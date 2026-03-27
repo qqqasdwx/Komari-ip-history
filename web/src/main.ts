@@ -972,6 +972,101 @@ function renderNodeListSummary(item: NodeListItem) {
   `;
 }
 
+function buildStructuredCompareGroups(currentResult: Record<string, unknown>, previousResult?: Record<string, unknown>) {
+  const structured = getFilteredCurrentResult(currentResult);
+  const previousStructured = previousResult ? getFilteredCurrentResult(previousResult) : null;
+  if (!structured) {
+    return [];
+  }
+
+  return [
+    { key: "Meta", title: "Meta", chip: "基础信息", current: structured.meta, previous: previousStructured?.meta },
+    { key: "Score", title: "Score", chip: "风险分项", current: structured.score, previous: previousStructured?.score },
+    { key: "Media", title: "Media", chip: "流媒体与服务", current: structured.media, previous: previousStructured?.media },
+    { key: "Mail", title: "Mail", chip: "邮件能力", current: structured.mail, previous: previousStructured?.mail },
+    { key: "Other", title: "其他字段", chip: "动态字段", current: structured.remainder, previous: previousStructured?.remainder }
+  ]
+    .filter((group) => !isEmptyRecord(group.current))
+    .map((group) => ({
+      ...group,
+      stats: compareValueStats(group.current, group.previous)
+    }));
+}
+
+function renderRecentChangeSummary(detail: NodeDetail) {
+  const latestRecord = detail.history[0] ?? null;
+  const previousRecord = detail.history[1] ?? null;
+
+  if (!latestRecord) {
+    return `
+      <div class="summary-section" data-detail-change="empty">
+        <div class="summary-head">
+          <strong>最近变化</strong>
+          <span class="chip">N/A</span>
+        </div>
+        <div class="muted">当前还没有历史记录，暂时无法判断最近一次变化。</div>
+      </div>
+    `;
+  }
+
+  if (!previousRecord) {
+    return `
+      <div class="summary-section" data-detail-change="single">
+        <div class="summary-head">
+          <strong>最近变化</strong>
+          <span class="chip">无对比基准</span>
+        </div>
+        <div class="muted">当前只有 1 条历史记录，需等待下一次结果落库后才能比较变化。</div>
+        <div class="muted">最新记录时间: ${formatDateTime(latestRecord.recorded_at)}</div>
+      </div>
+    `;
+  }
+
+  const latestResult = parseResultJSON(latestRecord.result_json);
+  const previousResult = parseResultJSON(previousRecord.result_json);
+  const groups = buildStructuredCompareGroups(latestResult, previousResult);
+  const totalStats = groups.reduce((stats, group) => mergeCompareStats(stats, group.stats), emptyCompareStats());
+  const changedGroups = groups.filter((group) => group.stats.changed > 0 || group.stats.added > 0);
+
+  return `
+    <div class="summary-section" data-detail-change="overview">
+      <div class="summary-head">
+        <strong>最近变化</strong>
+        <span class="chip">相对上一条历史</span>
+      </div>
+      <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
+      ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
+      <div class="change-summary-grid">
+        ${
+          changedGroups.length > 0
+            ? changedGroups
+                .map(
+                  (group) => `
+                    <div class="card change-card">
+                      <div class="summary-head">
+                        <strong>${escapeHtml(group.title)}</strong>
+                        <span class="chip">${escapeHtml(group.chip)}</span>
+                      </div>
+                      <div class="compare-overview">
+                        <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${group.stats.changed}</span></span>
+                        <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${group.stats.added}</span></span>
+                      </div>
+                    </div>
+                  `
+                )
+                .join("")
+            : `
+              <div class="card change-card change-card-empty">
+                <strong>最近一次没有字段变化</strong>
+                <div class="muted">当前记录与上一条在可见字段范围内一致。</div>
+              </div>
+            `
+        }
+      </div>
+    </div>
+  `;
+}
+
 function renderNodeDetail(embed = false) {
   const detail = state.nodeDetail;
   if (!detail) {
@@ -980,6 +1075,7 @@ function renderNodeDetail(embed = false) {
   }
 
   const currentResultMarkup = renderCurrentResult(detail.current_result);
+  const recentChangeMarkup = renderRecentChangeSummary(detail);
   if (embed) {
     app.innerHTML = `
       <div class="embed-shell">
@@ -1052,6 +1148,15 @@ function renderNodeDetail(embed = false) {
           </div>
 
           <div class="section">
+            <div class="section-head">
+              <h2>最近变化</h2>
+              <button class="button ghost" id="detail-history-link">查看完整对比</button>
+            </div>
+            <p class="muted">这里展示最近一次历史记录相对上一条的变化摘要，完整差异请进入历史页查看。</p>
+            ${recentChangeMarkup}
+          </div>
+
+          <div class="section">
             <h2>历史入口</h2>
             <p class="muted">历史页已接入，阶段 1 采用时间倒序轻量列表和 JSON 兜底详情。</p>
           </div>
@@ -1067,6 +1172,9 @@ function renderNodeDetail(embed = false) {
 
   bindShellEvents();
   document.querySelector<HTMLButtonElement>("#history-button")?.addEventListener("click", () => {
+    navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history`);
+  });
+  document.querySelector<HTMLButtonElement>("#detail-history-link")?.addEventListener("click", () => {
     navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history`);
   });
   document.querySelector<HTMLButtonElement>("#delete-button")?.addEventListener("click", async () => {

@@ -221,8 +221,13 @@ await page.waitForTimeout(1000);
 
 const detailResultGroupCount = await page.locator('.result-group').count();
 const detailGroupTitles = await page.locator('.result-group h3').allInnerTexts();
+const detailRecentChangeCount = await page.locator('[data-detail-change="overview"]').count();
+const detailRecentChangeCards = await page.locator('.change-card').count();
 if (detailResultGroupCount === 0) {
   throw new Error('structured result groups not found on node detail page');
+}
+if (detailRecentChangeCount === 0 || detailRecentChangeCards === 0) {
+  throw new Error('recent change summary not found on node detail page');
 }
 
 await page.goto(`/ipq/#/nodes/${uuid}?embed=1`);
@@ -308,6 +313,8 @@ writeFileSync(
       emptyListSummaryCount,
       detailResultGroupCount,
       detailGroupTitles,
+      detailRecentChangeCount,
+      detailRecentChangeCards,
       embedResultGroupCount,
       embedGroupTitles,
       historyUrl,

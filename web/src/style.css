@@ -424,6 +424,20 @@ textarea {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.change-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.change-card {
+  gap: 12px;
+}
+
+.change-card-empty {
+  align-content: center;
+}
+
 .raw-json {
   display: grid;
   gap: 10px;
