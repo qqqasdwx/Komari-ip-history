@@ -61,6 +61,95 @@ func main() {
   return { nodeUUID, nodeName };
 }
 
+function seedHistoryBaseline(nodeUUID) {
+  const scriptPath = '/workspace/web/playwright-output/ipq-seed-history-baseline.go';
+
+  writeFileSync(
+    scriptPath,
+    `package main
+
+import (
+  "encoding/json"
+  "os"
+  "time"
+
+  "komari-ip-history/internal/config"
+  "komari-ip-history/internal/database"
+  "komari-ip-history/internal/models"
+)
+
+func main() {
+  cfg := config.Load()
+  db, err := database.Open(cfg)
+  if err != nil {
+    panic(err)
+  }
+
+  var node models.Node
+  if err := db.First(&node, "komari_node_uuid = ?", os.Getenv("IPQ_NODE_UUID")).Error; err != nil {
+    panic(err)
+  }
+
+  recordedAt := time.Now().UTC().Add(-1 * time.Hour)
+  payload := map[string]any{
+    "Meta": map[string]any{
+      "node_uuid": os.Getenv("IPQ_NODE_UUID"),
+      "node_name": node.Name,
+      "source": "mock",
+      "updated_at": recordedAt.Format(time.RFC3339),
+      "environment": "development",
+    },
+    "Score": map[string]any{
+      "Scamalytics": 12,
+      "AbuseIPDB": 0,
+      "IPQS": 22,
+    },
+    "Media": map[string]any{
+      "Netflix": map[string]any{
+        "Status": "Yes",
+        "Region": "US",
+        "Type": "Originals",
+      },
+      "ChatGPT": map[string]any{
+        "Status": "No",
+        "Region": "HK",
+        "Type": "Web",
+      },
+    },
+    "Mail": map[string]any{
+      "Blacklisted": 1,
+    },
+  }
+
+  raw, err := json.MarshalIndent(payload, "", "  ")
+  if err != nil {
+    panic(err)
+  }
+
+  history := models.NodeHistory{
+    NodeID: node.ID,
+    ResultJSON: string(raw),
+    Summary: "Playwright historical baseline",
+    RecordedAt: recordedAt,
+  }
+
+  if err := db.Create(&history).Error; err != nil {
+    panic(err)
+  }
+}`
+  );
+
+  execFileSync('sh', ['-lc', `cd /workspace && go run ${scriptPath}`], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      IPQ_APP_ENV: process.env.IPQ_APP_ENV || 'development',
+      IPQ_DB_PATH: process.env.IPQ_DB_PATH || '/workspace/data/ipq/ipq.db',
+      IPQ_NODE_UUID: nodeUUID
+    }
+  });
+}
+
 async function jsonFetch(page, url, options) {
   return page.evaluate(async ({ url, options }) => {
     const response = await fetch(url, {
@@ -110,6 +199,7 @@ await page.waitForLoadState('networkidle');
 await page.waitForTimeout(3000);
 await page.locator('button', { hasText: /IP 质量|登录 IP 质量服务/ }).first().click();
 await page.waitForTimeout(1500);
+seedHistoryBaseline(uuid);
 
 await page.goto('/ipq/#/nodes');
 await page.waitForLoadState('networkidle');
@@ -152,7 +242,18 @@ await page.waitForTimeout(1500);
 const historyBody = await page.locator('body').innerText();
 const historyUrl = page.url();
 const historyCards = await page.locator('[data-history-record]').count();
+const historyStructuredCount = await page.locator('[data-history-structured="true"]').count();
+const historyOverviewCount = await page.locator('[data-history-compare="overview"]').count();
+const changedBadgeCount = await page.locator('.diff-badge.changed').count();
+const addedBadgeCount = await page.locator('.diff-badge.added').count();
+const unchangedBadgeCount = await page.locator('.diff-badge.unchanged').count();
 const codeBlocks = await page.locator('.code-block').count();
+if (historyStructuredCount === 0 || historyOverviewCount === 0) {
+  throw new Error('structured history comparison not found');
+}
+if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 0) {
+  throw new Error('history comparison badges missing expected statuses');
+}
 
 let copyDialogMessage = '';
 page.once('dialog', async (dialog) => {
@@ -182,6 +283,11 @@ writeFileSync(
       embedGroupTitles,
       historyUrl,
       historyCards,
+      historyStructuredCount,
+      historyOverviewCount,
+      changedBadgeCount,
+      addedBadgeCount,
+      unchangedBadgeCount,
       codeBlocks,
       historyBodyPreview: historyBody.slice(0, 5000),
       copyButtonCount,

@@ -369,6 +369,68 @@ textarea {
   font-size: 13px;
 }
 
+.summary-pill-compare.changed,
+.diff-badge.changed {
+  background: rgba(180, 35, 24, 0.1);
+  border-color: rgba(180, 35, 24, 0.2);
+  color: var(--danger);
+}
+
+.summary-pill-compare.added,
+.diff-badge.added {
+  background: rgba(15, 118, 110, 0.12);
+  border-color: rgba(15, 118, 110, 0.2);
+  color: var(--accent);
+}
+
+.summary-pill-compare.unchanged,
+.diff-badge.unchanged {
+  background: rgba(102, 116, 125, 0.12);
+  border-color: rgba(102, 116, 125, 0.18);
+  color: var(--muted);
+}
+
+.compare-head,
+.compare-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compare-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diff-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.history-compare-meta {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.raw-json {
+  display: grid;
+  gap: 10px;
+}
+
+.raw-json summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .history-card {
   width: 100%;
   text-align: left;

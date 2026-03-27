@@ -37,6 +37,14 @@ type DisplayFieldsConfig = {
   hidden_paths: string[];
 };
 
+type CompareStatus = "changed" | "added" | "unchanged";
+
+type CompareStats = {
+  changed: number;
+  added: number;
+  unchanged: number;
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("missing app container");
@@ -413,6 +421,147 @@ function getFilteredCurrentResult(result: Record<string, unknown>) {
   };
 }
 
+function emptyCompareStats(): CompareStats {
+  return { changed: 0, added: 0, unchanged: 0 };
+}
+
+function mergeCompareStats(target: CompareStats, next: CompareStats) {
+  target.changed += next.changed;
+  target.added += next.added;
+  target.unchanged += next.unchanged;
+  return target;
+}
+
+function parseResultJSON(raw: string) {
+  try {
+    const parsed = JSON.parse(raw);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function deepEqual(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) {
+      return false;
+    }
+    return left.every((value, index) => deepEqual(value, right[index]));
+  }
+
+  if (isRecord(left) && isRecord(right)) {
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) {
+      return false;
+    }
+    return leftKeys.every((key) => deepEqual(left[key], right[key]));
+  }
+
+  return false;
+}
+
+function compareValueStatus(current: unknown, previous: unknown): CompareStatus {
+  if (previous === undefined) {
+    return "added";
+  }
+  return deepEqual(current, previous) ? "unchanged" : "changed";
+}
+
+function compareValueStats(current: unknown, previous: unknown): CompareStats {
+  if (isRecord(current)) {
+    return Object.entries(current).reduce((stats, [key, value]) => {
+      const previousValue = isRecord(previous) ? previous[key] : undefined;
+      return mergeCompareStats(stats, compareValueStats(value, previousValue));
+    }, emptyCompareStats());
+  }
+
+  return {
+    changed: compareValueStatus(current, previous) === "changed" ? 1 : 0,
+    added: compareValueStatus(current, previous) === "added" ? 1 : 0,
+    unchanged: compareValueStatus(current, previous) === "unchanged" ? 1 : 0
+  };
+}
+
+function compareLabel(status: CompareStatus) {
+  if (status === "changed") {
+    return "变化";
+  }
+  if (status === "added") {
+    return "新增";
+  }
+  return "未变化";
+}
+
+function renderCompareBadge(status: CompareStatus) {
+  return `<span class="diff-badge ${status}">${compareLabel(status)}</span>`;
+}
+
+function renderCompareOverview(stats: CompareStats, emptyText: string) {
+  const total = stats.changed + stats.added + stats.unchanged;
+  if (total === 0) {
+    return `<div class="muted">${escapeHtml(emptyText)}</div>`;
+  }
+
+  return `
+    <div class="compare-overview">
+      <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${stats.changed}</span></span>
+      <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${stats.added}</span></span>
+      <span class="summary-pill summary-pill-compare unchanged"><strong>未变化</strong><span>${stats.unchanged}</span></span>
+    </div>
+  `;
+}
+
+function renderComparedRecordRows(current: Record<string, unknown>, previous?: Record<string, unknown>) {
+  const entries = Object.entries(current);
+  if (entries.length === 0) {
+    return { markup: `<div class="muted">N/A</div>`, stats: emptyCompareStats() };
+  }
+
+  const stats = emptyCompareStats();
+  const markup = `
+    <div class="kv">
+      ${entries
+        .map(([key, value]) => {
+          const previousValue = previous?.[key];
+          if (isRecord(value)) {
+            const child = renderComparedRecordRows(value, isRecord(previousValue) ? previousValue : undefined);
+            mergeCompareStats(stats, child.stats);
+            const status = compareValueStatus(value, previousValue);
+            return `
+              <div class="stack-block">
+                <div class="compare-head">
+                  <strong>${escapeHtml(titleize(key))}</strong>
+                  ${renderCompareBadge(status)}
+                </div>
+                ${child.markup}
+              </div>
+            `;
+          }
+
+          const status = compareValueStatus(value, previousValue);
+          mergeCompareStats(stats, compareValueStats(value, previousValue));
+          return `
+            <div class="kv-row">
+              <strong>${escapeHtml(titleize(key))}</strong>
+              <div class="compare-value">
+                <span>${escapeHtml(formatDisplayValue(value))}</span>
+                ${renderCompareBadge(status)}
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+
+  return { markup, stats };
+}
+
 function renderScoreGrid(score: Record<string, unknown>) {
   const entries = Object.entries(score);
   if (entries.length === 0) {
@@ -552,6 +701,132 @@ function renderCurrentResult(result: Record<string, unknown>) {
   }
 
   return `<div class="result-layout">${sections.join("")}</div>`;
+}
+
+function renderHistoricalResult(currentResult: Record<string, unknown>, previousResult?: Record<string, unknown>) {
+  const structured = getFilteredCurrentResult(currentResult);
+  const previousStructured = previousResult ? getFilteredCurrentResult(previousResult) : null;
+  if (!structured) {
+    return {
+      markup: `
+        <div class="empty-state">
+          <strong>N/A</strong>
+          <p class="muted">当前没有可展示的历史结果。</p>
+        </div>
+      `,
+      stats: emptyCompareStats()
+    };
+  }
+
+  const sections: string[] = [];
+  const allStats = emptyCompareStats();
+
+  const pushRecordSection = (
+    title: string,
+    chip: string,
+    currentRecord?: Record<string, unknown>,
+    previousRecord?: Record<string, unknown>
+  ) => {
+    if (isEmptyRecord(currentRecord)) {
+      return;
+    }
+
+    const rendered = renderComparedRecordRows(currentRecord!, previousRecord);
+    mergeCompareStats(allStats, rendered.stats);
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>${title}</h3>
+          <span class="chip">${chip}</span>
+        </div>
+        ${rendered.markup}
+      </div>
+    `);
+  };
+
+  pushRecordSection("Meta", "基础信息", structured.meta, previousStructured?.meta);
+
+  if (!isEmptyRecord(structured.score)) {
+    const rendered = renderComparedRecordRows(structured.score!, previousStructured?.score);
+    mergeCompareStats(allStats, rendered.stats);
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Score</h3>
+          <span class="chip">风险分项</span>
+        </div>
+        ${rendered.markup}
+      </div>
+    `);
+  }
+
+  if (!isEmptyRecord(structured.media)) {
+    const entries = Object.entries(structured.media!);
+    const mediaStats = emptyCompareStats();
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Media</h3>
+          <span class="chip">流媒体与服务</span>
+        </div>
+        <div class="detail-grid">
+          ${entries
+            .map(([key, value]) => {
+              const previousValue = previousStructured?.media?.[key];
+              if (isRecord(value)) {
+                const rendered = renderComparedRecordRows(value, isRecord(previousValue) ? previousValue : undefined);
+                mergeCompareStats(mediaStats, rendered.stats);
+                const status = compareValueStatus(value, previousValue);
+                return `
+                  <div class="card detail-card">
+                    <div class="compare-head">
+                      <h3>${escapeHtml(titleize(key))}</h3>
+                      ${renderCompareBadge(status)}
+                    </div>
+                    ${rendered.markup}
+                  </div>
+                `;
+              }
+
+              const status = compareValueStatus(value, previousValue);
+              mergeCompareStats(mediaStats, compareValueStats(value, previousValue));
+              return `
+                <div class="card detail-card">
+                  <div class="compare-head">
+                    <h3>${escapeHtml(titleize(key))}</h3>
+                    ${renderCompareBadge(status)}
+                  </div>
+                  <div>${escapeHtml(formatDisplayValue(value))}</div>
+                </div>
+              `;
+            })
+            .join("")}
+        </div>
+      </div>
+    `);
+    mergeCompareStats(allStats, mediaStats);
+  }
+
+  pushRecordSection("Mail", "邮件能力", structured.mail, previousStructured?.mail);
+
+  if (!isEmptyRecord(structured.remainder)) {
+    const rendered = renderComparedRecordRows(structured.remainder, previousStructured?.remainder);
+    mergeCompareStats(allStats, rendered.stats);
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>其他字段</h3>
+          <span class="chip">动态字段</span>
+        </div>
+        ${rendered.markup}
+      </div>
+    `);
+  }
+
+  return {
+    markup: `<div class="result-layout">${sections.join("")}</div>`,
+    stats: allStats
+  };
 }
 
 function renderSummaryPills(entries: Array<{ label: string; value: string }>, fallback: string) {
@@ -777,10 +1052,26 @@ function renderHistoryPage() {
 
   const route = currentRoute();
   const selectedID = Number(route.query.get("record") ?? "");
-  const selectedRecord = detail.history.find((item) => item.id === selectedID) ?? detail.history[0] ?? null;
+  const selectedIndex = detail.history.findIndex((item) => item.id === selectedID);
+  const resolvedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  const selectedRecord = detail.history[resolvedIndex] ?? null;
+  const previousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
+  const selectedResult = selectedRecord ? parseResultJSON(selectedRecord.result_json) : {};
+  const previousResult = previousRecord ? parseResultJSON(previousRecord.result_json) : undefined;
+  const historyResult = renderHistoricalResult(selectedResult, previousResult);
+  const compareSummary = previousRecord
+    ? renderCompareOverview(historyResult.stats, "当前记录与上一条之间没有可对比字段。")
+    : `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`;
   const historyCards = detail.history
-    .map((item) => {
+    .map((item, index) => {
       const active = selectedRecord?.id === item.id;
+      const baseline = detail.history[index + 1] ?? null;
+      const stats = baseline
+        ? compareValueStats(parseResultJSON(item.result_json), parseResultJSON(baseline.result_json))
+        : emptyCompareStats();
+      const deltaText = baseline
+        ? `变化 ${stats.changed} 项 / 新增 ${stats.added} 项 / 未变化 ${stats.unchanged} 项`
+        : "首条记录，无上一条可比较";
       return `
         <button class="card history-card ${active ? "active" : ""}" data-history-record="${item.id}">
           <div class="section-head">
@@ -788,7 +1079,7 @@ function renderHistoryPage() {
             <span class="chip">${formatDateTime(item.recorded_at)}</span>
           </div>
           <div class="muted">记录 ID: ${item.id}</div>
-          <div class="muted">${escapeHtml((item.result_json || "").slice(0, 120) || "暂无详情")}</div>
+          <div class="muted">${escapeHtml(deltaText)}</div>
         </button>
       `;
     })
@@ -799,11 +1090,11 @@ function renderHistoryPage() {
       <div class="hero">
         <div class="chip-row">
           <span class="chip">历史记录</span>
-          <span class="chip">轻量列表</span>
-          <span class="chip">JSON 兜底详情</span>
+          <span class="chip">结构化对比</span>
+          <span class="chip">上一条比较</span>
         </div>
         <h1>${escapeHtml(detail.name)} 的历史</h1>
-        <p>阶段 1 先采用轻量历史页：左侧看时间倒序列表，右侧查看单条详情，复杂图表后续再补。</p>
+        <p>历史页当前按时间倒序查看单条记录，并与上一条历史结果做字段级比较，先不引入复杂图表。</p>
       </div>
       <div class="layout">
         ${sidebar("nodes")}
@@ -835,8 +1126,34 @@ function renderHistoryPage() {
               <h2>历史详情</h2>
               ${selectedRecord ? `<span class="chip">记录时间: ${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
             </div>
-            <p class="muted">阶段 1 先用格式化 JSON 作为兜底详情承载。</p>
-            <div class="code-block">${escapeHtml(selectedRecord?.result_json || "N/A")}</div>
+            <div class="history-compare-meta">
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>当前记录</strong>
+                  <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
+                </div>
+                <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
+              </div>
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>对比基准</strong>
+                  <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
+                </div>
+                <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
+              </div>
+            </div>
+            <div class="summary-section" data-history-compare="overview">
+              <div class="summary-head">
+                <strong>变化摘要</strong>
+                <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
+              </div>
+              ${compareSummary}
+            </div>
+            <div data-history-structured="true">${historyResult.markup}</div>
+            <details class="raw-json">
+              <summary>查看原始 JSON</summary>
+              <pre class="code-block">${escapeHtml(selectedRecord?.result_json || "N/A")}</pre>
+            </details>
           </div>
         </section>
       </div>
@@ -998,7 +1315,7 @@ async function boot() {
 
   if (/^\/nodes\/[^/]+\/history$/.test(path)) {
     const uuid = path.replace(/^\/nodes\/([^/]+)\/history$/, "$1");
-    await loadNode(decodeURIComponent(uuid));
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields()]);
     renderHistoryPage();
     return;
   }
