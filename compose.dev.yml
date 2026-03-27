@@ -1,0 +1,50 @@
+services:
+  proxy:
+    image: caddy:2.10-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/dev/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - komari
+      - workspace
+
+  komari:
+    image: ghcr.io/komari-monitor/komari:latest
+    environment:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+    volumes:
+      - ./data/komari:/app/data
+
+  workspace:
+    container_name: ipq-workspace-dev
+    build:
+      context: .
+      dockerfile: ./deploy/dev/workspace/Dockerfile
+    working_dir: /workspace
+    command: >
+      sh -lc "tail -f /dev/null"
+    tty: true
+    stdin_open: true
+    environment:
+      IPQ_APP_ENV: development
+      IPQ_LISTEN: :8090
+      IPQ_BASE_PATH: /ipq
+      IPQ_DB_PATH: /workspace/data/ipq/ipq.db
+      IPQ_DEFAULT_ADMIN_USERNAME: admin
+      IPQ_DEFAULT_ADMIN_PASSWORD: admin
+      IPQ_COOKIE_SECURE: "false"
+      VITE_BASE_PATH: /ipq/
+    volumes:
+      - ./:/workspace
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      - npm-cache:/root/.npm
+      - web-node-modules:/workspace/web/node_modules
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
+  npm-cache:
+  web-node-modules:

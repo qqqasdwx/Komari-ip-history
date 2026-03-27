@@ -1,0 +1,7 @@
+.git
+.cache
+data
+ipq.exe
+public/assets
+web/node_modules
+references/komari-official/.git

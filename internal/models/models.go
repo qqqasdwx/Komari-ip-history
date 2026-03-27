@@ -1,0 +1,47 @@
+package models
+
+import "time"
+
+type AdminUser struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"size:64;uniqueIndex;not null" json:"username"`
+	PasswordHash string    `gorm:"size:255;not null" json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type Session struct {
+	Token     string    `gorm:"primaryKey;size:128" json:"token"`
+	UserID    uint      `gorm:"index;not null" json:"user_id"`
+	User      AdminUser `gorm:"constraint:OnDelete:CASCADE" json:"-"`
+	ExpiresAt time.Time `gorm:"index;not null" json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Node struct {
+	ID                     uint       `gorm:"primaryKey" json:"id"`
+	KomariNodeUUID         string     `gorm:"size:64;uniqueIndex;not null" json:"komari_node_uuid"`
+	Name                   string     `gorm:"size:255;not null" json:"name"`
+	HasData                bool       `gorm:"not null;default:false" json:"has_data"`
+	CurrentSummary         string     `gorm:"size:512" json:"current_summary"`
+	CurrentResultJSON      string     `gorm:"type:longtext" json:"-"`
+	CurrentResultUpdatedAt *time.Time `json:"current_result_updated_at"`
+	ReporterToken          string     `gorm:"size:128" json:"-"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+type NodeHistory struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	NodeID     uint      `gorm:"index;not null" json:"node_id"`
+	ResultJSON string    `gorm:"type:longtext" json:"result_json"`
+	Summary    string    `gorm:"size:512" json:"summary"`
+	RecordedAt time.Time `gorm:"index;not null" json:"recorded_at"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type AppSetting struct {
+	Key       string    `gorm:"primaryKey;size:128" json:"key"`
+	Value     string    `gorm:"type:longtext;not null" json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

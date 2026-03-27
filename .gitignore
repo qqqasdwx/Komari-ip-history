@@ -30,3 +30,22 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend
+web/node_modules/
+web/playwright-output/
+public/assets/
+public/index.html
+
+# Local data and build cache
+data/ipq/
+data/komari/
+.cache/
+
+# Local reference repos
+references/IPQuality/
+references/komari-official/
+
+# SQLite side files
+*.db-shm
+*.db-wal

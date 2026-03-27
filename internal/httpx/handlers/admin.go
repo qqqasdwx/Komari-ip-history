@@ -1,0 +1,113 @@
+package handlers
+
+import (
+	"net/http"
+	"strings"
+
+	"komari-ip-history/internal/auth"
+	"komari-ip-history/internal/config"
+	"komari-ip-history/internal/httpx/middleware"
+	"komari-ip-history/internal/models"
+	"komari-ip-history/internal/service"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+)
+
+type AdminHandler struct {
+	DB  *gorm.DB
+	Cfg config.Config
+}
+
+func (h AdminHandler) Runtime(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"app_name":  h.Cfg.AppName,
+		"app_env":   h.Cfg.AppEnv,
+		"base_path": h.Cfg.BasePath,
+	})
+}
+
+func (h AdminHandler) GetDisplayFields(c *gin.Context) {
+	cfg, err := service.GetDisplayFieldsConfig(h.DB)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
+		return
+	}
+	c.JSON(http.StatusOK, cfg)
+}
+
+func (h AdminHandler) PutDisplayFields(c *gin.Context) {
+	var req service.DisplayFieldsConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	if err := service.SetDisplayFieldsConfig(h.DB, req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save settings"})
+		return
+	}
+	c.JSON(http.StatusOK, req)
+}
+
+func (h AdminHandler) ListDisplayFieldPaths(c *gin.Context) {
+	paths, err := service.ListDisplayFieldPaths(h.DB)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load field paths"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": paths})
+}
+
+func (h AdminHandler) UpdateProfile(c *gin.Context) {
+	user, ok := middleware.GetCurrentUser(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+		return
+	}
+
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+
+	updates := map[string]any{}
+	if strings.TrimSpace(req.Username) != "" {
+		updates["username"] = strings.TrimSpace(req.Username)
+	}
+	if strings.TrimSpace(req.Password) != "" {
+		hash, err := auth.HashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to hash password"})
+			return
+		}
+		updates["password_hash"] = hash
+	}
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "nothing to update"})
+		return
+	}
+
+	if err := h.DB.Model(&models.AdminUser{}).Where("id = ?", user.ID).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to update profile"})
+		return
+	}
+
+	token, _ := c.Cookie(h.Cfg.SessionCookieName)
+	if token != "" {
+		_ = h.DB.Delete(&models.Session{}, "token = ?", token).Error
+	}
+	c.SetCookie(h.Cfg.SessionCookieName, "", -1, cookiePath(h.Cfg), "", h.Cfg.CookieSecure, true)
+	c.JSON(http.StatusOK, gin.H{"status": "reauth_required"})
+}
+
+func (h AdminHandler) HeaderPreview(c *gin.Context) {
+	variant := c.DefaultQuery("variant", "loader")
+	c.JSON(http.StatusOK, gin.H{
+		"variant": variant,
+		"code":    service.HeaderPreview(h.Cfg, variant),
+	})
+}
