@@ -5,6 +5,6 @@ cd /workspace
 
 go mod download
 cd /workspace/web
-npm install
+npm ci
 
 echo "workspace bootstrap completed"

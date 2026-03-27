@@ -4,36 +4,91 @@ on:
   push:
     branches:
       - main
+      - master
   pull_request:
 
 jobs:
-  backend:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Tidy
-        run: go mod tidy
-      - name: Test
-        run: go test ./...
-      - name: Build
-        run: go build ./cmd/ipq
 
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install
-        run: npm install
-      - name: Build
+
+      - name: Install frontend deps
+        working-directory: web
+        run: npm ci
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Go build
+        run: go build ./cmd/ipq
+
+      - name: Frontend build
+        working-directory: web
         run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start docker compose stack
+        run: docker compose -f compose.dev.yml up -d --build
+
+      - name: Bootstrap workspace
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/bootstrap.sh
+
+      - name: Start backend
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh
+
+      - name: Start frontend
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-frontend.sh
+
+      - name: Wait for proxy and app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in {1..60}; do
+            if curl -fsS http://localhost:8080/ >/dev/null && curl -fsS http://localhost:8080/ipq/ >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "services did not become ready in time" >&2
+          exit 1
+
+      - name: Run Playwright e2e
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
+
+      - name: Collect artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+          docker compose -f compose.dev.yml logs --no-color > ci-artifacts/docker-compose.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-frontend.log ci-artifacts/ipq-frontend.log || true
+          docker cp ipq-workspace-dev:/workspace/web/playwright-output ci-artifacts/playwright-output || true
+
+      - name: Upload CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts
+          path: ci-artifacts
+
+      - name: Stop docker compose stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v

@@ -9,6 +9,7 @@ COPY --from=node /usr/local/share/doc/node /usr/local/share/doc/node
 COPY --from=node /usr/local/share/man/man1/node.1 /usr/local/share/man/man1/node.1
 
 ENV PATH="/usr/local/go/bin:/usr/local/bin:${PATH}"
+ENV PLAYWRIGHT_BROWSERS_PATH="/ms-playwright"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends procps \
@@ -18,6 +19,7 @@ RUN apt-get update \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && mkdir -p /workspace /root/.npm /root/.cache/go-build /go/pkg/mod \
+    && npx -y playwright@1.58.2 install --with-deps chromium \
     && go version \
     && node --version \
     && npm --version
