@@ -18,6 +18,7 @@
 - Go + Gin + Gorm + SQLite 的基础后端结构。
 - 单管理员登录、Session Cookie、节点接入记录、展示字段配置的基础模型。
 - 独立前端的最小后台页面骨架：登录、节点列表、节点详情、系统配置。
+- 节点详情页可直接提供每节点独立上报配置，包括 reporter token、上报地址、token 重置和 `curl` 示例。
 - 开发环境反代骨架：默认通过 `/ipq/` 子路径挂载本服务。
 - 容器化开发工作流：默认通过 `docker compose exec workspace ...` 在容器内执行依赖安装、构建与测试。
 - GitHub Actions CI：自动执行 Go 构建、前端构建，以及基于开发容器环境的 Playwright 主流程验证。

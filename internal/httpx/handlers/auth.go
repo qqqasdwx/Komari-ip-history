@@ -87,10 +87,11 @@ func (h AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"logged_in": true,
-		"username":  user.Username,
-		"app_env":   h.Cfg.AppEnv,
-		"base_path": h.Cfg.BasePath,
+		"logged_in":       true,
+		"username":        user.Username,
+		"app_env":         h.Cfg.AppEnv,
+		"base_path":       h.Cfg.BasePath,
+		"public_base_url": h.Cfg.PublicBaseURL,
 	})
 }
 

@@ -3,8 +3,10 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
+	"komari-ip-history/internal/auth"
 	"komari-ip-history/internal/config"
 	"komari-ip-history/internal/models"
 	"komari-ip-history/internal/sampledata"
@@ -25,13 +27,18 @@ type NodeStatus struct {
 }
 
 type NodeListItem struct {
-	KomariNodeUUID string     `json:"komari_node_uuid"`
-	Name           string     `json:"name"`
-	HasData        bool       `json:"has_data"`
-	CurrentSummary string     `json:"current_summary"`
+	KomariNodeUUID string         `json:"komari_node_uuid"`
+	Name           string         `json:"name"`
+	HasData        bool           `json:"has_data"`
+	CurrentSummary string         `json:"current_summary"`
 	CurrentResult  map[string]any `json:"current_result"`
-	UpdatedAt      *time.Time `json:"updated_at"`
-	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      *time.Time     `json:"updated_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type NodeReportConfig struct {
+	EndpointPath  string `json:"endpoint_path"`
+	ReporterToken string `json:"reporter_token"`
 }
 
 type NodeDetail struct {
@@ -42,6 +49,17 @@ type NodeDetail struct {
 	UpdatedAt      *time.Time           `json:"updated_at"`
 	CurrentResult  map[string]any       `json:"current_result"`
 	History        []models.NodeHistory `json:"history"`
+	ReportConfig   NodeReportConfig     `json:"report_config"`
+}
+
+type ReportNodeInput struct {
+	Summary    string         `json:"summary"`
+	Result     map[string]any `json:"result"`
+	RecordedAt *time.Time     `json:"recorded_at"`
+}
+
+func newReporterToken() (string, error) {
+	return auth.NewSessionToken()
 }
 
 func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*models.Node, bool, error) {
@@ -53,6 +71,13 @@ func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*mod
 	err := db.First(&node, "komari_node_uuid = ?", input.KomariNodeUUID).Error
 	if err == nil {
 		node.Name = input.Name
+		if node.ReporterToken == "" {
+			token, err := newReporterToken()
+			if err != nil {
+				return nil, true, err
+			}
+			node.ReporterToken = token
+		}
 		if err := db.Save(&node).Error; err != nil {
 			return nil, true, err
 		}
@@ -66,6 +91,11 @@ func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*mod
 		KomariNodeUUID: input.KomariNodeUUID,
 		Name:           input.Name,
 	}
+	reporterToken, err := newReporterToken()
+	if err != nil {
+		return nil, false, err
+	}
+	node.ReporterToken = reporterToken
 
 	var history *models.NodeHistory
 	if cfg.IsDevelopment() {
@@ -171,6 +201,10 @@ func GetNodeDetail(db *gorm.DB, uuid string) (NodeDetail, error) {
 		UpdatedAt:      node.CurrentResultUpdatedAt,
 		CurrentResult:  current,
 		History:        history,
+		ReportConfig: NodeReportConfig{
+			EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
+			ReporterToken: node.ReporterToken,
+		},
 	}, nil
 }
 
@@ -184,5 +218,76 @@ func DeleteNode(db *gorm.DB, uuid string) error {
 			return err
 		}
 		return tx.Delete(&node).Error
+	})
+}
+
+func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error) {
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return NodeReportConfig{}, err
+	}
+
+	token, err := newReporterToken()
+	if err != nil {
+		return NodeReportConfig{}, err
+	}
+	if err := db.Model(&node).Update("reporter_token", token).Error; err != nil {
+		return NodeReportConfig{}, err
+	}
+
+	return NodeReportConfig{
+		EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
+		ReporterToken: token,
+	}, nil
+}
+
+func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
+	if strings.TrimSpace(token) == "" {
+		return errors.New("missing reporter token")
+	}
+	if len(input.Result) == 0 {
+		return errors.New("result is required")
+	}
+
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return err
+	}
+	if node.ReporterToken == "" || token != node.ReporterToken {
+		return errors.New("invalid reporter token")
+	}
+
+	recordedAt := time.Now().UTC()
+	if input.RecordedAt != nil && !input.RecordedAt.IsZero() {
+		recordedAt = input.RecordedAt.UTC()
+	}
+
+	raw, err := json.MarshalIndent(input.Result, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	summary := strings.TrimSpace(input.Summary)
+	if summary == "" {
+		summary = "Reporter update"
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&node).Updates(map[string]any{
+			"has_data":                  true,
+			"current_summary":           summary,
+			"current_result_json":       string(raw),
+			"current_result_updated_at": recordedAt,
+		}).Error; err != nil {
+			return err
+		}
+
+		history := models.NodeHistory{
+			NodeID:     node.ID,
+			ResultJSON: string(raw),
+			Summary:    summary,
+			RecordedAt: recordedAt,
+		}
+		return tx.Create(&history).Error
 	})
 }

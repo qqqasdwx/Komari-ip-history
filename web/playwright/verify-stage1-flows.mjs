@@ -178,6 +178,10 @@ await jsonFetch(page, '/ipq/api/v1/auth/login', {
   method: 'POST',
   body: JSON.stringify({ username: 'admin', password: 'admin' })
 });
+await jsonFetch(page, '/ipq/api/v1/admin/display-fields', {
+  method: 'PUT',
+  body: JSON.stringify({ hidden_paths: [] })
+});
 
 const headerPreview = await jsonFetch(page, '/ipq/api/v1/admin/header-preview?variant=loader');
 const loaderCode = JSON.parse(headerPreview.text).code;
@@ -223,11 +227,51 @@ const detailResultGroupCount = await page.locator('.result-group').count();
 const detailGroupTitles = await page.locator('.result-group h3').allInnerTexts();
 const detailRecentChangeCount = await page.locator('[data-detail-change="overview"]').count();
 const detailRecentChangeCards = await page.locator('.change-card').count();
+const detailReportConfigCount = await page.locator('[data-node-report-config="true"]').count();
 if (detailResultGroupCount === 0) {
   throw new Error('structured result groups not found on node detail page');
 }
 if (detailRecentChangeCount === 0 || detailRecentChangeCards === 0) {
   throw new Error('recent change summary not found on node detail page');
+}
+if (detailReportConfigCount === 0) {
+  throw new Error('node report config section not found on detail page');
+}
+
+const detailResponse = await jsonFetch(page, `/ipq/api/v1/nodes/${uuid}`);
+const detailPayload = JSON.parse(detailResponse.text);
+const historyCountBeforeReport = detailPayload.history.length;
+const reporterToken = detailPayload.report_config.reporter_token;
+const reportedResult = JSON.parse(JSON.stringify(detailPayload.current_result));
+reportedResult.Meta.updated_at = new Date().toISOString();
+reportedResult.Meta.source = 'playwright-reporter';
+reportedResult.Meta.reporter_run_id = randomUUID();
+reportedResult.Score.Scamalytics = 9;
+reportedResult.Score.AbuseIPDB = 1;
+reportedResult.Mail.Blacklisted = 0;
+await jsonFetch(page, `/ipq/api/v1/report/nodes/${uuid}`, {
+  method: 'POST',
+  headers: {
+    'X-IPQ-Reporter-Token': reporterToken
+  },
+  body: JSON.stringify({
+    summary: 'Playwright reporter update',
+    result: reportedResult
+  })
+});
+
+await page.reload();
+await page.waitForTimeout(1000);
+
+const reportedSummaryVisible = await page.locator('body').innerText();
+if (!reportedSummaryVisible.includes('Playwright reporter update')) {
+  throw new Error('reported update summary not visible on detail page');
+}
+
+const detailAfterReportResponse = await jsonFetch(page, `/ipq/api/v1/nodes/${uuid}`);
+const detailAfterReportPayload = JSON.parse(detailAfterReportResponse.text);
+if ((detailAfterReportPayload.history?.length || 0) <= historyCountBeforeReport) {
+  throw new Error('history count did not increase after reporter update');
 }
 
 await page.goto(`/ipq/#/nodes/${uuid}?embed=1`);
@@ -315,6 +359,7 @@ writeFileSync(
       detailGroupTitles,
       detailRecentChangeCount,
       detailRecentChangeCards,
+      detailReportConfigCount,
       embedResultGroupCount,
       embedGroupTitles,
       historyUrl,

@@ -29,6 +29,7 @@ func Run() error {
 	adminHandler := handlers.AdminHandler{DB: db, Cfg: cfg}
 	nodeHandler := handlers.NodeHandler{DB: db}
 	embedHandler := handlers.EmbedHandler{DB: db, Cfg: cfg}
+	reportHandler := handlers.ReportHandler{DB: db}
 
 	api := router.Group(cfg.APIBase())
 	{
@@ -40,6 +41,7 @@ func Run() error {
 		api.GET("/embed/nodes/:uuid/status", embedHandler.Status)
 		api.POST("/embed/nodes/register", embedHandler.Register)
 		api.GET("/embed/nodes/:uuid/current", embedHandler.Current)
+		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
 		admin := api.Group("/admin")
 		admin.Use(middleware.RequireAdmin())
@@ -58,6 +60,7 @@ func Run() error {
 			nodes.GET("", nodeHandler.List)
 			nodes.GET("/:uuid", nodeHandler.Detail)
 			nodes.GET("/:uuid/history", nodeHandler.History)
+			nodes.POST("/:uuid/reporter-token/rotate", nodeHandler.RotateReporterToken)
 			nodes.DELETE("/:uuid", nodeHandler.Delete)
 		}
 	}

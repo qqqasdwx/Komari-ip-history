@@ -47,3 +47,12 @@ func (h NodeHandler) Delete(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
+
+func (h NodeHandler) RotateReporterToken(c *gin.Context) {
+	config, err := service.RotateNodeReporterToken(h.DB, c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}

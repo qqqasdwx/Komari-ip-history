@@ -5,6 +5,7 @@ type MeResponse = {
   username?: string;
   app_env?: string;
   base_path?: string;
+  public_base_url?: string;
 };
 
 type NodeListItem = {
@@ -31,6 +32,10 @@ type NodeDetail = {
   updated_at?: string;
   current_result: Record<string, unknown>;
   history: NodeHistoryItem[];
+  report_config: {
+    endpoint_path: string;
+    reporter_token: string;
+  };
 };
 
 type DisplayFieldsConfig = {
@@ -282,6 +287,50 @@ function formatDateTime(value?: string) {
     return value;
   }
   return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function currentOrigin() {
+  return window.location.origin;
+}
+
+function normalizedPublicBaseURL() {
+  return (state.me?.public_base_url ?? "").replace(/\/$/, "");
+}
+
+function resolveReportEndpointURL(path: string) {
+  const base = normalizedPublicBaseURL() || currentOrigin();
+  return `${base}${path}`;
+}
+
+function resolveComposeReportEndpointURL(path: string) {
+  if (state.me?.app_env !== "development" || normalizedPublicBaseURL()) {
+    return "";
+  }
+  return `http://proxy:8080${path}`;
+}
+
+function buildReportExample(detail: NodeDetail) {
+  const endpoint = resolveReportEndpointURL(detail.report_config.endpoint_path);
+  const payload = {
+    summary: "Node reporter update",
+    result: {
+      Meta: {
+        node_uuid: detail.komari_node_uuid,
+        node_name: detail.name,
+        source: "reporter"
+      },
+      Score: {
+        Scamalytics: 12,
+        AbuseIPDB: 0,
+        IPQS: 18
+      }
+    }
+  };
+
+  return `curl -X POST "${endpoint}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-IPQ-Reporter-Token: ${detail.report_config.reporter_token}" \\
+  -d '${JSON.stringify(payload, null, 2)}'`;
 }
 
 function filterHiddenFields(value: unknown, prefix: string, hiddenPaths: Set<string>): unknown {
@@ -1076,6 +1125,9 @@ function renderNodeDetail(embed = false) {
 
   const currentResultMarkup = renderCurrentResult(detail.current_result);
   const recentChangeMarkup = renderRecentChangeSummary(detail);
+  const reportEndpointURL = resolveReportEndpointURL(detail.report_config.endpoint_path);
+  const composeReportEndpointURL = resolveComposeReportEndpointURL(detail.report_config.endpoint_path);
+  const reportExample = buildReportExample(detail);
   if (embed) {
     app.innerHTML = `
       <div class="embed-shell">
@@ -1163,7 +1215,49 @@ function renderNodeDetail(embed = false) {
 
           <div class="section">
             <h2>节点接入配置</h2>
-            <p class="muted">此区域为后续真实节点上报预留。阶段 1 不实现真实上报能力，只预留结构与说明位置。</p>
+            <p class="muted">使用每节点独立 token 调用上报接口。本页提供地址、token 和基础请求示例。</p>
+            <div class="report-config" data-node-report-config="true">
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>浏览器当前地址</strong>
+                  <button class="button ghost" id="copy-report-endpoint-button">复制</button>
+                </div>
+                <div class="code-block">${escapeHtml(reportEndpointURL)}</div>
+              </div>
+              ${
+                composeReportEndpointURL
+                  ? `
+                    <div class="summary-section">
+                      <div class="summary-head">
+                        <strong>容器网络地址</strong>
+                        <button class="button ghost" id="copy-report-compose-endpoint-button">复制</button>
+                      </div>
+                      <div class="code-block">${escapeHtml(composeReportEndpointURL)}</div>
+                      <div class="muted">开发环境下，如果上报脚本运行在 compose 网络内，优先使用这个地址。</div>
+                    </div>
+                  `
+                  : ""
+              }
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>Reporter Token</strong>
+                  <div class="toolbar">
+                    <button class="button ghost" id="copy-report-token-button">复制</button>
+                    <button class="button ghost" id="rotate-report-token-button">重置 Token</button>
+                  </div>
+                </div>
+                <div class="code-block">${escapeHtml(detail.report_config.reporter_token)}</div>
+                <div class="muted">认证头使用 <code>X-IPQ-Reporter-Token</code>，也兼容 <code>Authorization: Bearer ...</code>。</div>
+              </div>
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>请求示例</strong>
+                  <button class="button ghost" id="copy-report-example-button">复制</button>
+                </div>
+                <pre class="code-block">${escapeHtml(reportExample)}</pre>
+                <div class="muted">请求体至少需要 <code>result</code>，<code>summary</code> 和 <code>recorded_at</code> 为可选字段。</div>
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -1176,6 +1270,34 @@ function renderNodeDetail(embed = false) {
   });
   document.querySelector<HTMLButtonElement>("#detail-history-link")?.addEventListener("click", () => {
     navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history`);
+  });
+  document.querySelector<HTMLButtonElement>("#copy-report-endpoint-button")?.addEventListener("click", async () => {
+    await copyText(reportEndpointURL);
+    alert("上报地址已复制。");
+  });
+  document.querySelector<HTMLButtonElement>("#copy-report-compose-endpoint-button")?.addEventListener("click", async () => {
+    if (!composeReportEndpointURL) {
+      return;
+    }
+    await copyText(composeReportEndpointURL);
+    alert("容器网络上报地址已复制。");
+  });
+  document.querySelector<HTMLButtonElement>("#copy-report-token-button")?.addEventListener("click", async () => {
+    await copyText(detail.report_config.reporter_token);
+    alert("Reporter Token 已复制。");
+  });
+  document.querySelector<HTMLButtonElement>("#copy-report-example-button")?.addEventListener("click", async () => {
+    await copyText(reportExample);
+    alert("上报示例已复制。");
+  });
+  document.querySelector<HTMLButtonElement>("#rotate-report-token-button")?.addEventListener("click", async () => {
+    if (!confirm("重置后旧 Token 会立即失效。是否继续？")) {
+      return;
+    }
+    await api(`/nodes/${detail.komari_node_uuid}/reporter-token/rotate`, { method: "POST" });
+    await loadNode(detail.komari_node_uuid);
+    renderNodeDetail(false);
+    alert("Reporter Token 已重置。");
   });
   document.querySelector<HTMLButtonElement>("#delete-button")?.addEventListener("click", async () => {
     if (!confirm("只会从本服务移除该节点，不影响 Komari。是否继续？")) {
