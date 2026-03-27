@@ -323,6 +323,10 @@ textarea {
   align-items: center;
 }
 
+.field-group {
+  gap: 14px;
+}
+
 .row-link {
   display: grid;
   gap: 8px;

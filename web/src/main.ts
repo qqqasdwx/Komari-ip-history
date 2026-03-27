@@ -330,6 +330,41 @@ function compactLabel(key: string) {
   return titleize(key).replaceAll(" ", "");
 }
 
+function fieldGroupLabel(key: string) {
+  if (key === "Meta") {
+    return "Meta";
+  }
+  if (key === "Score") {
+    return "Score";
+  }
+  if (key === "Media") {
+    return "Media";
+  }
+  if (key === "Mail") {
+    return "Mail";
+  }
+  return "其他字段";
+}
+
+function groupDisplayFieldPaths(paths: string[]) {
+  const grouped = new Map<string, string[]>();
+  for (const path of paths) {
+    const root = path.split(".")[0] || "其他字段";
+    const group = fieldGroupLabel(root);
+    if (!grouped.has(group)) {
+      grouped.set(group, []);
+    }
+    grouped.get(group)?.push(path);
+  }
+
+  return ["Meta", "Score", "Media", "Mail", "其他字段"]
+    .map((group) => ({
+      group,
+      paths: (grouped.get(group) ?? []).sort((left, right) => left.localeCompare(right))
+    }))
+    .filter((item) => item.paths.length > 0);
+}
+
 function formatDisplayValue(value: unknown) {
   if (value === undefined || value === null || value === "") {
     return "N/A";
@@ -1183,14 +1218,41 @@ async function renderSettings() {
   ]);
 
   const hidden = new Set(state.displayFields.hidden_paths);
-  const fieldCards = state.displayFieldPaths
-    .map(
-      (path) => `
-        <label class="card field-toggle">
-          <span>${escapeHtml(path)}</span>
-          <input type="checkbox" data-field="${escapeHtml(path)}" ${hidden.has(path) ? "" : "checked"} />
-        </label>`
-    )
+  const fieldGroups = groupDisplayFieldPaths(state.displayFieldPaths);
+  const fieldCards = fieldGroups
+    .map((group) => {
+      const checkedCount = group.paths.filter((path) => !hidden.has(path)).length;
+      return `
+        <div class="card field-group">
+          <div class="section-head">
+            <div>
+              <h3>${escapeHtml(group.group)}</h3>
+              <p class="muted">已开启 ${checkedCount} / ${group.paths.length}</p>
+            </div>
+            <div class="toolbar">
+              <button class="button ghost" type="button" data-field-group-toggle="${escapeHtml(group.group)}" data-field-group-mode="check">全选</button>
+              <button class="button ghost" type="button" data-field-group-toggle="${escapeHtml(group.group)}" data-field-group-mode="uncheck">全不选</button>
+            </div>
+          </div>
+          <div class="list">
+            ${group.paths
+              .map(
+                (path) => `
+                  <label class="card field-toggle">
+                    <span>${escapeHtml(path)}</span>
+                    <input
+                      type="checkbox"
+                      data-field="${escapeHtml(path)}"
+                      data-field-group="${escapeHtml(group.group)}"
+                      ${hidden.has(path) ? "" : "checked"}
+                    />
+                  </label>`
+              )
+              .join("")}
+          </div>
+        </div>
+      `;
+    })
     .join("");
 
   app.innerHTML = `
@@ -1259,6 +1321,18 @@ async function renderSettings() {
   `;
 
   bindShellEvents();
+  document.querySelectorAll<HTMLButtonElement>("[data-field-group-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = button.dataset.fieldGroupToggle ?? "";
+      const mode = button.dataset.fieldGroupMode ?? "check";
+      document
+        .querySelectorAll<HTMLInputElement>(`[data-field-group="${group}"]`)
+        .forEach((input) => {
+          input.checked = mode === "check";
+        });
+    });
+  });
+
   document.querySelector<HTMLButtonElement>("#save-fields-button")?.addEventListener("click", async () => {
     const hiddenPaths = Array.from(document.querySelectorAll<HTMLInputElement>("[data-field]"))
       .filter((input) => !input.checked)

@@ -263,10 +263,39 @@ page.once('dialog', async (dialog) => {
 await page.goto('/ipq/#/settings');
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
+const fieldGroupCount = await page.locator('.field-group').count();
+const mediaUncheckButton = page.locator('[data-field-group-toggle="Media"][data-field-group-mode="uncheck"]').first();
+if ((await mediaUncheckButton.count()) > 0) {
+  await mediaUncheckButton.click();
+  await page.waitForTimeout(200);
+}
+await page.locator('#save-fields-button').click();
+await page.waitForTimeout(500);
 const copyButtonCount = await page.locator('#copy-loader-button').count();
 if (copyButtonCount > 0) {
   await page.locator('#copy-loader-button').click();
   await page.waitForTimeout(500);
+}
+
+await page.goto('/ipq/#/nodes');
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(800);
+const listMediaVisibleAfterHide = await page.locator('.summary-section strong', { hasText: '媒体能力' }).count();
+
+await page.goto(`/ipq/#/nodes/${uuid}`);
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(800);
+const detailMediaVisibleAfterHide = await page.locator('.result-group h3', { hasText: 'Media' }).count();
+
+await page.goto(`/ipq/#/nodes/${uuid}/history`);
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(800);
+const historyMediaVisibleAfterHide = await page.locator('[data-history-structured="true"] h3', { hasText: 'Media' }).count();
+if (fieldGroupCount === 0) {
+  throw new Error('grouped field toggles not found on settings page');
+}
+if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {
+  throw new Error('hidden Media group still visible after saving field settings');
 }
 
 writeFileSync(
@@ -288,6 +317,10 @@ writeFileSync(
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,
+      fieldGroupCount,
+      listMediaVisibleAfterHide,
+      detailMediaVisibleAfterHide,
+      historyMediaVisibleAfterHide,
       codeBlocks,
       historyBodyPreview: historyBody.slice(0, 5000),
       copyButtonCount,
