@@ -252,6 +252,67 @@ textarea {
   line-height: 1.5;
 }
 
+.result-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.result-group {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(214, 208, 197, 0.85);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.metric-grid,
+.detail-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.metric-card,
+.detail-card {
+  min-height: 100%;
+}
+
+.metric-card-rich {
+  gap: 12px;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metric-value {
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+}
+
+.stack-block {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(242, 239, 232, 0.7);
+}
+
+.empty-state {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
 .list {
   display: grid;
   gap: 12px;

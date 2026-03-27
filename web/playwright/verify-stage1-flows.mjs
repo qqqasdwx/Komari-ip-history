@@ -54,6 +54,26 @@ await page.waitForTimeout(3000);
 await page.locator('button', { hasText: /IP 质量|登录 IP 质量服务/ }).first().click();
 await page.waitForTimeout(1500);
 
+await page.goto(`/ipq/#/nodes/${uuid}`);
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(1000);
+
+const detailResultGroupCount = await page.locator('.result-group').count();
+const detailGroupTitles = await page.locator('.result-group h3').allInnerTexts();
+if (detailResultGroupCount === 0) {
+  throw new Error('structured result groups not found on node detail page');
+}
+
+await page.goto(`/ipq/#/nodes/${uuid}?embed=1`);
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(1000);
+
+const embedResultGroupCount = await page.locator('.result-group').count();
+const embedGroupTitles = await page.locator('.result-group h3').allInnerTexts();
+if (embedResultGroupCount === 0) {
+  throw new Error('structured result groups not found on embed page');
+}
+
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(1500);
@@ -82,6 +102,10 @@ writeFileSync(
   JSON.stringify(
     {
       uuid,
+      detailResultGroupCount,
+      detailGroupTitles,
+      embedResultGroupCount,
+      embedGroupTitles,
       historyUrl,
       historyCards,
       codeBlocks,

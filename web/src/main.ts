@@ -301,13 +301,251 @@ function filterHiddenFields(value: unknown, prefix: string, hiddenPaths: Set<str
   return value;
 }
 
-function renderCurrentResult(result: Record<string, unknown>) {
-  const hidden = new Set(state.displayFields.hidden_paths);
-  const filtered = filterHiddenFields(result, "", hidden);
-  if (!filtered || (typeof filtered === "object" && Object.keys(filtered as Record<string, unknown>).length === 0)) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isEmptyRecord(value?: Record<string, unknown>) {
+  return !value || Object.keys(value).length === 0;
+}
+
+function titleize(key: string) {
+  return key
+    .replaceAll("_", " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatDisplayValue(value: unknown) {
+  if (value === undefined || value === null || value === "") {
     return "N/A";
   }
-  return JSON.stringify(filtered, null, 2);
+
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "[]";
+    }
+    return value
+      .map((item) => {
+        if (isRecord(item) || Array.isArray(item)) {
+          return JSON.stringify(item);
+        }
+        return String(item);
+      })
+      .join(", ");
+  }
+
+  if (isRecord(value)) {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function renderRecordRows(record: Record<string, unknown>) {
+  const entries = Object.entries(record);
+  if (entries.length === 0) {
+    return `<div class="muted">N/A</div>`;
+  }
+
+  return `
+    <div class="kv">
+      ${entries
+        .map(([key, value]) => {
+          if (isRecord(value)) {
+            return `
+              <div class="stack-block">
+                <strong>${escapeHtml(titleize(key))}</strong>
+                ${renderRecordRows(value)}
+              </div>
+            `;
+          }
+
+          return `
+            <div class="kv-row">
+              <strong>${escapeHtml(titleize(key))}</strong>
+              <span>${escapeHtml(formatDisplayValue(value))}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function cloneRecord(record: Record<string, unknown>) {
+  return JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
+}
+
+function takeStructuredGroup(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  delete record[key];
+  return value;
+}
+
+function getFilteredCurrentResult(result: Record<string, unknown>) {
+  const hidden = new Set(state.displayFields.hidden_paths);
+  const filtered = filterHiddenFields(result, "", hidden);
+  if (!isRecord(filtered) || Object.keys(filtered).length === 0) {
+    return null;
+  }
+
+  const remainder = cloneRecord(filtered);
+  return {
+    meta: takeStructuredGroup(remainder, "Meta"),
+    score: takeStructuredGroup(remainder, "Score"),
+    media: takeStructuredGroup(remainder, "Media"),
+    mail: takeStructuredGroup(remainder, "Mail"),
+    remainder
+  };
+}
+
+function renderScoreGrid(score: Record<string, unknown>) {
+  const entries = Object.entries(score);
+  if (entries.length === 0) {
+    return `<div class="muted">N/A</div>`;
+  }
+
+  return `
+    <div class="metric-grid">
+      ${entries
+        .map(([key, value]) => {
+          if (isRecord(value)) {
+            return `
+              <div class="card metric-card metric-card-rich">
+                <div class="metric-label">${escapeHtml(titleize(key))}</div>
+                ${renderRecordRows(value)}
+              </div>
+            `;
+          }
+
+          return `
+            <div class="card metric-card">
+              <div class="metric-label">${escapeHtml(titleize(key))}</div>
+              <div class="metric-value">${escapeHtml(formatDisplayValue(value))}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderMediaGrid(media: Record<string, unknown>) {
+  const entries = Object.entries(media);
+  if (entries.length === 0) {
+    return `<div class="muted">N/A</div>`;
+  }
+
+  return `
+    <div class="detail-grid">
+      ${entries
+        .map(([key, value]) => {
+          if (isRecord(value)) {
+            return `
+              <div class="card detail-card">
+                <div class="section-head">
+                  <h3>${escapeHtml(titleize(key))}</h3>
+                </div>
+                ${renderRecordRows(value)}
+              </div>
+            `;
+          }
+
+          return `
+            <div class="card detail-card">
+              <div class="section-head">
+                <h3>${escapeHtml(titleize(key))}</h3>
+              </div>
+              <div>${escapeHtml(formatDisplayValue(value))}</div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCurrentResult(result: Record<string, unknown>) {
+  const structured = getFilteredCurrentResult(result);
+  if (!structured) {
+    return `
+      <div class="empty-state">
+        <strong>N/A</strong>
+        <p class="muted">当前没有可展示的检测结果。</p>
+      </div>
+    `;
+  }
+
+  const sections: string[] = [];
+  if (!isEmptyRecord(structured.meta)) {
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Meta</h3>
+          <span class="chip">基础信息</span>
+        </div>
+        ${renderRecordRows(structured.meta)}
+      </div>
+    `);
+  }
+
+  if (!isEmptyRecord(structured.score)) {
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Score</h3>
+          <span class="chip">风险分项</span>
+        </div>
+        ${renderScoreGrid(structured.score)}
+      </div>
+    `);
+  }
+
+  if (!isEmptyRecord(structured.media)) {
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Media</h3>
+          <span class="chip">流媒体与服务</span>
+        </div>
+        ${renderMediaGrid(structured.media)}
+      </div>
+    `);
+  }
+
+  if (!isEmptyRecord(structured.mail)) {
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>Mail</h3>
+          <span class="chip">邮件能力</span>
+        </div>
+        ${renderRecordRows(structured.mail)}
+      </div>
+    `);
+  }
+
+  if (!isEmptyRecord(structured.remainder)) {
+    sections.push(`
+      <div class="result-group">
+        <div class="section-head">
+          <h3>其他字段</h3>
+          <span class="chip">JSON 兜底</span>
+        </div>
+        <pre class="code-block">${escapeHtml(JSON.stringify(structured.remainder, null, 2))}</pre>
+      </div>
+    `);
+  }
+
+  return `<div class="result-layout">${sections.join("")}</div>`;
 }
 
 function renderNodeDetail(embed = false) {
@@ -317,7 +555,7 @@ function renderNodeDetail(embed = false) {
     return;
   }
 
-  const currentResultText = escapeHtml(renderCurrentResult(detail.current_result));
+  const currentResultMarkup = renderCurrentResult(detail.current_result);
   if (embed) {
     app.innerHTML = `
       <div class="embed-shell">
@@ -344,7 +582,7 @@ function renderNodeDetail(embed = false) {
                 <a class="button ghost" href="${basePath}/#/nodes/${encodeURIComponent(detail.komari_node_uuid)}" target="_blank" rel="noopener noreferrer">打开完整页面</a>
               </div>
             </div>
-            <div class="code-block">${currentResultText}</div>
+            ${currentResultMarkup}
           </div>
         </section>
       </div>
@@ -386,7 +624,7 @@ function renderNodeDetail(embed = false) {
           <div class="section">
             <h2>当前状态</h2>
             <p class="muted">此区域为只读视图，展示内容由系统配置页中的全局字段开关控制。</p>
-            <div class="code-block">${currentResultText}</div>
+            ${currentResultMarkup}
           </div>
 
           <div class="section">
