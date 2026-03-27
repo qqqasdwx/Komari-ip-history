@@ -330,6 +330,45 @@ textarea {
   color: inherit;
 }
 
+.list-summary {
+  display: grid;
+  gap: 10px;
+}
+
+.summary-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(214, 208, 197, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.summary-pill {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--ink);
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  font-size: 13px;
+}
+
 .history-card {
   width: 100%;
   text-align: left;

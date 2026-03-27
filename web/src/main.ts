@@ -12,6 +12,7 @@ type NodeListItem = {
   name: string;
   has_data: boolean;
   current_summary: string;
+  current_result: Record<string, unknown>;
   updated_at?: string;
 };
 
@@ -217,6 +218,7 @@ function renderNodes() {
           </div>
           <div class="muted">${escapeHtml(item.komari_node_uuid)}</div>
           <div>${escapeHtml(item.current_summary || "N/A")}</div>
+          ${renderNodeListSummary(item)}
           <div class="muted">最近更新时间: ${formatDateTime(item.updated_at)}</div>
         </a>`
     )
@@ -314,6 +316,10 @@ function titleize(key: string) {
     .replaceAll("_", " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function compactLabel(key: string) {
+  return titleize(key).replaceAll(" ", "");
 }
 
 function formatDisplayValue(value: unknown) {
@@ -546,6 +552,114 @@ function renderCurrentResult(result: Record<string, unknown>) {
   }
 
   return `<div class="result-layout">${sections.join("")}</div>`;
+}
+
+function renderSummaryPills(entries: Array<{ label: string; value: string }>, fallback: string) {
+  if (entries.length === 0) {
+    return `<div class="muted">${escapeHtml(fallback)}</div>`;
+  }
+
+  return `
+    <div class="summary-pills">
+      ${entries
+        .map(
+          (entry) => `
+            <span class="summary-pill">
+              <strong>${escapeHtml(entry.label)}</strong>
+              <span>${escapeHtml(entry.value)}</span>
+            </span>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderNodeListSummary(item: NodeListItem) {
+  const structured = getFilteredCurrentResult(item.current_result ?? {});
+  if (!item.has_data || !structured) {
+    return `
+      <div class="list-summary" data-node-summary="empty">
+        <div class="summary-section">
+          <div class="summary-head">
+            <strong>风险概览</strong>
+            <span class="chip">N/A</span>
+          </div>
+          <div class="muted">等待首份检测结果</div>
+        </div>
+        <div class="summary-section">
+          <div class="summary-head">
+            <strong>媒体能力</strong>
+            <span class="chip">N/A</span>
+          </div>
+          <div class="muted">尚未获取服务可用性</div>
+        </div>
+        <div class="summary-section">
+          <div class="summary-head">
+            <strong>邮件能力</strong>
+            <span class="chip">N/A</span>
+          </div>
+          <div class="muted">尚未获取邮件相关结果</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const scoreEntries = Object.entries(structured.score ?? {}).map(([key, value]) => ({
+    label: compactLabel(key),
+    value: formatDisplayValue(value)
+  }));
+
+  const mediaEntries = Object.entries(structured.media ?? {})
+    .map(([key, value]) => {
+      if (!isRecord(value)) {
+        return {
+          label: compactLabel(key),
+          value: formatDisplayValue(value)
+        };
+      }
+
+      const parts = [value.Status, value.Region, value.Type]
+        .filter((part) => part !== undefined && part !== null && part !== "")
+        .map((part) => formatDisplayValue(part));
+
+      return {
+        label: compactLabel(key),
+        value: parts.join(" / ") || "N/A"
+      };
+    })
+    .filter((entry) => entry.value !== "N/A");
+
+  const mailEntries = Object.entries(structured.mail ?? {}).map(([key, value]) => ({
+    label: compactLabel(key),
+    value: formatDisplayValue(value)
+  }));
+
+  return `
+    <div class="list-summary" data-node-summary="structured">
+      <div class="summary-section">
+        <div class="summary-head">
+          <strong>风险概览</strong>
+          <span class="chip">${scoreEntries.length > 0 ? `${scoreEntries.length} 项` : "N/A"}</span>
+        </div>
+        ${renderSummaryPills(scoreEntries, "没有可展示的风险分项")}
+      </div>
+      <div class="summary-section">
+        <div class="summary-head">
+          <strong>媒体能力</strong>
+          <span class="chip">${mediaEntries.length > 0 ? `${mediaEntries.length} 项` : "N/A"}</span>
+        </div>
+        ${renderSummaryPills(mediaEntries, "没有可展示的媒体能力")}
+      </div>
+      <div class="summary-section">
+        <div class="summary-head">
+          <strong>邮件能力</strong>
+          <span class="chip">${mailEntries.length > 0 ? `${mailEntries.length} 项` : "N/A"}</span>
+        </div>
+        ${renderSummaryPills(mailEntries, "没有可展示的邮件能力")}
+      </div>
+    </div>
+  `;
 }
 
 function renderNodeDetail(embed = false) {
@@ -896,7 +1010,7 @@ async function boot() {
     return;
   }
 
-  await loadNodes();
+  await Promise.all([loadNodes(), loadDisplayFields()]);
   renderNodes();
 }
 

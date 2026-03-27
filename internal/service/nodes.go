@@ -29,6 +29,7 @@ type NodeListItem struct {
 	Name           string     `json:"name"`
 	HasData        bool       `json:"has_data"`
 	CurrentSummary string     `json:"current_summary"`
+	CurrentResult  map[string]any `json:"current_result"`
 	UpdatedAt      *time.Time `json:"updated_at"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
@@ -113,11 +114,16 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 
 	items := make([]NodeListItem, 0, len(nodes))
 	for _, node := range nodes {
+		current := map[string]any{}
+		if node.CurrentResultJSON != "" {
+			_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
+		}
 		items = append(items, NodeListItem{
 			KomariNodeUUID: node.KomariNodeUUID,
 			Name:           node.Name,
 			HasData:        node.HasData,
 			CurrentSummary: node.CurrentSummary,
+			CurrentResult:  current,
 			UpdatedAt:      node.CurrentResultUpdatedAt,
 			CreatedAt:      node.CreatedAt,
 		})
