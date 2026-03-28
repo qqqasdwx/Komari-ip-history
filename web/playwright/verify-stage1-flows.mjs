@@ -386,8 +386,9 @@ await page.goto('/ipq/#/settings');
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
 const settingsBody = await page.locator('body').innerText();
-const advancedDisplaySummary = page.locator('summary', { hasText: '高级展示配置' }).first();
-if ((await advancedDisplaySummary.count()) > 0) {
+const advancedDisplaySummary = page.locator('summary', { hasText: '更多设置' }).first();
+const saveFieldsButton = page.locator('#save-fields-button');
+if ((await advancedDisplaySummary.count()) > 0 && !(await saveFieldsButton.isVisible().catch(() => false))) {
   await advancedDisplaySummary.click();
   await page.waitForTimeout(200);
 }
@@ -421,7 +422,7 @@ const listMediaVisibleAfterHide = await page.locator('.summary-section strong', 
 await page.goto(`/ipq/#/nodes/${uuid}`);
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(800);
-const detailMediaVisibleAfterHide = await page.locator('.result-group h3', { hasText: 'Media' }).count();
+const detailMediaVisibleAfterHide = await page.locator('.report-group-title', { hasText: '流媒体与服务' }).count();
 const detailBodyAfterRules = await page.locator('body').innerText();
 const detailScoreChangeCard = page.locator('[data-detail-change="overview"] .change-card').filter({ hasText: 'Score' }).first();
 const detailScorePrimarySectionCount = await detailScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
@@ -481,7 +482,7 @@ if (fieldGroupCount === 0) {
 if (changePriorityGroupToggleCount === 0) {
   throw new Error('grouped change priority toggles not found on settings page');
 }
-if (!settingsBody.includes('接入 Komari') || !settingsBody.includes('高级展示配置')) {
+if (!settingsBody.includes('接入 Komari') || !settingsBody.includes('更多设置')) {
   throw new Error('settings page does not emphasize Komari setup flow');
 }
 if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {

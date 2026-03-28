@@ -454,6 +454,18 @@ function compactLabel(key: string) {
 }
 
 function fieldGroupLabel(key: string) {
+  if (key === "Head") {
+    return "Head";
+  }
+  if (key === "Info") {
+    return "Info";
+  }
+  if (key === "Type") {
+    return "Type";
+  }
+  if (key === "Factor") {
+    return "Factor";
+  }
   if (key === "Meta") {
     return "Meta";
   }
@@ -480,7 +492,7 @@ function groupDisplayFieldPaths(paths: string[]) {
     grouped.get(group)?.push(path);
   }
 
-  return ["Meta", "Score", "Media", "Mail", "其他字段"]
+  return ["Head", "Info", "Type", "Factor", "Meta", "Score", "Media", "Mail", "其他字段"]
     .map((group) => ({
       group,
       paths: (grouped.get(group) ?? []).sort((left, right) => left.localeCompare(right))
@@ -495,7 +507,7 @@ type ChangePriorityGroup = {
 };
 
 function changePriorityTargets(paths: string[], secondaryPaths: string[]): ChangePriorityGroup[] {
-  const preferred = ["Meta", "Score", "Media", "Mail"];
+  const preferred = ["Head", "Info", "Type", "Factor", "Meta", "Score", "Media", "Mail"];
   const grouped = new Map<string, Set<string>>();
 
   for (const path of paths) {
@@ -637,6 +649,10 @@ function getFilteredCurrentResult(result: Record<string, unknown>) {
 
   const remainder = cloneRecord(filtered);
   return {
+    head: takeStructuredGroup(remainder, "Head"),
+    info: takeStructuredGroup(remainder, "Info"),
+    type: takeStructuredGroup(remainder, "Type"),
+    factor: takeStructuredGroup(remainder, "Factor"),
     meta: takeStructuredGroup(remainder, "Meta"),
     score: takeStructuredGroup(remainder, "Score"),
     media: takeStructuredGroup(remainder, "Media"),
@@ -886,70 +902,246 @@ function renderComparedRecordRows(current: Record<string, unknown>, previous?: R
   return { markup, stats };
 }
 
-function renderScoreGrid(score: Record<string, unknown>) {
-  const entries = Object.entries(score);
-  if (entries.length === 0) {
-    return `<div class="muted">N/A</div>`;
+function reportFieldLabel(key: string) {
+  const labels: Record<string, string> = {
+    IP: "IP",
+    Time: "报告时间",
+    Version: "脚本版本",
+    Type: "类型",
+    ASN: "自治系统",
+    Organization: "组织",
+    Latitude: "纬度",
+    Longitude: "经度",
+    DMS: "坐标",
+    Map: "地图",
+    TimeZone: "时区",
+    RegisteredRegion: "注册地区",
+    Usage: "使用类型",
+    Company: "公司类型",
+    CountryCode: "地区",
+    Proxy: "代理",
+    Tor: "Tor",
+    VPN: "VPN",
+    Server: "服务器",
+    Abuser: "滥用者",
+    Robot: "机器人",
+    IPinfo: "IPinfo",
+    ipregistry: "ipregistry",
+    ipapi: "ipapi",
+    IP2LOCATION: "IP2Location",
+    IPWHOIS: "IPWHOIS",
+    SCAMALYTICS: "Scamalytics",
+    AbuseIPDB: "AbuseIPDB",
+    DBIP: "DB-IP",
+    DisneyPlus: "Disney+",
+    AmazonPrimeVideo: "AmazonPV",
+    TikTok: "TikTok",
+    Youtube: "Youtube",
+    Netflix: "Netflix",
+    Spotify: "Spotify",
+    ChatGPT: "ChatGPT",
+    Port25: "25端口",
+    MailRU: "MailRU",
+    MailCOM: "MailCOM",
+    DNSBlacklist: "DNSBL"
+  };
+  return labels[key] ?? titleize(key);
+}
+
+function reportValueText(value: unknown) {
+  if (value === undefined || value === null || value === "" || value === "null") {
+    return "N/A";
+  }
+  if (typeof value === "boolean") {
+    return value ? "是" : "否";
+  }
+  return String(value);
+}
+
+function reportValueClass(value: unknown) {
+  const text = reportValueText(value);
+  const normalized = text.trim().toLowerCase();
+
+  if (normalized === "n/a" || normalized === "null" || normalized === "-") {
+    return "report-pill-muted";
+  }
+  if (normalized === "yes" || normalized === "native" || normalized === "originals" || normalized === "解锁" || normalized === "是") {
+    return "report-pill-good";
+  }
+  if (normalized === "no" || normalized === "block" || normalized === "blocked" || normalized === "fail" || normalized === "否") {
+    return "report-pill-bad";
   }
 
-  return `
-    <div class="metric-grid">
-      ${entries
-        .map(([key, value]) => {
-          if (isRecord(value)) {
-            return `
-              <div class="card metric-card metric-card-rich">
-                <div class="metric-label">${escapeHtml(titleize(key))}</div>
-                ${renderRecordRows(value)}
-              </div>
-            `;
-          }
+  const number = Number.parseFloat(normalized.replace("%", ""));
+  if (!Number.isNaN(number)) {
+    if (number <= 33) {
+      return "report-pill-good";
+    }
+    if (number <= 66) {
+      return "report-pill-warn";
+    }
+    return "report-pill-bad";
+  }
 
-          return `
-            <div class="card metric-card">
-              <div class="metric-label">${escapeHtml(titleize(key))}</div>
-              <div class="metric-value">${escapeHtml(formatDisplayValue(value))}</div>
-            </div>
-          `;
-        })
-        .join("")}
+  return "report-pill-neutral";
+}
+
+function renderReportPill(value: unknown) {
+  return `<span class="report-pill ${reportValueClass(value)}">${escapeHtml(reportValueText(value))}</span>`;
+}
+
+function renderReportLine(label: string, value: unknown) {
+  return `
+    <div class="report-line">
+      <span class="report-label">${escapeHtml(label)}</span>
+      <div class="report-values">${renderReportPill(value)}</div>
     </div>
   `;
 }
 
-function renderMediaGrid(media: Record<string, unknown>) {
-  const entries = Object.entries(media);
-  if (entries.length === 0) {
-    return `<div class="muted">N/A</div>`;
-  }
-
+function renderReportCell(provider: string, value: unknown) {
   return `
-    <div class="detail-grid">
-      ${entries
-        .map(([key, value]) => {
-          if (isRecord(value)) {
-            return `
-              <div class="card detail-card">
-                <div class="section-head">
-                  <h3>${escapeHtml(titleize(key))}</h3>
-                </div>
-                ${renderRecordRows(value)}
-              </div>
-            `;
-          }
+    <span class="report-cell">
+      <strong>${escapeHtml(provider)}</strong>
+      ${renderReportPill(value)}
+    </span>
+  `;
+}
 
-          return `
-            <div class="card detail-card">
-              <div class="section-head">
-                <h3>${escapeHtml(titleize(key))}</h3>
-              </div>
-              <div>${escapeHtml(formatDisplayValue(value))}</div>
+function renderReportObjectRow(label: string, value: unknown) {
+  if (isRecord(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return renderReportLine(label, "N/A");
+    }
+    return `
+      <div class="report-line">
+        <span class="report-label">${escapeHtml(label)}</span>
+        <div class="report-values">
+          ${entries.map(([key, child]) => renderReportCell(reportFieldLabel(key), child)).join("")}
+        </div>
+      </div>
+    `;
+  }
+  return renderReportLine(label, value);
+}
+
+function orderedReportEntries(record: Record<string, unknown>, order: string[] = []) {
+  const seen = new Set<string>();
+  const entries: Array<[string, unknown]> = [];
+  for (const key of order) {
+    if (record[key] !== undefined) {
+      seen.add(key);
+      entries.push([key, record[key]]);
+    }
+  }
+  for (const entry of Object.entries(record)) {
+    if (!seen.has(entry[0])) {
+      entries.push(entry);
+    }
+  }
+  return entries;
+}
+
+function renderReportRows(record: Record<string, unknown>, order: string[] = []) {
+  return orderedReportEntries(record, order)
+    .map(([key, value]) => renderReportObjectRow(reportFieldLabel(key), value))
+    .join("");
+}
+
+function renderMediaReportRows(media: Record<string, unknown>) {
+  const mediaOrder = ["TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Spotify", "Reddit", "ChatGPT"];
+  return orderedReportEntries(media, mediaOrder)
+    .map(([service, value]) => {
+      if (!isRecord(value)) {
+        return renderReportLine(reportFieldLabel(service), value);
+      }
+
+      const cells = [];
+      if ("Status" in value) {
+        cells.push(renderReportCell("状态", value.Status));
+      }
+      if ("Region" in value) {
+        cells.push(renderReportCell("地区", value.Region));
+      }
+      if ("Type" in value) {
+        cells.push(renderReportCell("类型", value.Type));
+      }
+
+      const extras = Object.entries(value).filter(([key]) => !["Status", "Region", "Type"].includes(key));
+      for (const [key, child] of extras) {
+        cells.push(renderReportCell(reportFieldLabel(key), child));
+      }
+
+      return `
+        <div class="report-line">
+          <span class="report-label">${escapeHtml(reportFieldLabel(service))}</span>
+          <div class="report-values">${cells.join("") || renderReportPill("N/A")}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderMailReportRows(mail: Record<string, unknown>) {
+  const mailOrder = ["Gmail", "Outlook", "Yahoo", "Apple", "QQ", "MailRU", "AOL", "GMX", "MailCOM", "163", "Sohu", "Sina", "Port25", "DNSBlacklist"];
+  return orderedReportEntries(mail, mailOrder)
+    .map(([key, value]) => {
+      if (key === "DNSBlacklist" && isRecord(value)) {
+        return `
+          <div class="report-line">
+            <span class="report-label">${escapeHtml(reportFieldLabel(key))}</span>
+            <div class="report-values">
+              ${Object.entries(value).map(([childKey, childValue]) => renderReportCell(reportFieldLabel(childKey), childValue)).join("")}
             </div>
-          `;
-        })
-        .join("")}
+          </div>
+        `;
+      }
+      return renderReportLine(reportFieldLabel(key), value);
+    })
+    .join("");
+}
+
+function renderReportSection(title: string, rows: string) {
+  if (!rows) {
+    return "";
+  }
+  return `
+    <div class="result-group report-group">
+      <div class="report-group-title">${escapeHtml(title)}</div>
+      <div class="report-group-body">${rows}</div>
     </div>
   `;
+}
+
+function renderHeadInfoRows(head?: Record<string, unknown>, info?: Record<string, unknown>) {
+  const rows: string[] = [];
+  if (head) {
+    if (head.IP !== undefined) {
+      rows.push(renderReportLine("IP", head.IP));
+    }
+    if (head.Time !== undefined) {
+      rows.push(renderReportLine("报告时间", head.Time));
+    }
+    if (head.Version !== undefined) {
+      rows.push(renderReportLine("脚本版本", head.Version));
+    }
+  }
+  if (info) {
+    const infoOrder = ["ASN", "Organization", "Latitude", "Longitude", "DMS", "Map", "TimeZone", "Type"];
+    for (const key of infoOrder) {
+      if (info[key] !== undefined) {
+        rows.push(renderReportObjectRow(reportFieldLabel(key), info[key]));
+      }
+    }
+    for (const [key, value] of Object.entries(info)) {
+      if (infoOrder.includes(key)) {
+        continue;
+      }
+      rows.push(renderReportObjectRow(reportFieldLabel(key), value));
+    }
+  }
+  return rows.join("");
 }
 
 function renderCurrentResult(result: Record<string, unknown>) {
@@ -963,54 +1155,19 @@ function renderCurrentResult(result: Record<string, unknown>) {
     `;
   }
 
-  const sections: string[] = [];
-  if (!isEmptyRecord(structured.score)) {
-    sections.push(`
-      <div class="result-group">
-        <div class="section-head">
-          <h3>Score</h3>
-          <span class="chip">风险分项</span>
-        </div>
-        ${renderScoreGrid(structured.score)}
-      </div>
-    `);
-  }
-
-  if (!isEmptyRecord(structured.media)) {
-    sections.push(`
-      <div class="result-group">
-        <div class="section-head">
-          <h3>Media</h3>
-          <span class="chip">流媒体与服务</span>
-        </div>
-        ${renderMediaGrid(structured.media)}
-      </div>
-    `);
-  }
-
-  if (!isEmptyRecord(structured.mail)) {
-    sections.push(`
-      <div class="result-group">
-        <div class="section-head">
-          <h3>Mail</h3>
-          <span class="chip">邮件能力</span>
-        </div>
-        ${renderRecordRows(structured.mail)}
-      </div>
-    `);
-  }
-
-  if (!isEmptyRecord(structured.remainder)) {
-    sections.push(`
-      <div class="result-group">
-        <div class="section-head">
-          <h3>其他检测结果</h3>
-          <span class="chip">动态字段</span>
-        </div>
-        <pre class="code-block">${escapeHtml(JSON.stringify(structured.remainder, null, 2))}</pre>
-      </div>
-    `);
-  }
+  const sections = [
+    renderReportSection("基础信息", renderHeadInfoRows(structured.head, structured.info)),
+    renderReportSection(
+      "IP 类型与风险评分",
+      `${structured.type ? renderReportRows(structured.type, ["Usage", "Company"]) : ""}${
+        structured.score ? renderReportRows(structured.score, ["SCAMALYTICS", "IPQS", "AbuseIPDB", "IP2LOCATION", "ipapi", "DBIP"]) : ""
+      }`
+    ),
+    renderReportSection("风险因子", structured.factor ? renderReportRows(structured.factor, ["CountryCode", "Proxy", "Tor", "VPN", "Server", "Abuser", "Robot"]) : ""),
+    renderReportSection("流媒体与服务", structured.media ? renderMediaReportRows(structured.media) : ""),
+    renderReportSection("邮局检测", structured.mail ? renderMailReportRows(structured.mail) : ""),
+    renderReportSection("其他结果", structured.remainder ? renderReportRows(structured.remainder) : "")
+  ].filter(Boolean);
 
   if (sections.length === 0) {
     return `
@@ -1021,7 +1178,7 @@ function renderCurrentResult(result: Record<string, unknown>) {
     `;
   }
 
-  return `<div class="result-layout">${sections.join("")}</div>`;
+  return `<div class="result-layout report-layout"><div class="report-shell">${sections.join("")}</div></div>`;
 }
 
 function renderHistoricalResult(currentResult: Record<string, unknown>, previousResult?: Record<string, unknown>) {
@@ -1222,6 +1379,10 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
   }
 
   return [
+    { key: "Head", title: "Head", chip: "报告头", current: structured.head, previous: previousStructured?.head },
+    { key: "Info", title: "Info", chip: "基础信息", current: structured.info, previous: previousStructured?.info },
+    { key: "Type", title: "Type", chip: "类型信息", current: structured.type, previous: previousStructured?.type },
+    { key: "Factor", title: "Factor", chip: "风险因子", current: structured.factor, previous: previousStructured?.factor },
     { key: "Score", title: "Score", chip: "风险分项", current: structured.score, previous: previousStructured?.score },
     { key: "Media", title: "Media", chip: "流媒体与服务", current: structured.media, previous: previousStructured?.media },
     { key: "Mail", title: "Mail", chip: "邮件能力", current: structured.mail, previous: previousStructured?.mail },
