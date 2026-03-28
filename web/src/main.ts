@@ -219,27 +219,58 @@ function renderLogin() {
   });
 }
 
-function sidebar(active: "nodes" | "settings") {
+function topbar(active: "nodes" | "settings") {
   return `
-    <aside class="sidebar">
-      <h2>Komari IP Quality</h2>
-      <p class="muted">轻量后台用于配置展示字段、生成 header 并查看已接入节点。</p>
-      <div class="nav">
-        <button class="${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点列表</button>
-        <button class="${active === "settings" ? "active" : ""}" data-nav="/settings">系统配置</button>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div>
+          <h2>Komari IP Quality</h2>
+          <p class="muted">查看当前 IP 质量和历史变化。</p>
+        </div>
+        <div class="nav nav-inline">
+          <button class="${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点</button>
+          <button class="${active === "settings" ? "active" : ""}" data-nav="/settings">配置</button>
+        </div>
       </div>
-      <div class="chip-row" style="margin-top:16px;">
+      <div class="topbar-actions">
         <span class="chip">模式: ${state.me?.app_env ?? "unknown"}</span>
-        <span class="chip">路径: ${state.me?.base_path ?? basePath}</span>
+        <button class="button ghost" id="logout-button">退出登录</button>
       </div>
-      <button class="button ghost" id="logout-button" style="margin-top:18px;">退出登录</button>
-    </aside>
+    </header>
+  `;
+}
+
+function pageHeader(options: {
+  title: string;
+  subtitle?: string;
+  backPath?: string;
+  backLabel?: string;
+  actions?: string;
+}) {
+  return `
+    <div class="page-head">
+      <div class="page-head-main">
+        ${
+          options.backPath
+            ? `<button class="inline-button back-link" data-back="${escapeHtml(options.backPath)}">${escapeHtml(
+                options.backLabel ?? "返回"
+              )}</button>`
+            : ""
+        }
+        <h1>${escapeHtml(options.title)}</h1>
+        ${options.subtitle ? `<p class="muted">${escapeHtml(options.subtitle)}</p>` : ""}
+      </div>
+      ${options.actions ? `<div class="toolbar">${options.actions}</div>` : ""}
+    </div>
   `;
 }
 
 function bindShellEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-nav]").forEach((button) => {
     button.addEventListener("click", () => navigate(button.dataset.nav ?? "/nodes"));
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-back]").forEach((button) => {
+    button.addEventListener("click", () => navigate(button.dataset.back ?? "/nodes"));
   });
 
   document.querySelector<HTMLButtonElement>("#logout-button")?.addEventListener("click", async () => {
@@ -257,37 +288,40 @@ function renderNodes() {
             <h3>${escapeHtml(item.name)}</h3>
             <span class="status ${item.has_data ? "ok" : "empty"}">${item.has_data ? "有数据" : "无数据"}</span>
           </div>
-          <div class="muted">${escapeHtml(item.komari_node_uuid)}</div>
-          <div>${escapeHtml(item.current_summary || "N/A")}</div>
+          <div class="muted">最近更新: ${formatDateTime(item.updated_at)}</div>
           ${renderNodeListSummary(item)}
-          <div class="muted">最近更新时间: ${formatDateTime(item.updated_at)}</div>
+          <div class="inline-button">查看当前结果与历史变化</div>
         </a>`
     )
     .join("");
 
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">已接入节点</span>
-          <span class="chip">只显示从 Komari 主动添加过的节点</span>
-        </div>
-        <h1>节点列表</h1>
-        <p>节点列表按最近更新时间倒序排列，无数据节点会排在有结果节点之后。</p>
-      </div>
-      <div class="layout">
-        ${sidebar("nodes")}
-        <section class="panel">
+    <div class="shell app-shell">
+      ${topbar("nodes")}
+      ${pageHeader({
+        title: "节点",
+        subtitle: "这里应该只用来决定先看哪个节点。点进节点后，只看当前 IP 质量和历史变化。",
+        actions: `
+          <input class="input search-input" id="node-search" placeholder="搜索节点名称" value="${escapeHtml(state.search)}" />
+          <button class="button ghost" data-nav="/settings">复制 Header</button>
+        `
+      })}
+      <section class="panel">
+        <div class="section">
           <div class="section-head">
             <h2>已接入节点</h2>
-            <div class="toolbar">
-              <input class="input" style="min-width:260px;" id="node-search" placeholder="搜索节点名称或 UUID" value="${escapeHtml(state.search)}" />
-              <button class="button ghost" id="node-search-button">搜索</button>
-            </div>
+            <span class="chip">${state.nodes.length} 个节点</span>
           </div>
-          <div class="grid">${cards || `<div class="card"><h3>暂无节点</h3><p class="muted">请先从 Komari 节点详情页点击“添加 IP 质量检测”。</p></div>`}</div>
-        </section>
-      </div>
+          <div class="grid">${cards || `
+            <div class="card empty-state-card">
+              <h3>还没有节点</h3>
+              <p class="muted">先去系统配置页复制 Header，填到 Komari 的自定义 header，然后在节点详情页点击“添加 IP 质量检测”。</p>
+              <div class="toolbar">
+                <button class="button" data-nav="/settings">去复制 Header</button>
+              </div>
+            </div>`}</div>
+        </div>
+      </section>
     </div>
   `;
 
@@ -940,18 +974,6 @@ function renderCurrentResult(result: Record<string, unknown>) {
   }
 
   const sections: string[] = [];
-  if (!isEmptyRecord(structured.meta)) {
-    sections.push(`
-      <div class="result-group">
-        <div class="section-head">
-          <h3>Meta</h3>
-          <span class="chip">基础信息</span>
-        </div>
-        ${renderRecordRows(structured.meta)}
-      </div>
-    `);
-  }
-
   if (!isEmptyRecord(structured.score)) {
     sections.push(`
       <div class="result-group">
@@ -992,12 +1014,21 @@ function renderCurrentResult(result: Record<string, unknown>) {
     sections.push(`
       <div class="result-group">
         <div class="section-head">
-          <h3>其他字段</h3>
-          <span class="chip">JSON 兜底</span>
+          <h3>其他检测结果</h3>
+          <span class="chip">动态字段</span>
         </div>
         <pre class="code-block">${escapeHtml(JSON.stringify(structured.remainder, null, 2))}</pre>
       </div>
     `);
+  }
+
+  if (sections.length === 0) {
+    return `
+      <div class="empty-state">
+        <strong>N/A</strong>
+        <p class="muted">当前还没有可展示的 IP 质量结果。</p>
+      </div>
+    `;
   }
 
   return `<div class="result-layout">${sections.join("")}</div>`;
@@ -1043,8 +1074,6 @@ function renderHistoricalResult(currentResult: Record<string, unknown>, previous
       </div>
     `);
   };
-
-  pushRecordSection("Meta", "基础信息", structured.meta, previousStructured?.meta);
 
   if (!isEmptyRecord(structured.score)) {
     const rendered = renderComparedRecordRows(structured.score!, previousStructured?.score);
@@ -1115,7 +1144,7 @@ function renderHistoricalResult(currentResult: Record<string, unknown>, previous
     sections.push(`
       <div class="result-group">
         <div class="section-head">
-          <h3>其他字段</h3>
+          <h3>其他检测结果</h3>
           <span class="chip">动态字段</span>
         </div>
         ${rendered.markup}
@@ -1245,7 +1274,6 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
   }
 
   return [
-    { key: "Meta", title: "Meta", chip: "基础信息", current: structured.meta, previous: previousStructured?.meta },
     { key: "Score", title: "Score", chip: "风险分项", current: structured.score, previous: previousStructured?.score },
     { key: "Media", title: "Media", chip: "流媒体与服务", current: structured.media, previous: previousStructured?.media },
     { key: "Mail", title: "Mail", chip: "邮件能力", current: structured.mail, previous: previousStructured?.mail },
@@ -1305,7 +1333,6 @@ function renderRecentChangeSummary(detail: NodeDetail) {
       </div>
       <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
       ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
-      <div class="muted">${escapeHtml(changePrioritySummary())}</div>
       <div class="change-summary-grid">
         ${renderChangeGroupCards(groups, {
           dataAttr: "data-detail-change-entry",
@@ -1579,29 +1606,23 @@ function renderNodeDetail(embed = false) {
     app.innerHTML = `
       <div class="embed-shell">
         <section class="panel embed-panel">
-          <div class="section">
-            <div class="chip-row">
-              <span class="chip">Komari 内弹窗视图</span>
-              <span class="chip">当前状态总览</span>
+          <div class="section page-head embed-head">
+            <div class="page-head-main">
+              <h2>${escapeHtml(detail.name)}</h2>
+              <p class="muted">最近更新: ${formatDateTime(detail.updated_at)}${detail.has_data ? "" : "，当前还没有检测结果"}</p>
             </div>
-            <h2>${escapeHtml(detail.name)}</h2>
-            <p class="muted">注入端只负责弹层承载，详细展示仍由本服务页面输出。</p>
-            <div class="kv">
-              <div class="kv-row"><strong>UUID</strong><span title="${escapeHtml(detail.komari_node_uuid)}">${escapeHtml(truncate(detail.komari_node_uuid))}</span></div>
-              <div class="kv-row"><strong>状态</strong><span class="status ${detail.has_data ? "ok" : "empty"}">${detail.has_data ? "有数据" : "无数据"}</span></div>
-              <div class="kv-row"><strong>状态摘要</strong><span>${escapeHtml(detail.current_summary || "N/A")}</span></div>
-              <div class="kv-row"><strong>最近更新时间</strong><span>${formatDateTime(detail.updated_at)}</span></div>
+            <div class="toolbar">
+              <a class="button ghost" href="${basePath}/#/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history" target="_blank" rel="noopener noreferrer">查看历史变化</a>
+              <a class="button ghost" href="${basePath}/#/nodes/${encodeURIComponent(detail.komari_node_uuid)}" target="_blank" rel="noopener noreferrer">打开完整页面</a>
             </div>
           </div>
           <div class="section">
-            <div class="section-head">
-              <h2>当前状态</h2>
-              <div class="toolbar">
-                <a class="button ghost" href="${basePath}/#/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history" target="_blank" rel="noopener noreferrer">查看历史</a>
-                <a class="button ghost" href="${basePath}/#/nodes/${encodeURIComponent(detail.komari_node_uuid)}" target="_blank" rel="noopener noreferrer">打开完整页面</a>
-              </div>
-            </div>
+            <h2>当前 IP 质量</h2>
             ${currentResultMarkup}
+          </div>
+          <div class="section">
+            <h2>最近变化</h2>
+            ${recentChangeMarkup}
           </div>
         </section>
       </div>
@@ -1610,107 +1631,78 @@ function renderNodeDetail(embed = false) {
   }
 
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">当前状态总览</span>
-          <span class="chip">历史页已接入</span>
-          <span class="chip">节点接入区域已预留</span>
+    <div class="shell app-shell">
+      ${topbar("nodes")}
+      ${pageHeader({
+        title: detail.name,
+        subtitle: detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at)}` : "当前还没有检测结果",
+        backPath: "/nodes",
+        backLabel: "返回节点列表",
+        actions: `
+          <button class="button ghost" id="history-button">历史变化</button>
+          <button class="button ghost" id="detail-change-view-link">变化视图</button>
+        `
+      })}
+      <section class="panel">
+        <div class="section">
+          <h2>当前 IP 质量</h2>
+          ${currentResultMarkup}
         </div>
-        <h1>${escapeHtml(detail.name)}</h1>
-        <p>阶段 1 共用的当前状态核心视图会同时服务于独立前端节点详情页和 Komari 内弹窗。</p>
-      </div>
-      <div class="layout">
-        ${sidebar("nodes")}
-        <section class="panel">
-          <div class="section">
-            <div class="section-head">
-              <h2>节点总览</h2>
-              <div class="toolbar">
-                <button class="button ghost" id="history-button">查看历史</button>
-                <button class="button danger" id="delete-button">移除接入</button>
+
+        <div class="section">
+          <div class="section-head">
+            <h2>最近变化</h2>
+            <button class="button ghost" id="detail-history-link">查看完整历史</button>
+          </div>
+          ${recentChangeMarkup}
+        </div>
+
+        <details class="panel details-panel" data-node-report-config="true">
+          <summary>高级接入配置</summary>
+          <div class="section report-config">
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>上报地址</strong>
+                <button class="button ghost" id="copy-report-endpoint-button">复制</button>
               </div>
+              <div class="code-block">${escapeHtml(reportEndpointURL)}</div>
             </div>
-            <div class="kv">
-              <div class="kv-row"><strong>节点名称</strong><span>${escapeHtml(detail.name)}</span></div>
-              <div class="kv-row"><strong>UUID</strong><span title="${escapeHtml(detail.komari_node_uuid)}">${escapeHtml(truncate(detail.komari_node_uuid))}</span></div>
-              <div class="kv-row"><strong>状态</strong><span class="status ${detail.has_data ? "ok" : "empty"}">${detail.has_data ? "有数据" : "无数据"}</span></div>
-              <div class="kv-row"><strong>状态摘要</strong><span>${escapeHtml(detail.current_summary || "N/A")}</span></div>
-              <div class="kv-row"><strong>最近更新时间</strong><span>${formatDateTime(detail.updated_at)}</span></div>
-            </div>
-          </div>
-
-          <div class="section">
-            <h2>当前状态</h2>
-            <p class="muted">此区域为只读视图，展示内容由系统配置页中的全局字段开关控制。</p>
-            ${currentResultMarkup}
-          </div>
-
-          <div class="section">
-            <div class="section-head">
-              <h2>最近变化</h2>
-              <div class="toolbar">
-                <button class="button ghost" id="detail-change-view-link">查看变化视图</button>
-                <button class="button ghost" id="detail-history-link">查看完整对比</button>
-              </div>
-            </div>
-            <p class="muted">这里展示最近一次历史记录相对上一条的变化摘要，完整差异请进入历史页查看。</p>
-            ${recentChangeMarkup}
-          </div>
-
-          <div class="section">
-            <h2>历史入口</h2>
-            <p class="muted">历史页已接入，阶段 1 采用时间倒序轻量列表和 JSON 兜底详情。</p>
-          </div>
-
-          <div class="section">
-            <h2>节点接入配置</h2>
-            <p class="muted">使用每节点独立 token 调用上报接口。本页提供地址、token 和基础请求示例。</p>
-            <div class="report-config" data-node-report-config="true">
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>浏览器当前地址</strong>
-                  <button class="button ghost" id="copy-report-endpoint-button">复制</button>
-                </div>
-                <div class="code-block">${escapeHtml(reportEndpointURL)}</div>
-              </div>
-              ${
-                composeReportEndpointURL
-                  ? `
-                    <div class="summary-section">
-                      <div class="summary-head">
-                        <strong>容器网络地址</strong>
-                        <button class="button ghost" id="copy-report-compose-endpoint-button">复制</button>
-                      </div>
-                      <div class="code-block">${escapeHtml(composeReportEndpointURL)}</div>
-                      <div class="muted">开发环境下，如果上报脚本运行在 compose 网络内，优先使用这个地址。</div>
+            ${
+              composeReportEndpointURL
+                ? `
+                  <div class="summary-section">
+                    <div class="summary-head">
+                      <strong>容器网络地址</strong>
+                      <button class="button ghost" id="copy-report-compose-endpoint-button">复制</button>
                     </div>
-                  `
-                  : ""
-              }
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>Reporter Token</strong>
-                  <div class="toolbar">
-                    <button class="button ghost" id="copy-report-token-button">复制</button>
-                    <button class="button ghost" id="rotate-report-token-button">重置 Token</button>
+                    <div class="code-block">${escapeHtml(composeReportEndpointURL)}</div>
                   </div>
+                `
+                : ""
+            }
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>Reporter Token</strong>
+                <div class="toolbar">
+                  <button class="button ghost" id="copy-report-token-button">复制</button>
+                  <button class="button ghost" id="rotate-report-token-button">重置 Token</button>
                 </div>
-                <div class="code-block">${escapeHtml(detail.report_config.reporter_token)}</div>
-                <div class="muted">认证头使用 <code>X-IPQ-Reporter-Token</code>，也兼容 <code>Authorization: Bearer ...</code>。</div>
               </div>
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>请求示例</strong>
-                  <button class="button ghost" id="copy-report-example-button">复制</button>
-                </div>
-                <pre class="code-block">${escapeHtml(reportExample)}</pre>
-                <div class="muted">请求体至少需要 <code>result</code>，<code>summary</code> 和 <code>recorded_at</code> 为可选字段。</div>
+              <div class="code-block">${escapeHtml(detail.report_config.reporter_token)}</div>
+            </div>
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>请求示例</strong>
+                <button class="button ghost" id="copy-report-example-button">复制</button>
               </div>
+              <pre class="code-block">${escapeHtml(reportExample)}</pre>
+            </div>
+            <div class="toolbar">
+              <button class="button danger" id="delete-button">移除接入</button>
             </div>
           </div>
-        </section>
-      </div>
+        </details>
+      </section>
     </div>
   `;
 
@@ -1814,86 +1806,59 @@ function renderHistoryPage() {
     .join("");
 
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">历史记录</span>
-          <span class="chip">结构化对比</span>
-          <span class="chip">上一条比较</span>
+    <div class="shell app-shell">
+      ${topbar("nodes")}
+      ${pageHeader({
+        title: `${detail.name} 的历史变化`,
+        subtitle: detail.history.length > 0 ? `共 ${detail.history.length} 条记录` : "当前还没有历史记录",
+        backPath: `/nodes/${encodeURIComponent(detail.komari_node_uuid)}`,
+        backLabel: "返回当前结果",
+        actions: `<button class="button ghost" id="open-change-view-button">变化视图</button>`
+      })}
+      <section class="panel">
+        <div class="section">
+          <h2>历史记录</h2>
+          <div class="list">
+            ${historyCards || `<div class="card empty-state-card"><strong>暂无历史记录</strong><p class="muted">等待节点继续上报后，这里会出现历史变化。</p></div>`}
+          </div>
         </div>
-        <h1>${escapeHtml(detail.name)} 的历史</h1>
-        <p>历史页当前按时间倒序查看单条记录，并与上一条历史结果做字段级比较，先不引入复杂图表。</p>
-      </div>
-      <div class="layout">
-        ${sidebar("nodes")}
-        <section class="panel">
-          <div class="section">
-            <div class="section-head">
-              <h2>节点信息</h2>
-              <div class="toolbar">
-                <button class="button ghost" id="open-change-view-button">查看变化视图</button>
-                <button class="button ghost" id="back-to-node-button">返回节点详情</button>
-              </div>
-            </div>
-            <div class="kv">
-              <div class="kv-row"><strong>节点名称</strong><span>${escapeHtml(detail.name)}</span></div>
-              <div class="kv-row"><strong>UUID</strong><span title="${escapeHtml(detail.komari_node_uuid)}">${escapeHtml(truncate(detail.komari_node_uuid))}</span></div>
-              <div class="kv-row"><strong>当前状态摘要</strong><span>${escapeHtml(detail.current_summary || "N/A")}</span></div>
-              <div class="kv-row"><strong>历史条数</strong><span>${detail.history.length}</span></div>
-            </div>
-          </div>
 
-          <div class="section">
-            <h2>历史列表</h2>
-            <div class="list">
-              ${historyCards || `<div class="card"><strong>暂无历史</strong><p class="muted">阶段 1 历史结构已就位，但当前节点还没有沉淀历史记录。</p></div>`}
+        <div class="section">
+          <div class="section-head">
+            <h2>选中记录</h2>
+            ${selectedRecord ? `<span class="chip">${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
+          </div>
+          <div class="history-compare-meta">
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>当前记录</strong>
+                <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
+              </div>
+              <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
+            </div>
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>对比上一条</strong>
+                <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
+              </div>
+              <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
             </div>
           </div>
-
-          <div class="section">
-            <div class="section-head">
-              <h2>历史详情</h2>
-              ${selectedRecord ? `<span class="chip">记录时间: ${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
+          <div class="summary-section" data-history-change-list="true">
+            <div class="summary-head">
+              <strong>变化内容</strong>
+              <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
             </div>
-            <div class="history-compare-meta">
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>当前记录</strong>
-                  <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
-                </div>
-                <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
-              </div>
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>对比基准</strong>
-                  <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
-                </div>
-                <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
-              </div>
-            </div>
-            <div class="summary-section" data-history-compare="overview">
-              <div class="summary-head">
-                <strong>变化摘要</strong>
-                <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
-              </div>
-              ${compareSummary}
-            </div>
-            <div class="summary-section" data-history-change-list="true">
-              <div class="summary-head">
-                <strong>变化明细</strong>
-                <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
-              </div>
-              <div class="muted">${escapeHtml(changePrioritySummary())}</div>
-              ${historyChangeMarkup}
-            </div>
-            <div data-history-structured="true">${historyResult.markup}</div>
-            <details class="raw-json">
-              <summary>查看原始 JSON</summary>
-              <pre class="code-block">${escapeHtml(selectedRecord?.result_json || "N/A")}</pre>
-            </details>
+            ${compareSummary}
+            ${historyChangeMarkup}
           </div>
-        </section>
-      </div>
+          <div data-history-structured="true">${historyResult.markup}</div>
+          <details class="raw-json details-panel">
+            <summary>原始数据</summary>
+            <pre class="code-block">${escapeHtml(selectedRecord?.result_json || "N/A")}</pre>
+          </details>
+        </div>
+      </section>
     </div>
   `;
 
@@ -1952,8 +1917,6 @@ function renderChangeViewPage() {
     }
     return true;
   });
-  const trend = buildChangeViewTrend(visibleRecordSummaries, state.changeTrendScope);
-
   const selectedRecordSummary = baseSelectedRecord
     ? recordSummaries.find((record) => record.item.id === baseSelectedRecord.id) ?? null
     : null;
@@ -2015,172 +1978,87 @@ function renderChangeViewPage() {
     .join("");
 
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">变化视图</span>
-          <span class="chip">只看变化</span>
-          <span class="chip">字段级明细</span>
-        </div>
-        <h1>${escapeHtml(detail.name)} 的变化</h1>
-        <p>此视图只聚焦“发生了什么变化”，默认弱化完整结果展示，便于快速判断最近一次或某次上报是否值得关注。</p>
-      </div>
-      <div class="layout">
-        ${sidebar("nodes")}
-        <section class="panel" data-change-view="true">
-          <div class="section">
-            <div class="section-head">
-              <h2>节点信息</h2>
-              <div class="toolbar">
-                <button class="button ghost" id="change-view-history-button">查看历史页</button>
-                <button class="button ghost" id="change-view-node-button">返回节点详情</button>
-              </div>
-            </div>
-            <div class="kv">
-              <div class="kv-row"><strong>节点名称</strong><span>${escapeHtml(detail.name)}</span></div>
-              <div class="kv-row"><strong>UUID</strong><span title="${escapeHtml(detail.komari_node_uuid)}">${escapeHtml(truncate(detail.komari_node_uuid))}</span></div>
-              <div class="kv-row"><strong>当前摘要</strong><span>${escapeHtml(detail.current_summary || "N/A")}</span></div>
-              <div class="kv-row"><strong>历史条数</strong><span>${detail.history.length}</span></div>
-            </div>
+    <div class="shell app-shell">
+      ${topbar("nodes")}
+      ${pageHeader({
+        title: `${detail.name} 的变化`,
+        subtitle: "这里只看历史里发生了什么变化，不展示无关元数据。",
+        backPath: `/nodes/${encodeURIComponent(detail.komari_node_uuid)}`,
+        backLabel: "返回当前结果",
+        actions: `<button class="button ghost" id="change-view-history-button">历史记录</button>`
+      })}
+      <section class="panel" data-change-view="true">
+        <div class="section">
+          <div class="section-head">
+            <h2>变化记录</h2>
+            <span class="chip">${visibleRecordSummaries.length} 条</span>
           </div>
-
-          <div class="section">
-            <div class="section-head">
-              <h2>变化记录</h2>
-              <span class="chip">时间倒序</span>
-            </div>
-            <div class="change-filter-bar" data-change-view-filters="true">
-              <label class="card change-filter">
-                <span>只看重点变化</span>
-                <input type="checkbox" id="change-filter-primary-only" ${state.changeViewFilters.primaryOnly ? "checked" : ""} />
-              </label>
-              <label class="card change-filter">
-                <span>只看有变化记录</span>
-                <input type="checkbox" id="change-filter-changed-only" ${state.changeViewFilters.changedOnly ? "checked" : ""} />
-              </label>
-              <label class="card change-filter change-filter-select">
-                <span>分组筛选</span>
-                <select class="input" id="change-filter-group">
-                  ${groupOptions
-                    .map(
-                      (option) =>
-                        `<option value="${escapeHtml(option.value)}" ${option.value === state.changeViewFilters.group ? "selected" : ""}>${escapeHtml(option.label)}</option>`
-                    )
-                    .join("")}
-                </select>
-              </label>
-            </div>
-            <div class="list">
-              ${
-                changeRecords ||
-                `<div class="card" data-change-view-empty="true"><strong>当前筛选下没有变化记录</strong><p class="muted">请调整筛选条件，或等待新的检测结果进入历史。</p></div>`
-              }
-            </div>
+          <div class="change-filter-bar" data-change-view-filters="true">
+            <label class="card change-filter">
+              <span>只看重点变化</span>
+              <input type="checkbox" id="change-filter-primary-only" ${state.changeViewFilters.primaryOnly ? "checked" : ""} />
+            </label>
+            <label class="card change-filter">
+              <span>只看有变化记录</span>
+              <input type="checkbox" id="change-filter-changed-only" ${state.changeViewFilters.changedOnly ? "checked" : ""} />
+            </label>
+            <label class="card change-filter change-filter-select">
+              <span>分组筛选</span>
+              <select class="input" id="change-filter-group">
+                ${groupOptions
+                  .map(
+                    (option) =>
+                      `<option value="${escapeHtml(option.value)}" ${option.value === state.changeViewFilters.group ? "selected" : ""}>${escapeHtml(option.label)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
           </div>
-
-          <div class="section" data-change-trend="true">
-            <div class="section-head">
-              <h2>变化趋势</h2>
-              <span class="chip">随当前筛选即时重算</span>
-            </div>
-            <div class="muted">趋势统计基于当前筛选后的变化记录列表，用来快速判断最近哪些分组和字段最常发生变化。</div>
-            <div class="change-filter-bar change-trend-toolbar">
-              <label class="card change-filter change-filter-select">
-                <span>趋势口径</span>
-                <select class="input" id="change-trend-scope">
-                  <option value="filtered" ${state.changeTrendScope === "filtered" ? "selected" : ""}>当前筛选下全部趋势</option>
-                  <option value="primary" ${state.changeTrendScope === "primary" ? "selected" : ""}>只看重点变化趋势</option>
-                </select>
-              </label>
-            </div>
+          <div class="list">
             ${
-              trend.groupCount > 0 || trend.fieldCount > 0
-                ? `
-                  <div class="compare-overview" data-change-trend-overview="true">
-                    <span class="summary-pill"><strong>趋势口径</strong><span>${escapeHtml(trendScopeLabel(trend.scope))}</span></span>
-                    <span class="summary-pill"><strong>可比较记录</strong><span>${trend.comparedRecordCount}</span></span>
-                    <span class="summary-pill summary-pill-compare changed"><strong>有变化记录</strong><span>${trend.changedRecordCount}</span></span>
-                    <span class="summary-pill"><strong>涉及分组</strong><span>${trend.groupCount}</span></span>
-                    <span class="summary-pill"><strong>涉及字段</strong><span>${trend.fieldCount}</span></span>
-                  </div>
-                  <div class="muted" data-change-trend-sort="true">当前按“出现记录数 -> 累计变化次数 -> 名称”排序。</div>
-                  <div class="change-trend-sections">
-                    <div class="summary-section">
-                      <div class="summary-head">
-                        <strong>高频分组</strong>
-                        <span class="chip">Top ${Math.min(trend.groupCount, CHANGE_TREND_GROUP_LIMIT)}</span>
-                      </div>
-                      <div class="muted" data-change-trend-limit-group="true">${escapeHtml(trendLimitSummary(trend.groupCount, CHANGE_TREND_GROUP_LIMIT, "分组"))}</div>
-                      ${renderChangeTrendItems(trend.groups, {
-                        dataAttr: "data-change-trend-group",
-                        emptyText: "当前筛选下还没有可统计的分组变化。"
-                      })}
-                    </div>
-                    <div class="summary-section">
-                      <div class="summary-head">
-                        <strong>高频字段</strong>
-                        <span class="chip">Top ${Math.min(trend.fieldCount, CHANGE_TREND_FIELD_LIMIT)}</span>
-                      </div>
-                      <div class="muted" data-change-trend-limit-field="true">${escapeHtml(trendLimitSummary(trend.fieldCount, CHANGE_TREND_FIELD_LIMIT, "字段"))}</div>
-                      ${renderChangeTrendItems(trend.fields, {
-                        dataAttr: "data-change-trend-field",
-                        emptyText: "当前筛选下还没有可统计的字段变化。"
-                      })}
-                    </div>
-                  </div>
-                `
-                : `<div class="card change-card change-card-empty" data-change-trend-empty="true"><strong>当前筛选下没有可统计趋势</strong><div class="muted">请放宽筛选条件，或等待更多历史记录进入后再观察趋势。</div></div>`
+              changeRecords ||
+              `<div class="card empty-state-card" data-change-view-empty="true"><strong>当前没有可看的变化记录</strong><p class="muted">等下一次结果进入历史，或放宽筛选条件后再看。</p></div>`
             }
           </div>
+        </div>
 
-          <div class="section">
-            <div class="section-head">
-              <h2>本次变化</h2>
-              ${selectedRecord ? `<span class="chip">记录时间: ${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
-            </div>
-            <div class="history-compare-meta">
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>当前记录</strong>
-                  <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
-                </div>
-                <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
-              </div>
-              <div class="summary-section">
-                <div class="summary-head">
-                  <strong>对比基准</strong>
-                  <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
-                </div>
-                <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
-              </div>
-            </div>
-            <div class="summary-section" data-change-view-overview="true">
+        <div class="section">
+          <div class="section-head">
+            <h2>本次变化</h2>
+            ${selectedRecord ? `<span class="chip">${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
+          </div>
+          <div class="history-compare-meta">
+            <div class="summary-section">
               <div class="summary-head">
-                <strong>变化摘要</strong>
-                <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
+                <strong>当前记录</strong>
+                <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
               </div>
-              ${compareSummary.overviewMarkup}
+              <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
             </div>
-            <div class="summary-section" data-change-view-list="true">
+            <div class="summary-section">
               <div class="summary-head">
-                <strong>变化明细</strong>
-                <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
+                <strong>对比上一条</strong>
+                <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
               </div>
-              <div class="muted">${escapeHtml(changePrioritySummary())}</div>
-              <div class="muted">
-                ${
-                  state.changeViewFilters.primaryOnly
-                    ? "当前只显示重点变化。"
-                    : state.changeViewFilters.group === "all"
-                      ? "当前显示全部分组。"
-                      : `当前仅显示 ${escapeHtml(state.changeViewFilters.group)} 分组。`
-                }
-              </div>
-              ${compareSummary.changeMarkup}
+              <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
             </div>
           </div>
-        </section>
-      </div>
+          <div class="summary-section" data-change-view-overview="true">
+            <div class="summary-head">
+              <strong>变化摘要</strong>
+              <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
+            </div>
+            ${compareSummary.overviewMarkup}
+          </div>
+          <div class="summary-section" data-change-view-list="true">
+            <div class="summary-head">
+              <strong>变化明细</strong>
+              <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
+            </div>
+            ${compareSummary.changeMarkup}
+          </div>
+        </div>
+      </section>
     </div>
   `;
 
@@ -2202,10 +2080,6 @@ function renderChangeViewPage() {
   });
   document.querySelector<HTMLSelectElement>("#change-filter-group")?.addEventListener("change", (event) => {
     state.changeViewFilters.group = (event.target as HTMLSelectElement).value;
-    renderChangeViewPage();
-  });
-  document.querySelector<HTMLSelectElement>("#change-trend-scope")?.addEventListener("change", (event) => {
-    state.changeTrendScope = (event.target as HTMLSelectElement).value as ChangeTrendScope;
     renderChangeViewPage();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-change-record]").forEach((button) => {
@@ -2322,61 +2196,63 @@ async function renderSettings() {
     .join("");
 
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">系统配置</span>
-          <span class="chip">模式只读</span>
-          <span class="chip">字段开关全局生效</span>
-        </div>
-        <h1>系统配置</h1>
-        <p>此处管理 header 生成、模式信息、全局展示字段开关以及管理员账号信息。</p>
-      </div>
-      <div class="layout">
-        ${sidebar("settings")}
-        <section class="panel">
-          <div class="section">
-            <h2>运行模式</h2>
-            <div class="kv">
-              <div class="kv-row"><strong>应用名</strong><span>${escapeHtml(runtime.app_name)}</span></div>
-              <div class="kv-row"><strong>模式</strong><span>${escapeHtml(runtime.app_env)}</span></div>
-              <div class="kv-row"><strong>路径前缀</strong><span>${escapeHtml(runtime.base_path)}</span></div>
+    <div class="shell app-shell">
+      ${topbar("settings")}
+      ${pageHeader({
+        title: "系统配置",
+        subtitle: "这里先只做一件事：把 Header 复制到 Komari，让节点页出现 IP 质量入口。"
+      })}
+      <section class="panel">
+        <div class="section">
+          <div class="section-head">
+            <h2>接入 Komari</h2>
+            <span class="chip">推荐短 loader 版</span>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <h3>1. 复制 Header</h3>
+              <p class="muted">推荐短 loader 版。后续更新时通常不需要重新复制。</p>
+              <div class="toolbar">
+                <button class="button" id="copy-loader-button">复制短 loader 版</button>
+                <button class="button ghost" id="copy-inline-button">复制完整内联版</button>
+              </div>
+            </div>
+            <div class="card">
+              <h3>2. 填到 Komari</h3>
+              <p class="muted">把代码填到 Komari 的自定义 header。之后进入任意节点详情页，就会出现 IP 质量入口。</p>
+              <div class="chip-row">
+                <span class="chip">${escapeHtml(runtime.app_env)}</span>
+                <span class="chip">${escapeHtml(runtime.base_path)}</span>
+              </div>
             </div>
           </div>
-
-          <div class="section">
+          <div class="card">
             <div class="section-head">
-              <h2>Header 生成</h2>
-              <span class="chip">短 loader 版推荐</span>
+              <h3>短 loader 版</h3>
+              <button class="button ghost" id="copy-loader-inline-button">再次复制</button>
             </div>
-            <div class="card">
-              <div class="section-head">
-                <h3>短 loader 版</h3>
-                <button class="button ghost" id="copy-loader-button">复制代码</button>
-              </div>
-              <p class="muted">推荐方案。后续更新不需要重新复制。</p>
-              <pre class="code-block">${escapeHtml(loaderPreview.code)}</pre>
-            </div>
-            <div class="card">
-              <div class="section-head">
-                <h3>完整内联版</h3>
-                <button class="button ghost" id="copy-inline-button">复制代码</button>
-              </div>
-              <p class="muted">静态快照导出。后续逻辑更新后需要重新复制。</p>
-              <pre class="code-block">${escapeHtml(inlinePreview.code)}</pre>
-            </div>
+            <pre class="code-block">${escapeHtml(loaderPreview.code)}</pre>
           </div>
+        </div>
 
+        <details class="panel details-panel">
+          <summary>完整内联版</summary>
+          <div class="section">
+            <p class="muted">只有在你明确不想依赖 loader 时再用它。后续逻辑更新后需要重新复制。</p>
+            <pre class="code-block">${escapeHtml(inlinePreview.code)}</pre>
+          </div>
+        </details>
+
+        <details class="panel details-panel">
+          <summary>高级展示配置</summary>
           <div class="section">
             <h2>全局展示字段开关</h2>
-            <p class="muted">阶段 1 按字段路径保存显示/隐藏。新字段默认显示，之后可手动关闭。</p>
-            <div class="list">${fieldCards || `<div class="card"><strong>还没有可配置字段</strong><p class="muted">先从 Komari 接入一个节点，并让它拥有一份当前结果后，这里会自动出现字段路径。</p></div>`}</div>
+            <div class="list">${fieldCards || `<div class="card"><strong>还没有可配置字段</strong><p class="muted">先让节点产生一份检测结果，这里才会出现字段路径。</p></div>`}</div>
             <button class="button" id="save-fields-button">保存字段配置</button>
           </div>
 
           <div class="section">
             <h2>变化优先级规则</h2>
-            <p class="muted">支持顶层分组和字段路径两级规则。勾选后，该路径会被归类为“辅助变化”；未勾选的路径默认按“重点变化”处理。</p>
             <div class="summary-section">
               <div class="summary-head">
                 <strong>当前规则</strong>
@@ -2384,22 +2260,23 @@ async function renderSettings() {
               </div>
               <div class="muted">${escapeHtml(changePrioritySummary())}</div>
             </div>
-            <div class="list">${priorityCards || `<div class="card"><strong>还没有可配置路径</strong><p class="muted">先让节点产生一份检测结果，这里会自动出现可配置的分组和字段路径。</p></div>`}</div>
+            <div class="list">${priorityCards || `<div class="card"><strong>还没有可配置路径</strong><p class="muted">先让节点产生一份检测结果，这里才会出现分组和字段路径。</p></div>`}</div>
             <div class="toolbar">
               <button class="button ghost" type="button" id="change-priority-default-button">恢复默认规则</button>
               <button class="button" id="save-change-priority-button">保存变化规则</button>
             </div>
           </div>
+        </details>
 
+        <details class="panel details-panel">
+          <summary>管理员设置</summary>
           <div class="section">
-            <h2>管理员账号</h2>
-            <p class="muted">修改用户名或密码后，当前会话会立刻失效，需要重新登录。</p>
             <label>新用户名<input class="input" id="profile-username" value="${escapeHtml(state.me?.username ?? "admin")}" /></label>
             <label>新密码<input class="input" id="profile-password" type="password" placeholder="留空表示不修改密码" /></label>
             <button class="button" id="profile-save-button">保存并重新登录</button>
           </div>
-        </section>
-      </div>
+        </details>
+      </section>
     </div>
   `;
 
@@ -2453,6 +2330,10 @@ async function renderSettings() {
   });
 
   document.querySelector<HTMLButtonElement>("#copy-loader-button")?.addEventListener("click", async () => {
+    await copyText(loaderPreview.code);
+    alert("短 loader 版代码已复制。");
+  });
+  document.querySelector<HTMLButtonElement>("#copy-loader-inline-button")?.addEventListener("click", async () => {
     await copyText(loaderPreview.code);
     alert("短 loader 版代码已复制。");
   });

@@ -234,6 +234,8 @@ const detailRecentChangeCards = await page.locator('.change-card').count();
 const detailChangeEntryCount = await page.locator('[data-detail-change-entry="true"]').count();
 const detailPrimaryChangeLabelCount = await page.locator('.change-card strong', { hasText: '重点变化' }).count();
 const detailReportConfigCount = await page.locator('[data-node-report-config="true"]').count();
+const detailBackButtonCount = await page.locator('button[data-back="/nodes"]').count();
+const detailBodyBeforeReport = await page.locator('body').innerText();
 if (detailResultGroupCount === 0) {
   throw new Error('structured result groups not found on node detail page');
 }
@@ -248,6 +250,15 @@ if (detailPrimaryChangeLabelCount === 0) {
 }
 if (detailReportConfigCount === 0) {
   throw new Error('node report config section not found on detail page');
+}
+if (detailBackButtonCount === 0) {
+  throw new Error('back button not found on node detail page');
+}
+if (detailGroupTitles.includes('Meta')) {
+  throw new Error('Meta group should not be visible on node detail page');
+}
+if (detailBodyBeforeReport.includes('UUID') || detailBodyBeforeReport.includes('状态摘要')) {
+  throw new Error('node detail page still shows internal metadata labels');
 }
 
 const detailResponse = await jsonFetch(page, `/ipq/api/v1/nodes/${uuid}`);
@@ -274,10 +285,9 @@ await jsonFetch(page, `/ipq/api/v1/report/nodes/${uuid}`, {
 
 await page.reload();
 await page.waitForTimeout(1000);
-
-const reportedSummaryVisible = await page.locator('body').innerText();
-if (!reportedSummaryVisible.includes('Playwright reporter update')) {
-  throw new Error('reported update summary not visible on detail page');
+const detailRecentChangeCountAfterReport = await page.locator('[data-detail-change]').count();
+if (detailRecentChangeCountAfterReport === 0) {
+  throw new Error('recent change section missing after reporter update');
 }
 
 const detailAfterReportResponse = await jsonFetch(page, `/ipq/api/v1/nodes/${uuid}`);
@@ -295,6 +305,9 @@ const embedGroupTitles = await page.locator('.result-group h3').allInnerTexts();
 if (embedResultGroupCount === 0) {
   throw new Error('structured result groups not found on embed page');
 }
+if (embedGroupTitles.includes('Meta')) {
+  throw new Error('Meta group should not be visible on embed page');
+}
 
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
@@ -305,14 +318,15 @@ const historyBody = await page.locator('body').innerText();
 const historyUrl = page.url();
 const historyCards = await page.locator('[data-history-record]').count();
 const historyStructuredCount = await page.locator('[data-history-structured="true"]').count();
-const historyOverviewCount = await page.locator('[data-history-compare="overview"]').count();
 const historyChangeEntryCount = await page.locator('[data-history-change-entry="true"]').count();
 const historyPrimaryChangeLabelCount = await page.locator('[data-history-change-list="true"] strong', { hasText: '重点变化' }).count();
 const changedBadgeCount = await page.locator('.diff-badge.changed').count();
 const addedBadgeCount = await page.locator('.diff-badge.added').count();
 const unchangedBadgeCount = await page.locator('.diff-badge.unchanged').count();
 const codeBlocks = await page.locator('.code-block').count();
-if (historyStructuredCount === 0 || historyOverviewCount === 0) {
+const historyBackButtonCount = await page.locator(`button[data-back="/nodes/${uuid}"]`).count();
+const historyMetaTitleCount = await page.locator('[data-history-structured="true"] h3', { hasText: 'Meta' }).count();
+if (historyStructuredCount === 0) {
   throw new Error('structured history comparison not found');
 }
 if (historyChangeEntryCount === 0) {
@@ -321,8 +335,11 @@ if (historyChangeEntryCount === 0) {
 if (historyPrimaryChangeLabelCount === 0) {
   throw new Error('primary change sections not found on history page');
 }
-if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 0) {
-  throw new Error('history comparison badges missing expected statuses');
+if (historyBackButtonCount === 0) {
+  throw new Error('back button not found on history page');
+}
+if (historyMetaTitleCount > 0 || historyBody.includes('UUID')) {
+  throw new Error('history page still shows hidden metadata');
 }
 
 await page.goto(`/ipq/#/nodes/${uuid}/changes`);
@@ -334,14 +351,8 @@ const changeViewCount = await page.locator('[data-change-view="true"]').count();
 const changeViewOverviewCount = await page.locator('[data-change-view-overview="true"]').count();
 const changeViewListCount = await page.locator('[data-change-view-list="true"]').count();
 const changeViewEntryCount = await page.locator('[data-change-view-entry="true"]').count();
-const changeTrendCount = await page.locator('[data-change-trend="true"]').count();
-const changeTrendOverviewCount = await page.locator('[data-change-trend-overview="true"]').count();
-const changeTrendGroupCount = await page.locator('[data-change-trend-group="true"]').count();
-const changeTrendFieldCount = await page.locator('[data-change-trend-field="true"]').count();
-const changeTrendGroupTexts = await page.locator('[data-change-trend-group="true"]').allInnerTexts();
-const changeTrendFieldTexts = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
-const changeTrendLimitGroupText = await page.locator('[data-change-trend-limit-group="true"]').innerText();
-const changeTrendLimitFieldText = await page.locator('[data-change-trend-limit-field="true"]').innerText();
+const changeViewBackButtonCount = await page.locator(`button[data-back="/nodes/${uuid}"]`).count();
+const changeViewBodyBeforeRules = await page.locator('body').innerText();
 const changeViewRecordCountBeforeFilter = await page.locator('[data-change-record]').count();
 if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCount === 0) {
   throw new Error('change view page not rendered');
@@ -349,74 +360,24 @@ if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCoun
 if (changeViewEntryCount === 0) {
   throw new Error('change view entries not found');
 }
-if (changeTrendCount === 0 || changeTrendOverviewCount === 0) {
-  throw new Error('change trend section not rendered');
+if (changeViewBackButtonCount === 0) {
+  throw new Error('back button not found on change view page');
 }
-if (changeTrendGroupCount === 0 || changeTrendFieldCount === 0) {
-  throw new Error('change trend cards not found');
+if (changeViewBodyBeforeRules.includes('UUID') || changeViewBodyBeforeRules.includes('变化趋势')) {
+  throw new Error('change view still shows metadata or trend clutter');
 }
-if (!changeTrendLimitGroupText.includes('仅展示前 3 项')) {
-  throw new Error('change trend group limit hint not visible');
-}
-if (!changeTrendLimitFieldText.includes('仅展示前 6 项')) {
-  throw new Error('change trend field limit hint not visible');
-}
-await page.locator('#change-trend-scope').selectOption('primary');
-await page.waitForTimeout(300);
-const changeTrendGroupTextsAfterPrimaryScope = await page.locator('[data-change-trend-group="true"]').allInnerTexts();
-const changeTrendFieldTextsAfterPrimaryScope = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
-if (JSON.stringify(changeTrendGroupTextsAfterPrimaryScope) === JSON.stringify(changeTrendGroupTexts)) {
-  throw new Error('change trend scope switch did not change group cards');
-}
-if (JSON.stringify(changeTrendFieldTextsAfterPrimaryScope) === JSON.stringify(changeTrendFieldTexts)) {
-  throw new Error('change trend scope switch did not change field cards');
-}
-if (changeTrendGroupTextsAfterPrimaryScope.some((text) => text.includes('Meta'))) {
-  throw new Error('primary-only trend scope still shows Meta group');
-}
-if (changeTrendFieldTextsAfterPrimaryScope.some((text) => text.includes('Meta'))) {
-  throw new Error('primary-only trend scope still shows Meta fields');
-}
-await page.locator('#change-trend-scope').selectOption('filtered');
-await page.waitForTimeout(300);
 await page.locator('#change-filter-changed-only').check();
 await page.waitForTimeout(300);
 const changeViewRecordCountAfterChangedOnly = await page.locator('[data-change-record]').count();
 if (changeViewRecordCountAfterChangedOnly >= changeViewRecordCountBeforeFilter) {
   throw new Error('changed-only filter did not reduce visible change records');
 }
-await page.locator('#change-filter-group').selectOption('Meta');
+await page.locator('#change-filter-group').selectOption('Score');
 await page.waitForTimeout(300);
-const changeViewPrimaryCountAfterMetaFilter = await page.locator('[data-change-view-entry="true"]').count();
-const changeViewSecondaryCountAfterMetaFilter = await page.locator('[data-change-view-entry-secondary="true"]').count();
-const changeTrendGroupCountAfterMetaFilter = await page.locator('[data-change-trend-group="true"]').count();
-const changeTrendFieldTextAfterMetaFilter = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
-if (changeViewSecondaryCountAfterMetaFilter === 0) {
-  throw new Error('meta filter did not show secondary change entries');
+const changeViewEntryCountAfterScoreFilter = await page.locator('[data-change-view-entry="true"]').count();
+if (changeViewEntryCountAfterScoreFilter === 0) {
+  throw new Error('score filter did not keep visible change entries');
 }
-if (changeViewPrimaryCountAfterMetaFilter !== 0) {
-  throw new Error('meta filter still shows primary change entries');
-}
-if (changeTrendGroupCountAfterMetaFilter !== 1) {
-  throw new Error('meta filter did not narrow change trends to a single group');
-}
-if (
-  changeTrendFieldTextAfterMetaFilter.length === 0 ||
-  changeTrendFieldTextAfterMetaFilter.some((text) => !text.includes('Meta'))
-) {
-  throw new Error('meta filter did not narrow change field trends to Meta paths');
-}
-await page.locator('#change-filter-primary-only').check();
-await page.waitForTimeout(300);
-const changeViewEmptyCountAfterPrimaryMeta = await page.locator('[data-change-view-empty="true"]').count();
-const changeTrendEmptyCountAfterPrimaryMeta = await page.locator('[data-change-trend-empty="true"]').count();
-if (changeViewEmptyCountAfterPrimaryMeta === 0) {
-  throw new Error('primary-only meta filter did not show empty state');
-}
-if (changeTrendEmptyCountAfterPrimaryMeta === 0) {
-  throw new Error('primary-only meta filter did not empty the change trend section');
-}
-await page.locator('#change-filter-primary-only').uncheck();
 await page.locator('#change-filter-group').selectOption('all');
 await page.locator('#change-filter-changed-only').uncheck();
 await page.waitForTimeout(300);
@@ -429,6 +390,12 @@ page.on('dialog', async (dialog) => {
 await page.goto('/ipq/#/settings');
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
+const settingsBody = await page.locator('body').innerText();
+const advancedDisplaySummary = page.locator('summary', { hasText: '高级展示配置' }).first();
+if ((await advancedDisplaySummary.count()) > 0) {
+  await advancedDisplaySummary.click();
+  await page.waitForTimeout(200);
+}
 const fieldGroupCount = await page.locator('.field-group').count();
 const changePriorityGroupToggleCount = await page.locator('[data-change-priority-group-toggle]').count();
 const mediaUncheckButton = page.locator('[data-field-group-toggle="Media"][data-field-group-mode="uncheck"]').first();
@@ -460,7 +427,7 @@ await page.goto(`/ipq/#/nodes/${uuid}`);
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(800);
 const detailMediaVisibleAfterHide = await page.locator('.result-group h3', { hasText: 'Media' }).count();
-const detailPrioritySummary = await page.locator('body').innerText();
+const detailBodyAfterRules = await page.locator('body').innerText();
 const detailScoreChangeCard = page.locator('[data-detail-change="overview"] .change-card').filter({ hasText: 'Score' }).first();
 const detailScorePrimarySectionCount = await detailScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
 const detailScoreSecondarySectionCount = await detailScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
@@ -480,7 +447,7 @@ await page.waitForLoadState('networkidle');
 await page.locator('[data-history-change-list="true"]').waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(300);
 const historyMediaVisibleAfterHide = await page.locator('[data-history-structured="true"] h3', { hasText: 'Media' }).count();
-const historyPrioritySummary = await page.locator('body').innerText();
+const historyBodyAfterRules = await page.locator('body').innerText();
 const historyScoreChangeCard = page.locator('[data-history-change-list="true"] .change-card').filter({ hasText: 'Score' }).first();
 const historyScorePrimarySectionCount = await historyScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
 const historyScoreSecondarySectionCount = await historyScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
@@ -499,7 +466,7 @@ await page.goto(`/ipq/#/nodes/${uuid}/changes`);
 await page.waitForLoadState('networkidle');
 await page.locator('[data-change-view="true"]').waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(300);
-const changeViewPrioritySummary = await page.locator('body').innerText();
+const changeViewBodyAfterRules = await page.locator('body').innerText();
 const changeViewScoreChangeCard = page.locator('[data-change-view-list="true"] .change-card').filter({ hasText: 'Score' }).first();
 const changeViewScorePrimarySectionCount = await changeViewScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
 const changeViewScoreSecondarySectionCount = await changeViewScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
@@ -513,26 +480,24 @@ const changeViewScoreSecondaryScamalyticsCount = await changeViewScoreChangeCard
   .filter({ hasText: '辅助变化' })
   .locator('.change-entry strong', { hasText: 'Scamalytics' })
   .count();
-await page.locator('#change-trend-scope').selectOption('primary');
-await page.waitForTimeout(300);
-const changeTrendFieldTextsAfterFieldRule = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
 if (fieldGroupCount === 0) {
   throw new Error('grouped field toggles not found on settings page');
 }
 if (changePriorityGroupToggleCount === 0) {
   throw new Error('grouped change priority toggles not found on settings page');
 }
+if (!settingsBody.includes('接入 Komari') || !settingsBody.includes('高级展示配置')) {
+  throw new Error('settings page does not emphasize Komari setup flow');
+}
 if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {
   throw new Error('hidden Media group still visible after saving field settings');
 }
-if (!detailPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
-  throw new Error('updated change priority summary not visible on detail page');
-}
-if (!historyPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
-  throw new Error('updated change priority summary not visible on history page');
-}
-if (!changeViewPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
-  throw new Error('updated change priority summary not visible on change view page');
+if (
+  detailBodyAfterRules.includes('UUID') ||
+  historyBodyAfterRules.includes('UUID') ||
+  changeViewBodyAfterRules.includes('UUID')
+) {
+  throw new Error('user-facing pages still expose internal metadata after redesign');
 }
 if (
   detailScorePrimarySectionCount === 0 ||
@@ -558,12 +523,6 @@ if (
 ) {
   throw new Error('change view did not apply field-level change priority split inside Score group');
 }
-if (changeTrendFieldTextsAfterFieldRule.some((text) => text.includes('Score.Scamalytics'))) {
-  throw new Error('primary-only trend still includes downgraded Score.Scamalytics field');
-}
-if (!changeTrendFieldTextsAfterFieldRule.some((text) => text.includes('Score.AbuseIPDB'))) {
-  throw new Error('primary-only trend lost Score.AbuseIPDB after field-level rule update');
-}
 
 writeFileSync(
   `${outputDir}/stage1-flows-summary.json`,
@@ -585,34 +544,22 @@ writeFileSync(
       historyUrl,
       historyCards,
       historyStructuredCount,
-      historyOverviewCount,
       historyChangeEntryCount,
       historyPrimaryChangeLabelCount,
+      historyBackButtonCount,
       changeViewCount,
       changeViewOverviewCount,
       changeViewListCount,
       changeViewEntryCount,
-      changeTrendCount,
-      changeTrendOverviewCount,
-      changeTrendGroupCount,
-      changeTrendFieldCount,
-      changeTrendLimitGroupText,
-      changeTrendLimitFieldText,
-      changeTrendGroupTexts,
-      changeTrendFieldTexts,
-      changeTrendGroupTextsAfterPrimaryScope,
-      changeTrendFieldTextsAfterPrimaryScope,
+      changeViewBackButtonCount,
       changeViewRecordCountBeforeFilter,
       changeViewRecordCountAfterChangedOnly,
-      changeViewPrimaryCountAfterMetaFilter,
-      changeViewSecondaryCountAfterMetaFilter,
-      changeTrendGroupCountAfterMetaFilter,
-      changeTrendEmptyCountAfterPrimaryMeta,
-      changeViewEmptyCountAfterPrimaryMeta,
+      changeViewEntryCountAfterScoreFilter,
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,
       fieldGroupCount,
+      detailBackButtonCount,
       listMediaVisibleAfterHide,
       detailMediaVisibleAfterHide,
       historyMediaVisibleAfterHide,
@@ -630,7 +577,6 @@ writeFileSync(
       changeViewScoreSecondarySectionCount,
       changeViewScorePrimaryAbuseCount,
       changeViewScoreSecondaryScamalyticsCount,
-      changeTrendFieldTextsAfterFieldRule,
       historyBodyPreview: historyBody.slice(0, 5000),
       copyButtonCount,
       dialogMessages
