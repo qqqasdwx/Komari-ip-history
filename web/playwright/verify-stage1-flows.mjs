@@ -334,12 +334,22 @@ const changeViewCount = await page.locator('[data-change-view="true"]').count();
 const changeViewOverviewCount = await page.locator('[data-change-view-overview="true"]').count();
 const changeViewListCount = await page.locator('[data-change-view-list="true"]').count();
 const changeViewEntryCount = await page.locator('[data-change-view-entry="true"]').count();
+const changeTrendCount = await page.locator('[data-change-trend="true"]').count();
+const changeTrendOverviewCount = await page.locator('[data-change-trend-overview="true"]').count();
+const changeTrendGroupCount = await page.locator('[data-change-trend-group="true"]').count();
+const changeTrendFieldCount = await page.locator('[data-change-trend-field="true"]').count();
 const changeViewRecordCountBeforeFilter = await page.locator('[data-change-record]').count();
 if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCount === 0) {
   throw new Error('change view page not rendered');
 }
 if (changeViewEntryCount === 0) {
   throw new Error('change view entries not found');
+}
+if (changeTrendCount === 0 || changeTrendOverviewCount === 0) {
+  throw new Error('change trend section not rendered');
+}
+if (changeTrendGroupCount === 0 || changeTrendFieldCount === 0) {
+  throw new Error('change trend cards not found');
 }
 await page.locator('#change-filter-changed-only').check();
 await page.waitForTimeout(300);
@@ -351,17 +361,32 @@ await page.locator('#change-filter-group').selectOption('Meta');
 await page.waitForTimeout(300);
 const changeViewPrimaryCountAfterMetaFilter = await page.locator('[data-change-view-entry="true"]').count();
 const changeViewSecondaryCountAfterMetaFilter = await page.locator('[data-change-view-entry-secondary="true"]').count();
+const changeTrendGroupCountAfterMetaFilter = await page.locator('[data-change-trend-group="true"]').count();
+const changeTrendFieldTextAfterMetaFilter = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
 if (changeViewSecondaryCountAfterMetaFilter === 0) {
   throw new Error('meta filter did not show secondary change entries');
 }
 if (changeViewPrimaryCountAfterMetaFilter !== 0) {
   throw new Error('meta filter still shows primary change entries');
 }
+if (changeTrendGroupCountAfterMetaFilter !== 1) {
+  throw new Error('meta filter did not narrow change trends to a single group');
+}
+if (
+  changeTrendFieldTextAfterMetaFilter.length === 0 ||
+  changeTrendFieldTextAfterMetaFilter.some((text) => !text.includes('Meta'))
+) {
+  throw new Error('meta filter did not narrow change field trends to Meta paths');
+}
 await page.locator('#change-filter-primary-only').check();
 await page.waitForTimeout(300);
 const changeViewEmptyCountAfterPrimaryMeta = await page.locator('[data-change-view-empty="true"]').count();
+const changeTrendEmptyCountAfterPrimaryMeta = await page.locator('[data-change-trend-empty="true"]').count();
 if (changeViewEmptyCountAfterPrimaryMeta === 0) {
   throw new Error('primary-only meta filter did not show empty state');
+}
+if (changeTrendEmptyCountAfterPrimaryMeta === 0) {
+  throw new Error('primary-only meta filter did not empty the change trend section');
 }
 await page.locator('#change-filter-primary-only').uncheck();
 await page.locator('#change-filter-group').selectOption('all');
@@ -463,10 +488,16 @@ writeFileSync(
       changeViewOverviewCount,
       changeViewListCount,
       changeViewEntryCount,
+      changeTrendCount,
+      changeTrendOverviewCount,
+      changeTrendGroupCount,
+      changeTrendFieldCount,
       changeViewRecordCountBeforeFilter,
       changeViewRecordCountAfterChangedOnly,
       changeViewPrimaryCountAfterMetaFilter,
       changeViewSecondaryCountAfterMetaFilter,
+      changeTrendGroupCountAfterMetaFilter,
+      changeTrendEmptyCountAfterPrimaryMeta,
       changeViewEmptyCountAfterPrimaryMeta,
       changedBadgeCount,
       addedBadgeCount,

@@ -468,6 +468,24 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.change-trend-sections,
+.trend-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.change-trend-sections {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.trend-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.trend-card {
+  gap: 8px;
+}
+
 .change-entry {
   display: grid;
   gap: 10px;

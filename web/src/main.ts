@@ -621,6 +621,38 @@ type StructuredCompareGroup = {
   classifiedChanges: ClassifiedCompareChanges;
 };
 
+type ChangeViewRecordSummary = {
+  item: NodeHistoryItem;
+  baseline: NodeHistoryItem | null;
+  summary: {
+    stats: CompareStats;
+    groups: StructuredCompareGroup[];
+    overviewMarkup: string;
+    changeMarkup: string;
+  };
+  filteredGroups: StructuredCompareGroup[];
+  filteredStats: CompareStats;
+  hasMeaningfulChange: boolean;
+};
+
+type ChangeTrendItem = {
+  key: string;
+  label: string;
+  detail: string;
+  recordCount: number;
+  changeCount: number;
+  latestRecordedAt: string;
+};
+
+type ChangeViewTrend = {
+  comparedRecordCount: number;
+  changedRecordCount: number;
+  groupCount: number;
+  fieldCount: number;
+  groups: ChangeTrendItem[];
+  fields: ChangeTrendItem[];
+};
+
 function comparePathLabel(path: string) {
   const segments = path.split(".").filter(Boolean);
   if (segments.length === 0) {
@@ -1325,6 +1357,144 @@ function filterChangeGroups(groups: StructuredCompareGroup[]) {
     });
 }
 
+function upsertTrendItem(
+  bucket: Map<string, ChangeTrendItem>,
+  key: string,
+  next: Omit<ChangeTrendItem, "recordCount" | "changeCount" | "latestRecordedAt">,
+  recordedAt: string,
+  changeCount = 1
+) {
+  const current = bucket.get(key);
+  if (!current) {
+    bucket.set(key, {
+      ...next,
+      recordCount: 1,
+      changeCount,
+      latestRecordedAt: recordedAt
+    });
+    return;
+  }
+
+  current.recordCount += 1;
+  current.changeCount += changeCount;
+  if (new Date(recordedAt).getTime() > new Date(current.latestRecordedAt).getTime()) {
+    current.latestRecordedAt = recordedAt;
+  }
+}
+
+function sortTrendItems(items: ChangeTrendItem[]) {
+  return items.sort((left, right) => {
+    if (right.recordCount !== left.recordCount) {
+      return right.recordCount - left.recordCount;
+    }
+    if (right.changeCount !== left.changeCount) {
+      return right.changeCount - left.changeCount;
+    }
+    return left.label.localeCompare(right.label);
+  });
+}
+
+function buildChangeViewTrend(records: ChangeViewRecordSummary[]): ChangeViewTrend {
+  const groupBucket = new Map<string, ChangeTrendItem>();
+  const fieldBucket = new Map<string, ChangeTrendItem>();
+  let comparedRecordCount = 0;
+  let changedRecordCount = 0;
+
+  for (const record of records) {
+    if (!record.baseline) {
+      continue;
+    }
+
+    comparedRecordCount += 1;
+    if (record.hasMeaningfulChange) {
+      changedRecordCount += 1;
+    }
+
+    for (const group of record.filteredGroups) {
+      const groupChangeCount = group.stats.changed + group.stats.added;
+      if (groupChangeCount === 0) {
+        continue;
+      }
+
+      upsertTrendItem(
+        groupBucket,
+        group.key,
+        {
+          key: group.key,
+          label: group.title,
+          detail: group.chip
+        },
+        record.item.recorded_at,
+        groupChangeCount
+      );
+
+      const fieldSeen = new Set<string>();
+      for (const change of [...group.classifiedChanges.primary, ...group.classifiedChanges.secondary]) {
+        if (fieldSeen.has(change.fullPath)) {
+          continue;
+        }
+        fieldSeen.add(change.fullPath);
+        upsertTrendItem(
+          fieldBucket,
+          change.fullPath,
+          {
+            key: change.fullPath,
+            label: comparePathLabel(change.fullPath),
+            detail: change.fullPath
+          },
+          record.item.recorded_at
+        );
+      }
+    }
+  }
+
+  const groups = sortTrendItems(Array.from(groupBucket.values())).slice(0, 6);
+  const fields = sortTrendItems(Array.from(fieldBucket.values())).slice(0, 8);
+
+  return {
+    comparedRecordCount,
+    changedRecordCount,
+    groupCount: groupBucket.size,
+    fieldCount: fieldBucket.size,
+    groups,
+    fields
+  };
+}
+
+function renderChangeTrendItems(
+  items: ChangeTrendItem[],
+  options: {
+    dataAttr: string;
+    emptyText: string;
+  }
+) {
+  if (items.length === 0) {
+    return `<div class="muted">${escapeHtml(options.emptyText)}</div>`;
+  }
+
+  return `
+    <div class="trend-grid">
+      ${items
+        .map(
+          (item) => `
+            <div class="card trend-card" ${options.dataAttr}="true">
+              <div class="summary-head">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span class="chip">${item.recordCount} 次记录</span>
+              </div>
+              <div class="muted">${escapeHtml(item.detail)}</div>
+              <div class="compare-overview">
+                <span class="summary-pill summary-pill-compare changed"><strong>累计变化</strong><span>${item.changeCount}</span></span>
+                <span class="summary-pill"><strong>最近出现</strong><span>${escapeHtml(formatDateTime(item.latestRecordedAt))}</span></span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderNodeDetail(embed = false) {
   const detail = state.nodeDetail;
   if (!detail) {
@@ -1692,7 +1862,7 @@ function renderChangeViewPage() {
   const baseSelectedRecord = detail.history[resolvedIndex] ?? null;
   const basePreviousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
 
-  const recordSummaries = detail.history.map((item, index) => {
+  const recordSummaries: ChangeViewRecordSummary[] = detail.history.map((item, index) => {
     const baseline = detail.history[index + 1] ?? null;
     const summary = buildCompareRecordSummary(item, baseline);
     const filteredGroups = filterChangeGroups(summary.groups);
@@ -1714,6 +1884,7 @@ function renderChangeViewPage() {
     }
     return true;
   });
+  const trend = buildChangeViewTrend(visibleRecordSummaries);
 
   const selectedRecordSummary = baseSelectedRecord
     ? recordSummaries.find((record) => record.item.id === baseSelectedRecord.id) ?? null
@@ -1837,6 +2008,48 @@ function renderChangeViewPage() {
                 `<div class="card" data-change-view-empty="true"><strong>当前筛选下没有变化记录</strong><p class="muted">请调整筛选条件，或等待新的检测结果进入历史。</p></div>`
               }
             </div>
+          </div>
+
+          <div class="section" data-change-trend="true">
+            <div class="section-head">
+              <h2>变化趋势</h2>
+              <span class="chip">随当前筛选即时重算</span>
+            </div>
+            <div class="muted">趋势统计基于当前筛选后的变化记录列表，用来快速判断最近哪些分组和字段最常发生变化。</div>
+            ${
+              trend.groupCount > 0 || trend.fieldCount > 0
+                ? `
+                  <div class="compare-overview" data-change-trend-overview="true">
+                    <span class="summary-pill"><strong>可比较记录</strong><span>${trend.comparedRecordCount}</span></span>
+                    <span class="summary-pill summary-pill-compare changed"><strong>有变化记录</strong><span>${trend.changedRecordCount}</span></span>
+                    <span class="summary-pill"><strong>涉及分组</strong><span>${trend.groupCount}</span></span>
+                    <span class="summary-pill"><strong>涉及字段</strong><span>${trend.fieldCount}</span></span>
+                  </div>
+                  <div class="change-trend-sections">
+                    <div class="summary-section">
+                      <div class="summary-head">
+                        <strong>高频分组</strong>
+                        <span class="chip">Top ${trend.groups.length}</span>
+                      </div>
+                      ${renderChangeTrendItems(trend.groups, {
+                        dataAttr: "data-change-trend-group",
+                        emptyText: "当前筛选下还没有可统计的分组变化。"
+                      })}
+                    </div>
+                    <div class="summary-section">
+                      <div class="summary-head">
+                        <strong>高频字段</strong>
+                        <span class="chip">Top ${trend.fields.length}</span>
+                      </div>
+                      ${renderChangeTrendItems(trend.fields, {
+                        dataAttr: "data-change-trend-field",
+                        emptyText: "当前筛选下还没有可统计的字段变化。"
+                      })}
+                    </div>
+                  </div>
+                `
+                : `<div class="card change-card change-card-empty" data-change-trend-empty="true"><strong>当前筛选下没有可统计趋势</strong><div class="muted">请放宽筛选条件，或等待更多历史记录进入后再观察趋势。</div></div>`
+            }
           </div>
 
           <div class="section">
