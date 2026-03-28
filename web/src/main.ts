@@ -1249,6 +1249,32 @@ function renderRecentChangeSummary(detail: NodeDetail) {
   `;
 }
 
+function buildCompareRecordSummary(currentRecord: NodeHistoryItem, previousRecord?: NodeHistoryItem | null) {
+  if (!previousRecord) {
+    return {
+      stats: emptyCompareStats(),
+      groups: [] as StructuredCompareGroup[],
+      overviewMarkup: `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`,
+      changeMarkup: `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`
+    };
+  }
+
+  const currentResult = parseResultJSON(currentRecord.result_json);
+  const previousResult = parseResultJSON(previousRecord.result_json);
+  const groups = buildStructuredCompareGroups(currentResult, previousResult);
+  const stats = groups.reduce((summary, group) => mergeCompareStats(summary, group.stats), emptyCompareStats());
+
+  return {
+    stats,
+    groups,
+    overviewMarkup: renderCompareOverview(stats, "当前记录与上一条之间没有可对比字段。"),
+    changeMarkup: renderChangeGroupCards(groups, {
+      dataAttr: "data-change-view-entry",
+      emptyText: "当前记录相对上一条没有字段变化"
+    })
+  };
+}
+
 function renderNodeDetail(embed = false) {
   const detail = state.nodeDetail;
   if (!detail) {
@@ -1335,7 +1361,10 @@ function renderNodeDetail(embed = false) {
           <div class="section">
             <div class="section-head">
               <h2>最近变化</h2>
-              <button class="button ghost" id="detail-history-link">查看完整对比</button>
+              <div class="toolbar">
+                <button class="button ghost" id="detail-change-view-link">查看变化视图</button>
+                <button class="button ghost" id="detail-history-link">查看完整对比</button>
+              </div>
             </div>
             <p class="muted">这里展示最近一次历史记录相对上一条的变化摘要，完整差异请进入历史页查看。</p>
             ${recentChangeMarkup}
@@ -1403,6 +1432,9 @@ function renderNodeDetail(embed = false) {
   });
   document.querySelector<HTMLButtonElement>("#detail-history-link")?.addEventListener("click", () => {
     navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history`);
+  });
+  document.querySelector<HTMLButtonElement>("#detail-change-view-link")?.addEventListener("click", () => {
+    navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/changes`);
   });
   document.querySelector<HTMLButtonElement>("#copy-report-endpoint-button")?.addEventListener("click", async () => {
     await copyText(reportEndpointURL);
@@ -1511,6 +1543,7 @@ function renderHistoryPage() {
             <div class="section-head">
               <h2>节点信息</h2>
               <div class="toolbar">
+                <button class="button ghost" id="open-change-view-button">查看变化视图</button>
                 <button class="button ghost" id="back-to-node-button">返回节点详情</button>
               </div>
             </div>
@@ -1577,6 +1610,10 @@ function renderHistoryPage() {
   `;
 
   bindShellEvents();
+  document.querySelector<HTMLButtonElement>("#open-change-view-button")?.addEventListener("click", () => {
+    const recordQuery = selectedRecord ? `?record=${encodeURIComponent(String(selectedRecord.id))}` : "";
+    navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/changes${recordQuery}`);
+  });
   document.querySelector<HTMLButtonElement>("#back-to-node-button")?.addEventListener("click", () => {
     navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}`);
   });
@@ -1587,6 +1624,158 @@ function renderHistoryPage() {
         return;
       }
       navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history?record=${encodeURIComponent(recordID)}`);
+    });
+  });
+}
+
+function renderChangeViewPage() {
+  const detail = state.nodeDetail;
+  if (!detail) {
+    app.innerHTML = "<div class='shell'><div class='panel'>节点不存在。</div></div>";
+    return;
+  }
+
+  const route = currentRoute();
+  const selectedID = Number(route.query.get("record") ?? "");
+  const selectedIndex = detail.history.findIndex((item) => item.id === selectedID);
+  const resolvedIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  const selectedRecord = detail.history[resolvedIndex] ?? null;
+  const previousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
+
+  const compareSummary = selectedRecord
+    ? buildCompareRecordSummary(selectedRecord, previousRecord)
+    : {
+        stats: emptyCompareStats(),
+        groups: [] as StructuredCompareGroup[],
+        overviewMarkup: `<div class="muted">当前还没有历史记录，暂时无法查看变化。</div>`,
+        changeMarkup: `<div class="muted">当前还没有历史记录，暂时无法查看变化。</div>`
+      };
+
+  const changeRecords = detail.history
+    .map((item, index) => {
+      const baseline = detail.history[index + 1] ?? null;
+      const summary = buildCompareRecordSummary(item, baseline);
+      const active = selectedRecord?.id === item.id;
+      const hasMeaningfulChange = summary.stats.changed > 0 || summary.stats.added > 0;
+      const statusText = baseline
+        ? hasMeaningfulChange
+          ? `变化 ${summary.stats.changed} 项 / 新增 ${summary.stats.added} 项`
+          : "无重点变化"
+        : "首条记录，无上一条可比较";
+
+      return `
+        <button class="card history-card ${active ? "active" : ""}" data-change-record="${item.id}">
+          <div class="section-head">
+            <strong>${escapeHtml(item.summary || "无摘要")}</strong>
+            <span class="chip">${formatDateTime(item.recorded_at)}</span>
+          </div>
+          <div class="muted">${escapeHtml(statusText)}</div>
+          <div class="compare-overview">
+            <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${summary.stats.changed}</span></span>
+            <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${summary.stats.added}</span></span>
+          </div>
+        </button>
+      `;
+    })
+    .join("");
+
+  app.innerHTML = `
+    <div class="shell">
+      <div class="hero">
+        <div class="chip-row">
+          <span class="chip">变化视图</span>
+          <span class="chip">只看变化</span>
+          <span class="chip">字段级明细</span>
+        </div>
+        <h1>${escapeHtml(detail.name)} 的变化</h1>
+        <p>此视图只聚焦“发生了什么变化”，默认弱化完整结果展示，便于快速判断最近一次或某次上报是否值得关注。</p>
+      </div>
+      <div class="layout">
+        ${sidebar("nodes")}
+        <section class="panel" data-change-view="true">
+          <div class="section">
+            <div class="section-head">
+              <h2>节点信息</h2>
+              <div class="toolbar">
+                <button class="button ghost" id="change-view-history-button">查看历史页</button>
+                <button class="button ghost" id="change-view-node-button">返回节点详情</button>
+              </div>
+            </div>
+            <div class="kv">
+              <div class="kv-row"><strong>节点名称</strong><span>${escapeHtml(detail.name)}</span></div>
+              <div class="kv-row"><strong>UUID</strong><span title="${escapeHtml(detail.komari_node_uuid)}">${escapeHtml(truncate(detail.komari_node_uuid))}</span></div>
+              <div class="kv-row"><strong>当前摘要</strong><span>${escapeHtml(detail.current_summary || "N/A")}</span></div>
+              <div class="kv-row"><strong>历史条数</strong><span>${detail.history.length}</span></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head">
+              <h2>变化记录</h2>
+              <span class="chip">时间倒序</span>
+            </div>
+            <div class="list">
+              ${changeRecords || `<div class="card"><strong>暂无变化记录</strong><p class="muted">节点还没有历史记录，暂时无法进入变化视图。</p></div>`}
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head">
+              <h2>本次变化</h2>
+              ${selectedRecord ? `<span class="chip">记录时间: ${formatDateTime(selectedRecord.recorded_at)}</span>` : ""}
+            </div>
+            <div class="history-compare-meta">
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>当前记录</strong>
+                  <span class="chip">${selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
+                </div>
+                <div class="muted">${escapeHtml(selectedRecord?.summary || "无摘要")}</div>
+              </div>
+              <div class="summary-section">
+                <div class="summary-head">
+                  <strong>对比基准</strong>
+                  <span class="chip">${previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
+                </div>
+                <div class="muted">${escapeHtml(previousRecord?.summary || "没有更早记录")}</div>
+              </div>
+            </div>
+            <div class="summary-section" data-change-view-overview="true">
+              <div class="summary-head">
+                <strong>变化摘要</strong>
+                <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
+              </div>
+              ${compareSummary.overviewMarkup}
+            </div>
+            <div class="summary-section" data-change-view-list="true">
+              <div class="summary-head">
+                <strong>变化明细</strong>
+                <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
+              </div>
+              <div class="muted">${escapeHtml(changePrioritySummary())}</div>
+              ${compareSummary.changeMarkup}
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  `;
+
+  bindShellEvents();
+  document.querySelector<HTMLButtonElement>("#change-view-history-button")?.addEventListener("click", () => {
+    const recordQuery = selectedRecord ? `?record=${encodeURIComponent(String(selectedRecord.id))}` : "";
+    navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/history${recordQuery}`);
+  });
+  document.querySelector<HTMLButtonElement>("#change-view-node-button")?.addEventListener("click", () => {
+    navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}`);
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-change-record]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const recordID = button.dataset.changeRecord;
+      if (!recordID) {
+        return;
+      }
+      navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}/changes?record=${encodeURIComponent(recordID)}`);
     });
   });
 }
@@ -1821,6 +2010,13 @@ async function boot() {
     const uuid = path.replace(/^\/nodes\/([^/]+)\/history$/, "$1");
     await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
     renderHistoryPage();
+    return;
+  }
+
+  if (/^\/nodes\/[^/]+\/changes$/.test(path)) {
+    const uuid = path.replace(/^\/nodes\/([^/]+)\/changes$/, "$1");
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
+    renderChangeViewPage();
     return;
   }
 

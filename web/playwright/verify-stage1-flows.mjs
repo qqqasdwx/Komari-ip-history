@@ -182,6 +182,10 @@ await jsonFetch(page, '/ipq/api/v1/admin/display-fields', {
   method: 'PUT',
   body: JSON.stringify({ hidden_paths: [] })
 });
+await jsonFetch(page, '/ipq/api/v1/admin/change-priority', {
+  method: 'PUT',
+  body: JSON.stringify({ secondary_paths: ['Meta'] })
+});
 
 const headerPreview = await jsonFetch(page, '/ipq/api/v1/admin/header-preview?variant=loader');
 const loaderCode = JSON.parse(headerPreview.text).code;
@@ -294,7 +298,8 @@ if (embedResultGroupCount === 0) {
 
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
-await page.waitForTimeout(1500);
+await page.locator('[data-history-change-list="true"]').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(300);
 
 const historyBody = await page.locator('body').innerText();
 const historyUrl = page.url();
@@ -318,6 +323,22 @@ if (historyPrimaryChangeLabelCount === 0) {
 }
 if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 0) {
   throw new Error('history comparison badges missing expected statuses');
+}
+
+await page.goto(`/ipq/#/nodes/${uuid}/changes`);
+await page.waitForLoadState('networkidle');
+await page.locator('[data-change-view="true"]').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(300);
+
+const changeViewCount = await page.locator('[data-change-view="true"]').count();
+const changeViewOverviewCount = await page.locator('[data-change-view-overview="true"]').count();
+const changeViewListCount = await page.locator('[data-change-view-list="true"]').count();
+const changeViewEntryCount = await page.locator('[data-change-view-entry="true"]').count();
+if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCount === 0) {
+  throw new Error('change view page not rendered');
+}
+if (changeViewEntryCount === 0) {
+  throw new Error('change view entries not found');
 }
 
 const dialogMessages = [];
@@ -362,9 +383,16 @@ const detailPrioritySummary = await page.locator('body').innerText();
 
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
-await page.waitForTimeout(800);
+await page.locator('[data-history-change-list="true"]').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(300);
 const historyMediaVisibleAfterHide = await page.locator('[data-history-structured="true"] h3', { hasText: 'Media' }).count();
 const historyPrioritySummary = await page.locator('body').innerText();
+
+await page.goto(`/ipq/#/nodes/${uuid}/changes`);
+await page.waitForLoadState('networkidle');
+await page.locator('[data-change-view="true"]').waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(300);
+const changeViewPrioritySummary = await page.locator('body').innerText();
 if (fieldGroupCount === 0) {
   throw new Error('grouped field toggles not found on settings page');
 }
@@ -376,6 +404,9 @@ if (!detailPrioritySummary.includes('当前辅助变化: Meta、Score')) {
 }
 if (!historyPrioritySummary.includes('当前辅助变化: Meta、Score')) {
   throw new Error('updated change priority summary not visible on history page');
+}
+if (!changeViewPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+  throw new Error('updated change priority summary not visible on change view page');
 }
 
 writeFileSync(
@@ -401,6 +432,10 @@ writeFileSync(
       historyOverviewCount,
       historyChangeEntryCount,
       historyPrimaryChangeLabelCount,
+      changeViewCount,
+      changeViewOverviewCount,
+      changeViewListCount,
+      changeViewEntryCount,
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,
