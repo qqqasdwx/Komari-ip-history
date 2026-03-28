@@ -468,6 +468,10 @@ textarea {
   grid-template-columns: 1fr;
 }
 
+.change-trend-toolbar {
+  grid-template-columns: minmax(240px, 320px);
+}
+
 .change-trend-sections,
 .trend-grid {
   display: grid;

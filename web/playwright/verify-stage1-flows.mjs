@@ -338,6 +338,10 @@ const changeTrendCount = await page.locator('[data-change-trend="true"]').count(
 const changeTrendOverviewCount = await page.locator('[data-change-trend-overview="true"]').count();
 const changeTrendGroupCount = await page.locator('[data-change-trend-group="true"]').count();
 const changeTrendFieldCount = await page.locator('[data-change-trend-field="true"]').count();
+const changeTrendGroupTexts = await page.locator('[data-change-trend-group="true"]').allInnerTexts();
+const changeTrendFieldTexts = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
+const changeTrendLimitGroupText = await page.locator('[data-change-trend-limit-group="true"]').innerText();
+const changeTrendLimitFieldText = await page.locator('[data-change-trend-limit-field="true"]').innerText();
 const changeViewRecordCountBeforeFilter = await page.locator('[data-change-record]').count();
 if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCount === 0) {
   throw new Error('change view page not rendered');
@@ -351,6 +355,30 @@ if (changeTrendCount === 0 || changeTrendOverviewCount === 0) {
 if (changeTrendGroupCount === 0 || changeTrendFieldCount === 0) {
   throw new Error('change trend cards not found');
 }
+if (!changeTrendLimitGroupText.includes('仅展示前 3 项')) {
+  throw new Error('change trend group limit hint not visible');
+}
+if (!changeTrendLimitFieldText.includes('仅展示前 6 项')) {
+  throw new Error('change trend field limit hint not visible');
+}
+await page.locator('#change-trend-scope').selectOption('primary');
+await page.waitForTimeout(300);
+const changeTrendGroupTextsAfterPrimaryScope = await page.locator('[data-change-trend-group="true"]').allInnerTexts();
+const changeTrendFieldTextsAfterPrimaryScope = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
+if (JSON.stringify(changeTrendGroupTextsAfterPrimaryScope) === JSON.stringify(changeTrendGroupTexts)) {
+  throw new Error('change trend scope switch did not change group cards');
+}
+if (JSON.stringify(changeTrendFieldTextsAfterPrimaryScope) === JSON.stringify(changeTrendFieldTexts)) {
+  throw new Error('change trend scope switch did not change field cards');
+}
+if (changeTrendGroupTextsAfterPrimaryScope.some((text) => text.includes('Meta'))) {
+  throw new Error('primary-only trend scope still shows Meta group');
+}
+if (changeTrendFieldTextsAfterPrimaryScope.some((text) => text.includes('Meta'))) {
+  throw new Error('primary-only trend scope still shows Meta fields');
+}
+await page.locator('#change-trend-scope').selectOption('filtered');
+await page.waitForTimeout(300);
 await page.locator('#change-filter-changed-only').check();
 await page.waitForTimeout(300);
 const changeViewRecordCountAfterChangedOnly = await page.locator('[data-change-record]').count();
@@ -492,6 +520,12 @@ writeFileSync(
       changeTrendOverviewCount,
       changeTrendGroupCount,
       changeTrendFieldCount,
+      changeTrendLimitGroupText,
+      changeTrendLimitFieldText,
+      changeTrendGroupTexts,
+      changeTrendFieldTexts,
+      changeTrendGroupTextsAfterPrimaryScope,
+      changeTrendFieldTextsAfterPrimaryScope,
       changeViewRecordCountBeforeFilter,
       changeViewRecordCountAfterChangedOnly,
       changeViewPrimaryCountAfterMetaFilter,

@@ -58,6 +58,8 @@ type ChangePriorityConfig = {
   secondary_paths: string[];
 };
 
+type ChangeTrendScope = "filtered" | "primary";
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("missing app container");
@@ -77,6 +79,7 @@ const state = {
     changedOnly: false,
     group: "all"
   },
+  changeTrendScope: "filtered" as ChangeTrendScope,
   displayFieldPaths: [] as string[],
   route: window.location.hash || "#/login",
   search: ""
@@ -645,6 +648,7 @@ type ChangeTrendItem = {
 };
 
 type ChangeViewTrend = {
+  scope: ChangeTrendScope;
   comparedRecordCount: number;
   changedRecordCount: number;
   groupCount: number;
@@ -652,6 +656,9 @@ type ChangeViewTrend = {
   groups: ChangeTrendItem[];
   fields: ChangeTrendItem[];
 };
+
+const CHANGE_TREND_GROUP_LIMIT = 3;
+const CHANGE_TREND_FIELD_LIMIT = 6;
 
 function comparePathLabel(path: string) {
   const segments = path.split(".").filter(Boolean);
@@ -1394,7 +1401,42 @@ function sortTrendItems(items: ChangeTrendItem[]) {
   });
 }
 
-function buildChangeViewTrend(records: ChangeViewRecordSummary[]): ChangeViewTrend {
+function trendScopeLabel(scope: ChangeTrendScope) {
+  return scope === "primary" ? "只看重点变化趋势" : "当前筛选下全部趋势";
+}
+
+function trendLimitSummary(total: number, limit: number, noun: string) {
+  if (total > limit) {
+    return `当前共 ${total} 个${noun}，仅展示前 ${limit} 项。`;
+  }
+  return `当前共 ${total} 个${noun}，已全部展示。`;
+}
+
+function projectTrendGroups(groups: StructuredCompareGroup[], scope: ChangeTrendScope) {
+  return groups
+    .map((group) => {
+      const primaryChanges = group.classifiedChanges.primary;
+      const secondaryChanges = scope === "primary" ? [] : group.classifiedChanges.secondary;
+      const stats = {
+        changed: primaryChanges.filter((item) => item.status === "changed").length + secondaryChanges.filter((item) => item.status === "changed").length,
+        added: primaryChanges.filter((item) => item.status === "added").length + secondaryChanges.filter((item) => item.status === "added").length,
+        unchanged: 0
+      };
+
+      return {
+        ...group,
+        stats,
+        changes: [...primaryChanges, ...secondaryChanges],
+        classifiedChanges: {
+          primary: primaryChanges,
+          secondary: secondaryChanges
+        }
+      };
+    })
+    .filter((group) => group.stats.changed > 0 || group.stats.added > 0);
+}
+
+function buildChangeViewTrend(records: ChangeViewRecordSummary[], scope: ChangeTrendScope): ChangeViewTrend {
   const groupBucket = new Map<string, ChangeTrendItem>();
   const fieldBucket = new Map<string, ChangeTrendItem>();
   let comparedRecordCount = 0;
@@ -1406,11 +1448,12 @@ function buildChangeViewTrend(records: ChangeViewRecordSummary[]): ChangeViewTre
     }
 
     comparedRecordCount += 1;
-    if (record.hasMeaningfulChange) {
+    const trendGroups = projectTrendGroups(record.filteredGroups, scope);
+    if (trendGroups.length > 0) {
       changedRecordCount += 1;
     }
 
-    for (const group of record.filteredGroups) {
+    for (const group of trendGroups) {
       const groupChangeCount = group.stats.changed + group.stats.added;
       if (groupChangeCount === 0) {
         continue;
@@ -1448,10 +1491,11 @@ function buildChangeViewTrend(records: ChangeViewRecordSummary[]): ChangeViewTre
     }
   }
 
-  const groups = sortTrendItems(Array.from(groupBucket.values())).slice(0, 6);
-  const fields = sortTrendItems(Array.from(fieldBucket.values())).slice(0, 8);
+  const groups = sortTrendItems(Array.from(groupBucket.values())).slice(0, CHANGE_TREND_GROUP_LIMIT);
+  const fields = sortTrendItems(Array.from(fieldBucket.values())).slice(0, CHANGE_TREND_FIELD_LIMIT);
 
   return {
+    scope,
     comparedRecordCount,
     changedRecordCount,
     groupCount: groupBucket.size,
@@ -1884,7 +1928,7 @@ function renderChangeViewPage() {
     }
     return true;
   });
-  const trend = buildChangeViewTrend(visibleRecordSummaries);
+  const trend = buildChangeViewTrend(visibleRecordSummaries, state.changeTrendScope);
 
   const selectedRecordSummary = baseSelectedRecord
     ? recordSummaries.find((record) => record.item.id === baseSelectedRecord.id) ?? null
@@ -2016,21 +2060,33 @@ function renderChangeViewPage() {
               <span class="chip">随当前筛选即时重算</span>
             </div>
             <div class="muted">趋势统计基于当前筛选后的变化记录列表，用来快速判断最近哪些分组和字段最常发生变化。</div>
+            <div class="change-filter-bar change-trend-toolbar">
+              <label class="card change-filter change-filter-select">
+                <span>趋势口径</span>
+                <select class="input" id="change-trend-scope">
+                  <option value="filtered" ${state.changeTrendScope === "filtered" ? "selected" : ""}>当前筛选下全部趋势</option>
+                  <option value="primary" ${state.changeTrendScope === "primary" ? "selected" : ""}>只看重点变化趋势</option>
+                </select>
+              </label>
+            </div>
             ${
               trend.groupCount > 0 || trend.fieldCount > 0
                 ? `
                   <div class="compare-overview" data-change-trend-overview="true">
+                    <span class="summary-pill"><strong>趋势口径</strong><span>${escapeHtml(trendScopeLabel(trend.scope))}</span></span>
                     <span class="summary-pill"><strong>可比较记录</strong><span>${trend.comparedRecordCount}</span></span>
                     <span class="summary-pill summary-pill-compare changed"><strong>有变化记录</strong><span>${trend.changedRecordCount}</span></span>
                     <span class="summary-pill"><strong>涉及分组</strong><span>${trend.groupCount}</span></span>
                     <span class="summary-pill"><strong>涉及字段</strong><span>${trend.fieldCount}</span></span>
                   </div>
+                  <div class="muted" data-change-trend-sort="true">当前按“出现记录数 -> 累计变化次数 -> 名称”排序。</div>
                   <div class="change-trend-sections">
                     <div class="summary-section">
                       <div class="summary-head">
                         <strong>高频分组</strong>
-                        <span class="chip">Top ${trend.groups.length}</span>
+                        <span class="chip">Top ${Math.min(trend.groupCount, CHANGE_TREND_GROUP_LIMIT)}</span>
                       </div>
+                      <div class="muted" data-change-trend-limit-group="true">${escapeHtml(trendLimitSummary(trend.groupCount, CHANGE_TREND_GROUP_LIMIT, "分组"))}</div>
                       ${renderChangeTrendItems(trend.groups, {
                         dataAttr: "data-change-trend-group",
                         emptyText: "当前筛选下还没有可统计的分组变化。"
@@ -2039,8 +2095,9 @@ function renderChangeViewPage() {
                     <div class="summary-section">
                       <div class="summary-head">
                         <strong>高频字段</strong>
-                        <span class="chip">Top ${trend.fields.length}</span>
+                        <span class="chip">Top ${Math.min(trend.fieldCount, CHANGE_TREND_FIELD_LIMIT)}</span>
                       </div>
+                      <div class="muted" data-change-trend-limit-field="true">${escapeHtml(trendLimitSummary(trend.fieldCount, CHANGE_TREND_FIELD_LIMIT, "字段"))}</div>
                       ${renderChangeTrendItems(trend.fields, {
                         dataAttr: "data-change-trend-field",
                         emptyText: "当前筛选下还没有可统计的字段变化。"
@@ -2121,6 +2178,10 @@ function renderChangeViewPage() {
   });
   document.querySelector<HTMLSelectElement>("#change-filter-group")?.addEventListener("change", (event) => {
     state.changeViewFilters.group = (event.target as HTMLSelectElement).value;
+    renderChangeViewPage();
+  });
+  document.querySelector<HTMLSelectElement>("#change-trend-scope")?.addEventListener("change", (event) => {
+    state.changeTrendScope = (event.target as HTMLSelectElement).value as ChangeTrendScope;
     renderChangeViewPage();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-change-record]").forEach((button) => {
