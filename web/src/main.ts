@@ -1,4 +1,14 @@
 import "./style.css";
+import {
+  collectCompareLeafChanges,
+  compareValueStats,
+  compareValueStatus,
+  emptyCompareStats,
+  mergeCompareStats,
+  type CompareLeafChange,
+  type CompareStats,
+  type CompareStatus
+} from "./compare";
 
 type MeResponse = {
   logged_in: boolean;
@@ -40,14 +50,6 @@ type NodeDetail = {
 
 type DisplayFieldsConfig = {
   hidden_paths: string[];
-};
-
-type CompareStatus = "changed" | "added" | "unchanged";
-
-type CompareStats = {
-  changed: number;
-  added: number;
-  unchanged: number;
 };
 
 const app = document.querySelector<HTMLDivElement>("#app");
@@ -505,17 +507,6 @@ function getFilteredCurrentResult(result: Record<string, unknown>) {
   };
 }
 
-function emptyCompareStats(): CompareStats {
-  return { changed: 0, added: 0, unchanged: 0 };
-}
-
-function mergeCompareStats(target: CompareStats, next: CompareStats) {
-  target.changed += next.changed;
-  target.added += next.added;
-  target.unchanged += next.unchanged;
-  return target;
-}
-
 function parseResultJSON(raw: string) {
   try {
     const parsed = JSON.parse(raw);
@@ -523,52 +514,6 @@ function parseResultJSON(raw: string) {
   } catch {
     return {};
   }
-}
-
-function deepEqual(left: unknown, right: unknown): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (Array.isArray(left) && Array.isArray(right)) {
-    if (left.length !== right.length) {
-      return false;
-    }
-    return left.every((value, index) => deepEqual(value, right[index]));
-  }
-
-  if (isRecord(left) && isRecord(right)) {
-    const leftKeys = Object.keys(left);
-    const rightKeys = Object.keys(right);
-    if (leftKeys.length !== rightKeys.length) {
-      return false;
-    }
-    return leftKeys.every((key) => deepEqual(left[key], right[key]));
-  }
-
-  return false;
-}
-
-function compareValueStatus(current: unknown, previous: unknown): CompareStatus {
-  if (previous === undefined) {
-    return "added";
-  }
-  return deepEqual(current, previous) ? "unchanged" : "changed";
-}
-
-function compareValueStats(current: unknown, previous: unknown): CompareStats {
-  if (isRecord(current)) {
-    return Object.entries(current).reduce((stats, [key, value]) => {
-      const previousValue = isRecord(previous) ? previous[key] : undefined;
-      return mergeCompareStats(stats, compareValueStats(value, previousValue));
-    }, emptyCompareStats());
-  }
-
-  return {
-    changed: compareValueStatus(current, previous) === "changed" ? 1 : 0,
-    added: compareValueStatus(current, previous) === "added" ? 1 : 0,
-    unchanged: compareValueStatus(current, previous) === "unchanged" ? 1 : 0
-  };
 }
 
 function compareLabel(status: CompareStatus) {
@@ -598,6 +543,119 @@ function renderCompareOverview(stats: CompareStats, emptyText: string) {
       <span class="summary-pill summary-pill-compare unchanged"><strong>未变化</strong><span>${stats.unchanged}</span></span>
     </div>
   `;
+}
+
+type StructuredCompareGroup = {
+  key: string;
+  title: string;
+  chip: string;
+  current?: Record<string, unknown>;
+  previous?: Record<string, unknown>;
+  stats: CompareStats;
+  changes: CompareLeafChange[];
+};
+
+function comparePathLabel(path: string) {
+  const segments = path.split(".").filter(Boolean);
+  if (segments.length === 0) {
+    return "值";
+  }
+  return segments.map((segment) => titleize(segment)).join(" / ");
+}
+
+function renderCompareValueChip(label: string, value: unknown) {
+  return `
+    <span class="change-value-chip">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(formatDisplayValue(value))}</span>
+    </span>
+  `;
+}
+
+function renderCompareLeafChanges(
+  changes: CompareLeafChange[],
+  options: {
+    dataAttr: string;
+    emptyText: string;
+    limit?: number;
+  }
+) {
+  const visibleChanges = changes.filter((change) => change.status !== "unchanged");
+  if (visibleChanges.length === 0) {
+    return `<div class="muted">${escapeHtml(options.emptyText)}</div>`;
+  }
+
+  const limit = options.limit ?? visibleChanges.length;
+  const items = visibleChanges.slice(0, limit);
+  const hiddenCount = visibleChanges.length - items.length;
+
+  return `
+    <div class="change-list">
+      ${items
+        .map(
+          (change) => `
+            <div class="change-entry" ${options.dataAttr}="true">
+              <div class="change-entry-head">
+                <strong>${escapeHtml(comparePathLabel(change.path))}</strong>
+                ${renderCompareBadge(change.status)}
+              </div>
+              <div class="change-entry-values">
+                ${renderCompareValueChip("旧值", change.status === "added" ? "N/A" : change.previous)}
+                <span class="change-entry-arrow">→</span>
+                ${renderCompareValueChip("新值", change.current)}
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+      ${
+        hiddenCount > 0
+          ? `<div class="muted">还有 ${hiddenCount} 项变化未在此处展开，请进入历史页查看完整对比。</div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderChangeGroupCards(
+  groups: StructuredCompareGroup[],
+  options: {
+    dataAttr: string;
+    emptyText: string;
+    limitPerGroup?: number;
+  }
+) {
+  const changedGroups = groups.filter((group) => group.stats.changed > 0 || group.stats.added > 0);
+  if (changedGroups.length === 0) {
+    return `
+      <div class="card change-card change-card-empty">
+        <strong>${escapeHtml(options.emptyText)}</strong>
+        <div class="muted">当前记录与上一条在可见字段范围内一致。</div>
+      </div>
+    `;
+  }
+
+  return changedGroups
+    .map(
+      (group) => `
+        <div class="card change-card">
+          <div class="summary-head">
+            <strong>${escapeHtml(group.title)}</strong>
+            <span class="chip">${escapeHtml(group.chip)}</span>
+          </div>
+          <div class="compare-overview">
+            <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${group.stats.changed}</span></span>
+            <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${group.stats.added}</span></span>
+          </div>
+          ${renderCompareLeafChanges(group.changes, {
+            dataAttr: options.dataAttr,
+            emptyText: "该分组当前没有字段变化。",
+            limit: options.limitPerGroup
+          })}
+        </div>
+      `
+    )
+    .join("");
 }
 
 function renderComparedRecordRows(current: Record<string, unknown>, previous?: Record<string, unknown>) {
@@ -1025,7 +1083,7 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
   const structured = getFilteredCurrentResult(currentResult);
   const previousStructured = previousResult ? getFilteredCurrentResult(previousResult) : null;
   if (!structured) {
-    return [];
+    return [] as StructuredCompareGroup[];
   }
 
   return [
@@ -1038,7 +1096,8 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
     .filter((group) => !isEmptyRecord(group.current))
     .map((group) => ({
       ...group,
-      stats: compareValueStats(group.current, group.previous)
+      stats: compareValueStats(group.current, group.previous),
+      changes: collectCompareLeafChanges(group.current, group.previous)
     }));
 }
 
@@ -1075,7 +1134,6 @@ function renderRecentChangeSummary(detail: NodeDetail) {
   const previousResult = parseResultJSON(previousRecord.result_json);
   const groups = buildStructuredCompareGroups(latestResult, previousResult);
   const totalStats = groups.reduce((stats, group) => mergeCompareStats(stats, group.stats), emptyCompareStats());
-  const changedGroups = groups.filter((group) => group.stats.changed > 0 || group.stats.added > 0);
 
   return `
     <div class="summary-section" data-detail-change="overview">
@@ -1086,31 +1144,11 @@ function renderRecentChangeSummary(detail: NodeDetail) {
       <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
       ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
       <div class="change-summary-grid">
-        ${
-          changedGroups.length > 0
-            ? changedGroups
-                .map(
-                  (group) => `
-                    <div class="card change-card">
-                      <div class="summary-head">
-                        <strong>${escapeHtml(group.title)}</strong>
-                        <span class="chip">${escapeHtml(group.chip)}</span>
-                      </div>
-                      <div class="compare-overview">
-                        <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${group.stats.changed}</span></span>
-                        <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${group.stats.added}</span></span>
-                      </div>
-                    </div>
-                  `
-                )
-                .join("")
-            : `
-              <div class="card change-card change-card-empty">
-                <strong>最近一次没有字段变化</strong>
-                <div class="muted">当前记录与上一条在可见字段范围内一致。</div>
-              </div>
-            `
-        }
+        ${renderChangeGroupCards(groups, {
+          dataAttr: "data-detail-change-entry",
+          emptyText: "最近一次没有字段变化",
+          limitPerGroup: 3
+        })}
       </div>
     </div>
   `;
@@ -1323,16 +1361,26 @@ function renderHistoryPage() {
   const previousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
   const selectedResult = selectedRecord ? parseResultJSON(selectedRecord.result_json) : {};
   const previousResult = previousRecord ? parseResultJSON(previousRecord.result_json) : undefined;
+  const historyCompareGroups = previousRecord ? buildStructuredCompareGroups(selectedResult, previousResult) : [];
   const historyResult = renderHistoricalResult(selectedResult, previousResult);
   const compareSummary = previousRecord
     ? renderCompareOverview(historyResult.stats, "当前记录与上一条之间没有可对比字段。")
+    : `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`;
+  const historyChangeMarkup = previousRecord
+    ? renderChangeGroupCards(historyCompareGroups, {
+        dataAttr: "data-history-change-entry",
+        emptyText: "当前记录相对上一条没有字段变化"
+      })
     : `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`;
   const historyCards = detail.history
     .map((item, index) => {
       const active = selectedRecord?.id === item.id;
       const baseline = detail.history[index + 1] ?? null;
       const stats = baseline
-        ? compareValueStats(parseResultJSON(item.result_json), parseResultJSON(baseline.result_json))
+        ? buildStructuredCompareGroups(parseResultJSON(item.result_json), parseResultJSON(baseline.result_json)).reduce(
+            (summary, group) => mergeCompareStats(summary, group.stats),
+            emptyCompareStats()
+          )
         : emptyCompareStats();
       const deltaText = baseline
         ? `变化 ${stats.changed} 项 / 新增 ${stats.added} 项 / 未变化 ${stats.unchanged} 项`
@@ -1413,6 +1461,13 @@ function renderHistoryPage() {
                 <span class="chip">${previousRecord ? "相对上一条" : "无对比"}</span>
               </div>
               ${compareSummary}
+            </div>
+            <div class="summary-section" data-history-change-list="true">
+              <div class="summary-head">
+                <strong>变化明细</strong>
+                <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
+              </div>
+              ${historyChangeMarkup}
             </div>
             <div data-history-structured="true">${historyResult.markup}</div>
             <details class="raw-json">

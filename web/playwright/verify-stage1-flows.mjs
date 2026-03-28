@@ -227,12 +227,16 @@ const detailResultGroupCount = await page.locator('.result-group').count();
 const detailGroupTitles = await page.locator('.result-group h3').allInnerTexts();
 const detailRecentChangeCount = await page.locator('[data-detail-change="overview"]').count();
 const detailRecentChangeCards = await page.locator('.change-card').count();
+const detailChangeEntryCount = await page.locator('[data-detail-change-entry="true"]').count();
 const detailReportConfigCount = await page.locator('[data-node-report-config="true"]').count();
 if (detailResultGroupCount === 0) {
   throw new Error('structured result groups not found on node detail page');
 }
 if (detailRecentChangeCount === 0 || detailRecentChangeCards === 0) {
   throw new Error('recent change summary not found on node detail page');
+}
+if (detailChangeEntryCount === 0) {
+  throw new Error('recent change entries not found on node detail page');
 }
 if (detailReportConfigCount === 0) {
   throw new Error('node report config section not found on detail page');
@@ -293,12 +297,16 @@ const historyUrl = page.url();
 const historyCards = await page.locator('[data-history-record]').count();
 const historyStructuredCount = await page.locator('[data-history-structured="true"]').count();
 const historyOverviewCount = await page.locator('[data-history-compare="overview"]').count();
+const historyChangeEntryCount = await page.locator('[data-history-change-entry="true"]').count();
 const changedBadgeCount = await page.locator('.diff-badge.changed').count();
 const addedBadgeCount = await page.locator('.diff-badge.added').count();
 const unchangedBadgeCount = await page.locator('.diff-badge.unchanged').count();
 const codeBlocks = await page.locator('.code-block').count();
 if (historyStructuredCount === 0 || historyOverviewCount === 0) {
   throw new Error('structured history comparison not found');
+}
+if (historyChangeEntryCount === 0) {
+  throw new Error('history change entries not found');
 }
 if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 0) {
   throw new Error('history comparison badges missing expected statuses');
@@ -359,6 +367,7 @@ writeFileSync(
       detailGroupTitles,
       detailRecentChangeCount,
       detailRecentChangeCards,
+      detailChangeEntryCount,
       detailReportConfigCount,
       embedResultGroupCount,
       embedGroupTitles,
@@ -366,6 +375,7 @@ writeFileSync(
       historyCards,
       historyStructuredCount,
       historyOverviewCount,
+      historyChangeEntryCount,
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,
