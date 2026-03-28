@@ -220,10 +220,8 @@ function topbar(active: "nodes" | "settings") {
   return `
     <header class="topbar">
       <div class="topbar-brand">
-        <div>
-          <h2>Komari IP Quality</h2>
-          <p class="muted">查看当前 IP 质量和历史变化。</p>
-        </div>
+        <h2>Komari IP Quality</h2>
+        <span class="muted">| Komari Monitor</span>
         <div class="nav nav-inline">
           <button class="${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点</button>
           <button class="${active === "settings" ? "active" : ""}" data-nav="/settings">配置</button>
@@ -297,7 +295,7 @@ function renderNodes() {
       ${topbar("nodes")}
       ${pageHeader({
         title: "节点",
-        subtitle: "这里应该只用来决定先看哪个节点。点进节点后，只看当前 IP 质量和历史变化。",
+        subtitle: `${state.nodes.length} 个节点`,
         actions: `
           <input class="input search-input" id="node-search" placeholder="搜索节点名称" value="${escapeHtml(state.search)}" />
           <button class="button ghost" data-nav="/settings">复制 Header</button>
@@ -323,8 +321,11 @@ function renderNodes() {
   `;
 
   bindShellEvents();
-  document.querySelector<HTMLButtonElement>("#node-search-button")?.addEventListener("click", async () => {
-    state.search = document.querySelector<HTMLInputElement>("#node-search")?.value.trim() ?? "";
+  document.querySelector<HTMLInputElement>("#node-search")?.addEventListener("keydown", async (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    state.search = (event.target as HTMLInputElement).value.trim();
     await loadNodes();
     renderNodes();
   });
@@ -1950,8 +1951,8 @@ async function renderSettings() {
     <div class="shell app-shell">
       ${topbar("settings")}
       ${pageHeader({
-        title: "系统配置",
-        subtitle: "这里先只做一件事：把 Header 复制到 Komari，让节点页出现 IP 质量入口。"
+        title: "配置",
+        subtitle: "复制 Header 到 Komari"
       })}
       <section class="panel">
         <div class="section">

@@ -1,15 +1,15 @@
 :root {
-  --bg: #f4f5f7;
+  --bg: #f6f7fb;
   --paper: #ffffff;
-  --ink: #111827;
-  --muted: #6b7280;
-  --line: #d7dce3;
-  --accent: #2563eb;
-  --accent-soft: #dbeafe;
+  --ink: #23263a;
+  --muted: #8a8fa3;
+  --line: #e5e8f0;
+  --accent: #6c63ff;
+  --accent-soft: #eef0ff;
   --warn: #a16207;
   --danger: #b42318;
-  --radius: 12px;
-  --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --radius: 10px;
+  --shadow: 0 4px 14px rgba(31, 38, 135, 0.06);
   font-family: "Segoe UI", "Noto Sans SC", sans-serif;
 }
 
@@ -34,33 +34,34 @@ textarea {
 }
 
 .shell {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 32px 20px 48px;
+  padding: 14px 12px 28px;
 }
 
 .app-shell {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 
 .topbar {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
-  padding: 18px 20px;
-  background: rgba(255, 253, 247, 0.94);
-  border: 1px solid rgba(214, 208, 197, 0.85);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  padding: 0;
 }
 
-.topbar-brand,
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .topbar-actions,
 .page-head-main {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .topbar-brand h2,
@@ -68,30 +69,39 @@ textarea {
   margin: 0;
 }
 
+.topbar-brand h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
 .topbar-actions {
-  justify-items: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .nav-inline {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-left: 12px;
 }
 
 .page-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
+  margin-top: 2px;
 }
 
 .page-head h1 {
-  font-size: clamp(28px, 4vw, 42px);
-  line-height: 1.05;
+  font-size: clamp(18px, 3vw, 28px);
+  line-height: 1.15;
 }
 
 .back-link {
   font-weight: 600;
+  font-size: 13px;
 }
 
 .search-input {
@@ -125,10 +135,11 @@ textarea {
 
 .chip {
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.65);
-  padding: 8px 12px;
+  background: #fff;
+  padding: 5px 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .layout {
@@ -162,7 +173,7 @@ textarea {
 .nav {
   display: grid;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 0;
 }
 
 .nav button,
@@ -170,18 +181,20 @@ textarea {
 .inline-button {
   border: 0;
   cursor: pointer;
-  border-radius: 14px;
+  border-radius: 8px;
 }
 
 .nav button,
 .button {
-  padding: 12px 14px;
+  padding: 8px 12px;
+  font-size: 13px;
 }
 
 .nav button {
   text-align: left;
   color: var(--ink);
-  background: transparent;
+  background: #fff;
+  border: 1px solid transparent;
 }
 
 .nav button.active {
@@ -191,14 +204,14 @@ textarea {
 }
 
 .panel {
-  padding: 18px;
+  padding: 14px;
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .section {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .section-head {
@@ -211,7 +224,7 @@ textarea {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .input,
@@ -219,8 +232,8 @@ textarea {
   width: 100%;
   border: 1px solid var(--line);
   background: #fff;
-  border-radius: 14px;
-  padding: 12px 14px;
+  border-radius: 8px;
+  padding: 8px 10px;
 }
 
 .textarea {
@@ -251,14 +264,14 @@ textarea {
 
 .grid {
   display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .card {
-  padding: 16px;
+  padding: 12px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .muted {
@@ -269,11 +282,12 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: #fff;
   border: 1px solid var(--line);
   width: fit-content;
+  font-size: 12px;
 }
 
 .status.ok {
@@ -430,12 +444,12 @@ textarea {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  padding: 8px 10px;
+  padding: 5px 8px;
   border-radius: 999px;
-  background: rgba(15, 118, 110, 0.08);
+  background: #f5f7ff;
   color: var(--ink);
-  border: 1px solid rgba(15, 118, 110, 0.16);
-  font-size: 13px;
+  border: 1px solid #dde2ff;
+  font-size: 12px;
 }
 
 .summary-pill-compare.changed,
@@ -557,9 +571,9 @@ textarea {
 
 .change-entry {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
   background: #f8fafc;
   border: 1px solid var(--line);
 }
@@ -638,8 +652,8 @@ textarea {
 }
 
 .history-card.active {
-  border-color: rgba(15, 118, 110, 0.55);
-  background: linear-gradient(180deg, rgba(217, 243, 239, 0.9), rgba(255, 253, 247, 0.96));
+  border-color: #cfd5ff;
+  background: #f7f8ff;
 }
 
 .embed-shell {
