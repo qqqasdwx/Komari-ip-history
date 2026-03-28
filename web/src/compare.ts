@@ -13,6 +13,13 @@ export type CompareLeafChange = {
   current: unknown;
 };
 
+export type ComparePriority = "primary" | "secondary";
+
+export type ClassifiedCompareChanges = {
+  primary: CompareLeafChange[];
+  secondary: CompareLeafChange[];
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -95,4 +102,32 @@ export function collectCompareLeafChanges(
       current
     }
   ];
+}
+
+export function comparePathPriority(groupKey: string, path: string): ComparePriority {
+  const root = groupKey.trim();
+  if (root === "Meta") {
+    return "secondary";
+  }
+  if (root === "Score" || root === "Media" || root === "Mail") {
+    return "primary";
+  }
+  if (path === "") {
+    return "secondary";
+  }
+  return "primary";
+}
+
+export function classifyCompareLeafChanges(groupKey: string, changes: CompareLeafChange[]): ClassifiedCompareChanges {
+  return changes.reduce<ClassifiedCompareChanges>(
+    (result, change) => {
+      if (change.status === "unchanged") {
+        return result;
+      }
+      const priority = comparePathPriority(groupKey, change.path);
+      result[priority].push(change);
+      return result;
+    },
+    { primary: [], secondary: [] }
+  );
 }

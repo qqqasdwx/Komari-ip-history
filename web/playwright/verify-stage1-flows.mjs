@@ -228,6 +228,7 @@ const detailGroupTitles = await page.locator('.result-group h3').allInnerTexts()
 const detailRecentChangeCount = await page.locator('[data-detail-change="overview"]').count();
 const detailRecentChangeCards = await page.locator('.change-card').count();
 const detailChangeEntryCount = await page.locator('[data-detail-change-entry="true"]').count();
+const detailPrimaryChangeLabelCount = await page.locator('.change-card strong', { hasText: '重点变化' }).count();
 const detailReportConfigCount = await page.locator('[data-node-report-config="true"]').count();
 if (detailResultGroupCount === 0) {
   throw new Error('structured result groups not found on node detail page');
@@ -237,6 +238,9 @@ if (detailRecentChangeCount === 0 || detailRecentChangeCards === 0) {
 }
 if (detailChangeEntryCount === 0) {
   throw new Error('recent change entries not found on node detail page');
+}
+if (detailPrimaryChangeLabelCount === 0) {
+  throw new Error('primary change sections not found on node detail page');
 }
 if (detailReportConfigCount === 0) {
   throw new Error('node report config section not found on detail page');
@@ -298,6 +302,7 @@ const historyCards = await page.locator('[data-history-record]').count();
 const historyStructuredCount = await page.locator('[data-history-structured="true"]').count();
 const historyOverviewCount = await page.locator('[data-history-compare="overview"]').count();
 const historyChangeEntryCount = await page.locator('[data-history-change-entry="true"]').count();
+const historyPrimaryChangeLabelCount = await page.locator('[data-history-change-list="true"] strong', { hasText: '重点变化' }).count();
 const changedBadgeCount = await page.locator('.diff-badge.changed').count();
 const addedBadgeCount = await page.locator('.diff-badge.added').count();
 const unchangedBadgeCount = await page.locator('.diff-badge.unchanged').count();
@@ -307,6 +312,9 @@ if (historyStructuredCount === 0 || historyOverviewCount === 0) {
 }
 if (historyChangeEntryCount === 0) {
   throw new Error('history change entries not found');
+}
+if (historyPrimaryChangeLabelCount === 0) {
+  throw new Error('primary change sections not found on history page');
 }
 if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 0) {
   throw new Error('history comparison badges missing expected statuses');
@@ -368,6 +376,7 @@ writeFileSync(
       detailRecentChangeCount,
       detailRecentChangeCards,
       detailChangeEntryCount,
+      detailPrimaryChangeLabelCount,
       detailReportConfigCount,
       embedResultGroupCount,
       embedGroupTitles,
@@ -376,6 +385,7 @@ writeFileSync(
       historyStructuredCount,
       historyOverviewCount,
       historyChangeEntryCount,
+      historyPrimaryChangeLabelCount,
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,

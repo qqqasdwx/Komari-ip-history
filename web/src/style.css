@@ -438,6 +438,16 @@ textarea {
   align-content: center;
 }
 
+.change-section {
+  display: grid;
+  gap: 10px;
+}
+
+.change-section-secondary {
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+
 .change-list {
   display: grid;
   gap: 10px;

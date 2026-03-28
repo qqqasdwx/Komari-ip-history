@@ -1,10 +1,12 @@
 import "./style.css";
 import {
+  classifyCompareLeafChanges,
   collectCompareLeafChanges,
   compareValueStats,
   compareValueStatus,
   emptyCompareStats,
   mergeCompareStats,
+  type ClassifiedCompareChanges,
   type CompareLeafChange,
   type CompareStats,
   type CompareStatus
@@ -553,6 +555,7 @@ type StructuredCompareGroup = {
   previous?: Record<string, unknown>;
   stats: CompareStats;
   changes: CompareLeafChange[];
+  classifiedChanges: ClassifiedCompareChanges;
 };
 
 function comparePathLabel(path: string) {
@@ -647,11 +650,40 @@ function renderChangeGroupCards(
             <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${group.stats.changed}</span></span>
             <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${group.stats.added}</span></span>
           </div>
-          ${renderCompareLeafChanges(group.changes, {
-            dataAttr: options.dataAttr,
-            emptyText: "该分组当前没有字段变化。",
-            limit: options.limitPerGroup
-          })}
+          ${
+            group.classifiedChanges.primary.length > 0
+              ? `
+                <div class="change-section">
+                  <div class="summary-head">
+                    <strong>重点变化</strong>
+                    <span class="chip">${group.classifiedChanges.primary.length} 项</span>
+                  </div>
+                  ${renderCompareLeafChanges(group.classifiedChanges.primary, {
+                    dataAttr: options.dataAttr,
+                    emptyText: "当前没有重点变化。",
+                    limit: options.limitPerGroup
+                  })}
+                </div>
+              `
+              : ""
+          }
+          ${
+            group.classifiedChanges.secondary.length > 0
+              ? `
+                <div class="change-section change-section-secondary">
+                  <div class="summary-head">
+                    <strong>辅助变化</strong>
+                    <span class="chip">${group.classifiedChanges.secondary.length} 项</span>
+                  </div>
+                  ${renderCompareLeafChanges(group.classifiedChanges.secondary, {
+                    dataAttr: `${options.dataAttr}-secondary`,
+                    emptyText: "当前没有辅助变化。",
+                    limit: options.limitPerGroup
+                  })}
+                </div>
+              `
+              : ""
+          }
         </div>
       `
     )
@@ -1094,11 +1126,15 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
     { key: "Other", title: "其他字段", chip: "动态字段", current: structured.remainder, previous: previousStructured?.remainder }
   ]
     .filter((group) => !isEmptyRecord(group.current))
-    .map((group) => ({
-      ...group,
-      stats: compareValueStats(group.current, group.previous),
-      changes: collectCompareLeafChanges(group.current, group.previous)
-    }));
+    .map((group) => {
+      const changes = collectCompareLeafChanges(group.current, group.previous);
+      return {
+        ...group,
+        stats: compareValueStats(group.current, group.previous),
+        changes,
+        classifiedChanges: classifyCompareLeafChanges(group.key, changes)
+      };
+    });
 }
 
 function renderRecentChangeSummary(detail: NodeDetail) {
@@ -1143,6 +1179,7 @@ function renderRecentChangeSummary(detail: NodeDetail) {
       </div>
       <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
       ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
+      <div class="muted">默认将 Score、Media、Mail 和其他动态结果视为重点变化，Meta 视为辅助变化。</div>
       <div class="change-summary-grid">
         ${renderChangeGroupCards(groups, {
           dataAttr: "data-detail-change-entry",
@@ -1467,6 +1504,7 @@ function renderHistoryPage() {
                 <strong>变化明细</strong>
                 <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
               </div>
+              <div class="muted">默认将 Score、Media、Mail 和其他动态结果视为重点变化，Meta 视为辅助变化。</div>
               ${historyChangeMarkup}
             </div>
             <div data-history-structured="true">${historyResult.markup}</div>
