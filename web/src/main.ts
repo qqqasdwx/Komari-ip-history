@@ -54,6 +54,10 @@ type DisplayFieldsConfig = {
   hidden_paths: string[];
 };
 
+type ChangePriorityConfig = {
+  secondary_paths: string[];
+};
+
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("missing app container");
@@ -67,6 +71,7 @@ const state = {
   nodes: [] as NodeListItem[],
   nodeDetail: null as NodeDetail | null,
   displayFields: { hidden_paths: [] } as DisplayFieldsConfig,
+  changePriority: { secondary_paths: ["Meta"] } as ChangePriorityConfig,
   displayFieldPaths: [] as string[],
   route: window.location.hash || "#/login",
   search: ""
@@ -135,10 +140,21 @@ async function loadDisplayFieldPaths() {
   state.displayFieldPaths = response.items;
 }
 
+async function loadChangePriority() {
+  state.changePriority = await api<ChangePriorityConfig>("/admin/change-priority");
+}
+
 async function saveDisplayFields(hiddenPaths: string[]) {
   state.displayFields = await api<DisplayFieldsConfig>("/admin/display-fields", {
     method: "PUT",
     body: JSON.stringify({ hidden_paths: hiddenPaths })
+  });
+}
+
+async function saveChangePriority(secondaryPaths: string[]) {
+  state.changePriority = await api<ChangePriorityConfig>("/admin/change-priority", {
+    method: "PUT",
+    body: JSON.stringify({ secondary_paths: secondaryPaths })
   });
 }
 
@@ -416,6 +432,48 @@ function groupDisplayFieldPaths(paths: string[]) {
       paths: (grouped.get(group) ?? []).sort((left, right) => left.localeCompare(right))
     }))
     .filter((item) => item.paths.length > 0);
+}
+
+function changePriorityTargets(paths: string[], secondaryPaths: string[]) {
+  const preferred = ["Meta", "Score", "Media", "Mail"];
+  const roots = new Set<string>(preferred);
+
+  for (const path of paths) {
+    const root = path.split(".")[0]?.trim();
+    if (root) {
+      roots.add(root);
+    }
+  }
+
+  for (const path of secondaryPaths) {
+    const root = path.split(".")[0]?.trim();
+    if (root) {
+      roots.add(root);
+    }
+  }
+
+  return Array.from(roots).sort((left, right) => {
+    const leftIndex = preferred.indexOf(left);
+    const rightIndex = preferred.indexOf(right);
+    if (leftIndex >= 0 || rightIndex >= 0) {
+      if (leftIndex < 0) {
+        return 1;
+      }
+      if (rightIndex < 0) {
+        return -1;
+      }
+      return leftIndex - rightIndex;
+    }
+    return left.localeCompare(right);
+  });
+}
+
+function changePrioritySummary() {
+  const secondaryPaths = state.changePriority.secondary_paths;
+  if (secondaryPaths.length === 0) {
+    return "当前未设置辅助变化路径，所有分组默认作为重点变化。";
+  }
+  return `当前辅助变化: ${secondaryPaths.join("、")}；其余分组默认作为重点变化。`;
 }
 
 function formatDisplayValue(value: unknown) {
@@ -1127,12 +1185,12 @@ function buildStructuredCompareGroups(currentResult: Record<string, unknown>, pr
   ]
     .filter((group) => !isEmptyRecord(group.current))
     .map((group) => {
-      const changes = collectCompareLeafChanges(group.current, group.previous);
+      const changes = collectCompareLeafChanges(group.current, group.previous, "", group.key);
       return {
         ...group,
         stats: compareValueStats(group.current, group.previous),
         changes,
-        classifiedChanges: classifyCompareLeafChanges(group.key, changes)
+        classifiedChanges: classifyCompareLeafChanges(changes, state.changePriority.secondary_paths)
       };
     });
 }
@@ -1179,7 +1237,7 @@ function renderRecentChangeSummary(detail: NodeDetail) {
       </div>
       <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
       ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
-      <div class="muted">默认将 Score、Media、Mail 和其他动态结果视为重点变化，Meta 视为辅助变化。</div>
+      <div class="muted">${escapeHtml(changePrioritySummary())}</div>
       <div class="change-summary-grid">
         ${renderChangeGroupCards(groups, {
           dataAttr: "data-detail-change-entry",
@@ -1504,7 +1562,7 @@ function renderHistoryPage() {
                 <strong>变化明细</strong>
                 <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
               </div>
-              <div class="muted">默认将 Score、Media、Mail 和其他动态结果视为重点变化，Meta 视为辅助变化。</div>
+              <div class="muted">${escapeHtml(changePrioritySummary())}</div>
               ${historyChangeMarkup}
             </div>
             <div data-history-structured="true">${historyResult.markup}</div>
@@ -1542,6 +1600,8 @@ async function renderSettings() {
 
   const hidden = new Set(state.displayFields.hidden_paths);
   const fieldGroups = groupDisplayFieldPaths(state.displayFieldPaths);
+  const secondaryPaths = new Set(state.changePriority.secondary_paths);
+  const priorityTargets = changePriorityTargets(state.displayFieldPaths, state.changePriority.secondary_paths);
   const fieldCards = fieldGroups
     .map((group) => {
       const checkedCount = group.paths.filter((path) => !hidden.has(path)).length;
@@ -1576,6 +1636,20 @@ async function renderSettings() {
         </div>
       `;
     })
+    .join("");
+  const priorityCards = priorityTargets
+    .map(
+      (path) => `
+        <label class="card field-toggle">
+          <span>${escapeHtml(path)}</span>
+          <input
+            type="checkbox"
+            data-change-priority-path="${escapeHtml(path)}"
+            ${secondaryPaths.has(path) ? "checked" : ""}
+          />
+        </label>
+      `
+    )
     .join("");
 
   app.innerHTML = `
@@ -1632,6 +1706,23 @@ async function renderSettings() {
           </div>
 
           <div class="section">
+            <h2>变化优先级规则</h2>
+            <p class="muted">勾选后，该路径会被归类为“辅助变化”；未勾选的路径默认按“重点变化”处理。</p>
+            <div class="summary-section">
+              <div class="summary-head">
+                <strong>当前规则</strong>
+                <span class="chip">全局生效</span>
+              </div>
+              <div class="muted">${escapeHtml(changePrioritySummary())}</div>
+            </div>
+            <div class="list">${priorityCards || `<div class="card"><strong>还没有可配置分组</strong><p class="muted">先让节点产生一份检测结果，这里会自动出现可配置路径。</p></div>`}</div>
+            <div class="toolbar">
+              <button class="button ghost" type="button" id="change-priority-default-button">恢复默认规则</button>
+              <button class="button" id="save-change-priority-button">保存变化规则</button>
+            </div>
+          </div>
+
+          <div class="section">
             <h2>管理员账号</h2>
             <p class="muted">修改用户名或密码后，当前会话会立刻失效，需要重新登录。</p>
             <label>新用户名<input class="input" id="profile-username" value="${escapeHtml(state.me?.username ?? "admin")}" /></label>
@@ -1663,6 +1754,22 @@ async function renderSettings() {
       .filter(Boolean);
     await saveDisplayFields(hiddenPaths);
     alert("字段配置已保存。");
+  });
+
+  document.querySelector<HTMLButtonElement>("#change-priority-default-button")?.addEventListener("click", () => {
+    document.querySelectorAll<HTMLInputElement>("[data-change-priority-path]").forEach((input) => {
+      input.checked = input.dataset.changePriorityPath === "Meta";
+    });
+  });
+
+  document.querySelector<HTMLButtonElement>("#save-change-priority-button")?.addEventListener("click", async () => {
+    const secondaryPaths = Array.from(document.querySelectorAll<HTMLInputElement>("[data-change-priority-path]"))
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.changePriorityPath ?? "")
+      .filter(Boolean);
+    await saveChangePriority(secondaryPaths);
+    await renderSettings();
+    alert("变化规则已保存。");
   });
 
   document.querySelector<HTMLButtonElement>("#copy-loader-button")?.addEventListener("click", async () => {
@@ -1705,21 +1812,21 @@ async function boot() {
   const route = currentRoute();
   const path = route.path;
   if (path === "/settings") {
-    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths()]);
+    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths(), loadChangePriority()]);
     await renderSettings();
     return;
   }
 
   if (/^\/nodes\/[^/]+\/history$/.test(path)) {
     const uuid = path.replace(/^\/nodes\/([^/]+)\/history$/, "$1");
-    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields()]);
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
     renderHistoryPage();
     return;
   }
 
   if (path.startsWith("/nodes/")) {
     const uuid = path.replace("/nodes/", "");
-    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields()]);
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
     renderNodeDetail(route.query.get("embed") === "1");
     return;
   }

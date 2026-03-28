@@ -320,9 +320,9 @@ if (changedBadgeCount === 0 || addedBadgeCount === 0 || unchangedBadgeCount === 
   throw new Error('history comparison badges missing expected statuses');
 }
 
-let copyDialogMessage = '';
-page.once('dialog', async (dialog) => {
-  copyDialogMessage = dialog.message();
+const dialogMessages = [];
+page.on('dialog', async (dialog) => {
+  dialogMessages.push(dialog.message());
   await dialog.accept();
 });
 await page.goto('/ipq/#/settings');
@@ -335,6 +335,13 @@ if ((await mediaUncheckButton.count()) > 0) {
   await page.waitForTimeout(200);
 }
 await page.locator('#save-fields-button').click();
+await page.waitForTimeout(500);
+const scorePriorityToggle = page.locator('[data-change-priority-path="Score"]').first();
+if ((await scorePriorityToggle.count()) > 0) {
+  await scorePriorityToggle.check();
+  await page.waitForTimeout(200);
+}
+await page.locator('#save-change-priority-button').click();
 await page.waitForTimeout(500);
 const copyButtonCount = await page.locator('#copy-loader-button').count();
 if (copyButtonCount > 0) {
@@ -351,16 +358,24 @@ await page.goto(`/ipq/#/nodes/${uuid}`);
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(800);
 const detailMediaVisibleAfterHide = await page.locator('.result-group h3', { hasText: 'Media' }).count();
+const detailPrioritySummary = await page.locator('body').innerText();
 
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(800);
 const historyMediaVisibleAfterHide = await page.locator('[data-history-structured="true"] h3', { hasText: 'Media' }).count();
+const historyPrioritySummary = await page.locator('body').innerText();
 if (fieldGroupCount === 0) {
   throw new Error('grouped field toggles not found on settings page');
 }
 if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {
   throw new Error('hidden Media group still visible after saving field settings');
+}
+if (!detailPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+  throw new Error('updated change priority summary not visible on detail page');
+}
+if (!historyPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+  throw new Error('updated change priority summary not visible on history page');
 }
 
 writeFileSync(
@@ -396,7 +411,7 @@ writeFileSync(
       codeBlocks,
       historyBodyPreview: historyBody.slice(0, 5000),
       copyButtonCount,
-      copyDialogMessage
+      dialogMessages
     },
     null,
     2

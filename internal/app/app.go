@@ -50,6 +50,8 @@ func Run() error {
 			admin.GET("/display-fields", adminHandler.GetDisplayFields)
 			admin.GET("/display-fields/paths", adminHandler.ListDisplayFieldPaths)
 			admin.PUT("/display-fields", adminHandler.PutDisplayFields)
+			admin.GET("/change-priority", adminHandler.GetChangePriority)
+			admin.PUT("/change-priority", adminHandler.PutChangePriority)
 			admin.PUT("/profile", adminHandler.UpdateProfile)
 			admin.GET("/header-preview", adminHandler.HeaderPreview)
 		}

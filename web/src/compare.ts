@@ -8,6 +8,7 @@ export type CompareStats = {
 
 export type CompareLeafChange = {
   path: string;
+  fullPath: string;
   status: CompareStatus;
   previous: unknown;
   current: unknown;
@@ -84,19 +85,22 @@ export function compareValueStats(current: unknown, previous: unknown): CompareS
 export function collectCompareLeafChanges(
   current: unknown,
   previous: unknown,
-  prefix = ""
+  prefix = "",
+  fullPrefix = prefix
 ): CompareLeafChange[] {
   if (isRecord(current)) {
     return Object.entries(current).flatMap(([key, value]) => {
       const nextPath = prefix ? `${prefix}.${key}` : key;
+      const nextFullPath = fullPrefix ? `${fullPrefix}.${key}` : key;
       const previousValue = isRecord(previous) ? previous[key] : undefined;
-      return collectCompareLeafChanges(value, previousValue, nextPath);
+      return collectCompareLeafChanges(value, previousValue, nextPath, nextFullPath);
     });
   }
 
   return [
     {
       path: prefix,
+      fullPath: fullPrefix,
       status: compareValueStatus(current, previous),
       previous,
       current
@@ -104,27 +108,27 @@ export function collectCompareLeafChanges(
   ];
 }
 
-export function comparePathPriority(groupKey: string, path: string): ComparePriority {
-  const root = groupKey.trim();
-  if (root === "Meta") {
-    return "secondary";
-  }
-  if (root === "Score" || root === "Media" || root === "Mail") {
-    return "primary";
-  }
-  if (path === "") {
+function matchesSecondaryPath(fullPath: string, secondaryPath: string): boolean {
+  return fullPath === secondaryPath || fullPath.startsWith(`${secondaryPath}.`);
+}
+
+export function comparePathPriority(fullPath: string, secondaryPaths: string[]): ComparePriority {
+  if (secondaryPaths.some((secondaryPath) => matchesSecondaryPath(fullPath, secondaryPath))) {
     return "secondary";
   }
   return "primary";
 }
 
-export function classifyCompareLeafChanges(groupKey: string, changes: CompareLeafChange[]): ClassifiedCompareChanges {
+export function classifyCompareLeafChanges(
+  changes: CompareLeafChange[],
+  secondaryPaths: string[]
+): ClassifiedCompareChanges {
   return changes.reduce<ClassifiedCompareChanges>(
     (result, change) => {
       if (change.status === "unchanged") {
         return result;
       }
-      const priority = comparePathPriority(groupKey, change.path);
+      const priority = comparePathPriority(change.fullPath, secondaryPaths);
       result[priority].push(change);
       return result;
     },
