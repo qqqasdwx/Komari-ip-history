@@ -334,12 +334,39 @@ const changeViewCount = await page.locator('[data-change-view="true"]').count();
 const changeViewOverviewCount = await page.locator('[data-change-view-overview="true"]').count();
 const changeViewListCount = await page.locator('[data-change-view-list="true"]').count();
 const changeViewEntryCount = await page.locator('[data-change-view-entry="true"]').count();
+const changeViewRecordCountBeforeFilter = await page.locator('[data-change-record]').count();
 if (changeViewCount === 0 || changeViewOverviewCount === 0 || changeViewListCount === 0) {
   throw new Error('change view page not rendered');
 }
 if (changeViewEntryCount === 0) {
   throw new Error('change view entries not found');
 }
+await page.locator('#change-filter-changed-only').check();
+await page.waitForTimeout(300);
+const changeViewRecordCountAfterChangedOnly = await page.locator('[data-change-record]').count();
+if (changeViewRecordCountAfterChangedOnly >= changeViewRecordCountBeforeFilter) {
+  throw new Error('changed-only filter did not reduce visible change records');
+}
+await page.locator('#change-filter-group').selectOption('Meta');
+await page.waitForTimeout(300);
+const changeViewPrimaryCountAfterMetaFilter = await page.locator('[data-change-view-entry="true"]').count();
+const changeViewSecondaryCountAfterMetaFilter = await page.locator('[data-change-view-entry-secondary="true"]').count();
+if (changeViewSecondaryCountAfterMetaFilter === 0) {
+  throw new Error('meta filter did not show secondary change entries');
+}
+if (changeViewPrimaryCountAfterMetaFilter !== 0) {
+  throw new Error('meta filter still shows primary change entries');
+}
+await page.locator('#change-filter-primary-only').check();
+await page.waitForTimeout(300);
+const changeViewEmptyCountAfterPrimaryMeta = await page.locator('[data-change-view-empty="true"]').count();
+if (changeViewEmptyCountAfterPrimaryMeta === 0) {
+  throw new Error('primary-only meta filter did not show empty state');
+}
+await page.locator('#change-filter-primary-only').uncheck();
+await page.locator('#change-filter-group').selectOption('all');
+await page.locator('#change-filter-changed-only').uncheck();
+await page.waitForTimeout(300);
 
 const dialogMessages = [];
 page.on('dialog', async (dialog) => {
@@ -436,6 +463,11 @@ writeFileSync(
       changeViewOverviewCount,
       changeViewListCount,
       changeViewEntryCount,
+      changeViewRecordCountBeforeFilter,
+      changeViewRecordCountAfterChangedOnly,
+      changeViewPrimaryCountAfterMetaFilter,
+      changeViewSecondaryCountAfterMetaFilter,
+      changeViewEmptyCountAfterPrimaryMeta,
       changedBadgeCount,
       addedBadgeCount,
       unchangedBadgeCount,

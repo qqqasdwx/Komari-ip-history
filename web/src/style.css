@@ -453,6 +453,21 @@ textarea {
   gap: 10px;
 }
 
+.change-filter-bar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.change-filter {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.change-filter-select {
+  grid-template-columns: 1fr;
+}
+
 .change-entry {
   display: grid;
   gap: 10px;

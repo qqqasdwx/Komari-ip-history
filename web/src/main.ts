@@ -72,6 +72,11 @@ const state = {
   nodeDetail: null as NodeDetail | null,
   displayFields: { hidden_paths: [] } as DisplayFieldsConfig,
   changePriority: { secondary_paths: ["Meta"] } as ChangePriorityConfig,
+  changeViewFilters: {
+    primaryOnly: false,
+    changedOnly: false,
+    group: "all"
+  },
   displayFieldPaths: [] as string[],
   route: window.location.hash || "#/login",
   search: ""
@@ -1275,6 +1280,51 @@ function buildCompareRecordSummary(currentRecord: NodeHistoryItem, previousRecor
   };
 }
 
+function changeViewGroupOptions(groups: StructuredCompareGroup[]) {
+  const options = [{ value: "all", label: "全部分组" }];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    if (seen.has(group.key)) {
+      continue;
+    }
+    seen.add(group.key);
+    options.push({ value: group.key, label: group.title });
+  }
+  return options;
+}
+
+function filterChangeGroups(groups: StructuredCompareGroup[]) {
+  return groups
+    .map((group) => {
+      const primaryChanges = state.changeViewFilters.primaryOnly ? group.classifiedChanges.primary : group.classifiedChanges.primary;
+      const secondaryChanges = state.changeViewFilters.primaryOnly ? [] : group.classifiedChanges.secondary;
+      const stats = {
+        changed: primaryChanges.filter((item) => item.status === "changed").length + secondaryChanges.filter((item) => item.status === "changed").length,
+        added: primaryChanges.filter((item) => item.status === "added").length + secondaryChanges.filter((item) => item.status === "added").length,
+        unchanged: 0
+      };
+
+      return {
+        ...group,
+        stats,
+        changes: [...primaryChanges, ...secondaryChanges],
+        classifiedChanges: {
+          primary: primaryChanges,
+          secondary: secondaryChanges
+        }
+      };
+    })
+    .filter((group) => {
+      if (state.changeViewFilters.group !== "all" && group.key !== state.changeViewFilters.group) {
+        return false;
+      }
+      if (state.changeViewFilters.changedOnly) {
+        return group.stats.changed > 0 || group.stats.added > 0;
+      }
+      return true;
+    });
+}
+
 function renderNodeDetail(embed = false) {
   const detail = state.nodeDetail;
   if (!detail) {
@@ -1639,11 +1689,54 @@ function renderChangeViewPage() {
   const selectedID = Number(route.query.get("record") ?? "");
   const selectedIndex = detail.history.findIndex((item) => item.id === selectedID);
   const resolvedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-  const selectedRecord = detail.history[resolvedIndex] ?? null;
-  const previousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
+  const baseSelectedRecord = detail.history[resolvedIndex] ?? null;
+  const basePreviousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
 
-  const compareSummary = selectedRecord
-    ? buildCompareRecordSummary(selectedRecord, previousRecord)
+  const recordSummaries = detail.history.map((item, index) => {
+    const baseline = detail.history[index + 1] ?? null;
+    const summary = buildCompareRecordSummary(item, baseline);
+    const filteredGroups = filterChangeGroups(summary.groups);
+    const filteredStats = filteredGroups.reduce((stats, group) => mergeCompareStats(stats, group.stats), emptyCompareStats());
+    const hasMeaningfulChange = filteredStats.changed > 0 || filteredStats.added > 0;
+    return {
+      item,
+      baseline,
+      summary,
+      filteredGroups,
+      filteredStats,
+      hasMeaningfulChange
+    };
+  });
+
+  const visibleRecordSummaries = recordSummaries.filter((record) => {
+    if (state.changeViewFilters.changedOnly) {
+      return record.hasMeaningfulChange;
+    }
+    return true;
+  });
+
+  const selectedRecordSummary = baseSelectedRecord
+    ? recordSummaries.find((record) => record.item.id === baseSelectedRecord.id) ?? null
+    : null;
+  const selectedRecord = selectedRecordSummary?.item ?? baseSelectedRecord;
+  const previousRecord = selectedRecordSummary?.baseline ?? basePreviousRecord;
+
+  const compareSummary = selectedRecordSummary
+    ? {
+        stats: selectedRecordSummary.filteredStats,
+        groups: selectedRecordSummary.filteredGroups,
+        overviewMarkup: renderCompareOverview(
+          selectedRecordSummary.filteredStats,
+          "当前记录在筛选条件下没有可对比字段。"
+        ),
+        changeMarkup:
+          selectedRecordSummary.filteredGroups.length > 0
+            ? renderChangeGroupCards(selectedRecordSummary.filteredGroups, {
+                dataAttr: "data-change-view-entry",
+                emptyText: "当前记录在筛选条件下没有字段变化"
+              })
+            : `<div class="muted">当前记录在筛选条件下没有可展示变化。</div>`
+      }
     : {
         stats: emptyCompareStats(),
         groups: [] as StructuredCompareGroup[],
@@ -1651,15 +1744,18 @@ function renderChangeViewPage() {
         changeMarkup: `<div class="muted">当前还没有历史记录，暂时无法查看变化。</div>`
       };
 
-  const changeRecords = detail.history
-    .map((item, index) => {
-      const baseline = detail.history[index + 1] ?? null;
-      const summary = buildCompareRecordSummary(item, baseline);
+  const groupOptions = changeViewGroupOptions(
+    recordSummaries.flatMap((record) => record.summary.groups)
+  );
+
+  const changeRecords = visibleRecordSummaries
+    .map((record) => {
+      const item = record.item;
+      const baseline = record.baseline;
       const active = selectedRecord?.id === item.id;
-      const hasMeaningfulChange = summary.stats.changed > 0 || summary.stats.added > 0;
       const statusText = baseline
-        ? hasMeaningfulChange
-          ? `变化 ${summary.stats.changed} 项 / 新增 ${summary.stats.added} 项`
+        ? record.hasMeaningfulChange
+          ? `变化 ${record.filteredStats.changed} 项 / 新增 ${record.filteredStats.added} 项`
           : "无重点变化"
         : "首条记录，无上一条可比较";
 
@@ -1671,8 +1767,8 @@ function renderChangeViewPage() {
           </div>
           <div class="muted">${escapeHtml(statusText)}</div>
           <div class="compare-overview">
-            <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${summary.stats.changed}</span></span>
-            <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${summary.stats.added}</span></span>
+            <span class="summary-pill summary-pill-compare changed"><strong>变化</strong><span>${record.filteredStats.changed}</span></span>
+            <span class="summary-pill summary-pill-compare added"><strong>新增</strong><span>${record.filteredStats.added}</span></span>
           </div>
         </button>
       `;
@@ -1714,8 +1810,32 @@ function renderChangeViewPage() {
               <h2>变化记录</h2>
               <span class="chip">时间倒序</span>
             </div>
+            <div class="change-filter-bar" data-change-view-filters="true">
+              <label class="card change-filter">
+                <span>只看重点变化</span>
+                <input type="checkbox" id="change-filter-primary-only" ${state.changeViewFilters.primaryOnly ? "checked" : ""} />
+              </label>
+              <label class="card change-filter">
+                <span>只看有变化记录</span>
+                <input type="checkbox" id="change-filter-changed-only" ${state.changeViewFilters.changedOnly ? "checked" : ""} />
+              </label>
+              <label class="card change-filter change-filter-select">
+                <span>分组筛选</span>
+                <select class="input" id="change-filter-group">
+                  ${groupOptions
+                    .map(
+                      (option) =>
+                        `<option value="${escapeHtml(option.value)}" ${option.value === state.changeViewFilters.group ? "selected" : ""}>${escapeHtml(option.label)}</option>`
+                    )
+                    .join("")}
+                </select>
+              </label>
+            </div>
             <div class="list">
-              ${changeRecords || `<div class="card"><strong>暂无变化记录</strong><p class="muted">节点还没有历史记录，暂时无法进入变化视图。</p></div>`}
+              ${
+                changeRecords ||
+                `<div class="card" data-change-view-empty="true"><strong>当前筛选下没有变化记录</strong><p class="muted">请调整筛选条件，或等待新的检测结果进入历史。</p></div>`
+              }
             </div>
           </div>
 
@@ -1753,6 +1873,15 @@ function renderChangeViewPage() {
                 <span class="chip">${previousRecord ? "字段级" : "无对比"}</span>
               </div>
               <div class="muted">${escapeHtml(changePrioritySummary())}</div>
+              <div class="muted">
+                ${
+                  state.changeViewFilters.primaryOnly
+                    ? "当前只显示重点变化。"
+                    : state.changeViewFilters.group === "all"
+                      ? "当前显示全部分组。"
+                      : `当前仅显示 ${escapeHtml(state.changeViewFilters.group)} 分组。`
+                }
+              </div>
               ${compareSummary.changeMarkup}
             </div>
           </div>
@@ -1768,6 +1897,18 @@ function renderChangeViewPage() {
   });
   document.querySelector<HTMLButtonElement>("#change-view-node-button")?.addEventListener("click", () => {
     navigate(`/nodes/${encodeURIComponent(detail.komari_node_uuid)}`);
+  });
+  document.querySelector<HTMLInputElement>("#change-filter-primary-only")?.addEventListener("change", (event) => {
+    state.changeViewFilters.primaryOnly = (event.target as HTMLInputElement).checked;
+    renderChangeViewPage();
+  });
+  document.querySelector<HTMLInputElement>("#change-filter-changed-only")?.addEventListener("change", (event) => {
+    state.changeViewFilters.changedOnly = (event.target as HTMLInputElement).checked;
+    renderChangeViewPage();
+  });
+  document.querySelector<HTMLSelectElement>("#change-filter-group")?.addEventListener("change", (event) => {
+    state.changeViewFilters.group = (event.target as HTMLSelectElement).value;
+    renderChangeViewPage();
   });
   document.querySelectorAll<HTMLButtonElement>("[data-change-record]").forEach((button) => {
     button.addEventListener("click", () => {
