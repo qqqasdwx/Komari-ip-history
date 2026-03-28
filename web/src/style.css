@@ -327,6 +327,11 @@ textarea {
   gap: 14px;
 }
 
+.priority-sublist {
+  padding-left: 14px;
+  border-left: 1px dashed var(--line);
+}
+
 .row-link {
   display: grid;
   gap: 8px;

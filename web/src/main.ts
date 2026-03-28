@@ -442,38 +442,62 @@ function groupDisplayFieldPaths(paths: string[]) {
     .filter((item) => item.paths.length > 0);
 }
 
-function changePriorityTargets(paths: string[], secondaryPaths: string[]) {
+type ChangePriorityGroup = {
+  group: string;
+  rootPath: string;
+  paths: string[];
+};
+
+function changePriorityTargets(paths: string[], secondaryPaths: string[]): ChangePriorityGroup[] {
   const preferred = ["Meta", "Score", "Media", "Mail"];
-  const roots = new Set<string>(preferred);
+  const grouped = new Map<string, Set<string>>();
 
   for (const path of paths) {
     const root = path.split(".")[0]?.trim();
     if (root) {
-      roots.add(root);
+      if (!grouped.has(root)) {
+        grouped.set(root, new Set<string>());
+      }
+      if (path !== root) {
+        grouped.get(root)?.add(path);
+      }
     }
   }
 
   for (const path of secondaryPaths) {
     const root = path.split(".")[0]?.trim();
     if (root) {
-      roots.add(root);
+      if (!grouped.has(root)) {
+        grouped.set(root, new Set<string>());
+      }
+      if (path !== root) {
+        grouped.get(root)?.add(path);
+      }
     }
   }
 
-  return Array.from(roots).sort((left, right) => {
-    const leftIndex = preferred.indexOf(left);
-    const rightIndex = preferred.indexOf(right);
-    if (leftIndex >= 0 || rightIndex >= 0) {
-      if (leftIndex < 0) {
-        return 1;
+  const roots = Array.from(new Set([...preferred, ...grouped.keys()])).filter((root) => grouped.has(root));
+
+  return roots
+    .sort((left, right) => {
+      const leftIndex = preferred.indexOf(left);
+      const rightIndex = preferred.indexOf(right);
+      if (leftIndex >= 0 || rightIndex >= 0) {
+        if (leftIndex < 0) {
+          return 1;
+        }
+        if (rightIndex < 0) {
+          return -1;
+        }
+        return leftIndex - rightIndex;
       }
-      if (rightIndex < 0) {
-        return -1;
-      }
-      return leftIndex - rightIndex;
-    }
-    return left.localeCompare(right);
-  });
+      return left.localeCompare(right);
+    })
+    .map((root) => ({
+      group: fieldGroupLabel(root),
+      rootPath: root,
+      paths: Array.from(grouped.get(root) ?? []).sort((left, right) => left.localeCompare(right))
+    }));
 }
 
 function changePrioritySummary() {
@@ -2242,18 +2266,59 @@ async function renderSettings() {
     })
     .join("");
   const priorityCards = priorityTargets
-    .map(
-      (path) => `
-        <label class="card field-toggle">
-          <span>${escapeHtml(path)}</span>
-          <input
-            type="checkbox"
-            data-change-priority-path="${escapeHtml(path)}"
-            ${secondaryPaths.has(path) ? "checked" : ""}
-          />
-        </label>
-      `
-    )
+    .map((target) => {
+      const entries = [target.rootPath, ...target.paths];
+      const checkedCount = entries.filter((path) => secondaryPaths.has(path)).length;
+
+      return `
+        <div class="card field-group">
+          <div class="section-head">
+            <div>
+              <h3>${escapeHtml(target.group)}</h3>
+              <p class="muted">已设为辅助变化 ${checkedCount} / ${entries.length}</p>
+            </div>
+            <div class="toolbar">
+              <button class="button ghost" type="button" data-change-priority-group-toggle="${escapeHtml(target.rootPath)}" data-change-priority-group-mode="check">本组全选</button>
+              <button class="button ghost" type="button" data-change-priority-group-toggle="${escapeHtml(target.rootPath)}" data-change-priority-group-mode="uncheck">本组清空</button>
+            </div>
+          </div>
+          <div class="list">
+            <label class="card field-toggle">
+              <span>整个 ${escapeHtml(target.group)} 分组</span>
+              <input
+                type="checkbox"
+                data-change-priority-path="${escapeHtml(target.rootPath)}"
+                data-change-priority-group="${escapeHtml(target.rootPath)}"
+                ${secondaryPaths.has(target.rootPath) ? "checked" : ""}
+              />
+            </label>
+            ${
+              target.paths.length > 0
+                ? `
+                  <div class="list priority-sublist">
+                    ${target.paths
+                      .map(
+                        (path) => `
+                          <label class="card field-toggle">
+                            <span>${escapeHtml(path)}</span>
+                            <input
+                              type="checkbox"
+                              data-change-priority-path="${escapeHtml(path)}"
+                              data-change-priority-group="${escapeHtml(target.rootPath)}"
+                              ${secondaryPaths.has(path) ? "checked" : ""}
+                            />
+                          </label>
+                        `
+                      )
+                      .join("")}
+                  </div>
+                `
+                : `<div class="muted">当前分组下还没有更细的字段路径可单独配置。</div>`
+            }
+          </div>
+        </div>
+      `;
+    })
     .join("");
 
   app.innerHTML = `
@@ -2311,7 +2376,7 @@ async function renderSettings() {
 
           <div class="section">
             <h2>变化优先级规则</h2>
-            <p class="muted">勾选后，该路径会被归类为“辅助变化”；未勾选的路径默认按“重点变化”处理。</p>
+            <p class="muted">支持顶层分组和字段路径两级规则。勾选后，该路径会被归类为“辅助变化”；未勾选的路径默认按“重点变化”处理。</p>
             <div class="summary-section">
               <div class="summary-head">
                 <strong>当前规则</strong>
@@ -2319,7 +2384,7 @@ async function renderSettings() {
               </div>
               <div class="muted">${escapeHtml(changePrioritySummary())}</div>
             </div>
-            <div class="list">${priorityCards || `<div class="card"><strong>还没有可配置分组</strong><p class="muted">先让节点产生一份检测结果，这里会自动出现可配置路径。</p></div>`}</div>
+            <div class="list">${priorityCards || `<div class="card"><strong>还没有可配置路径</strong><p class="muted">先让节点产生一份检测结果，这里会自动出现可配置的分组和字段路径。</p></div>`}</div>
             <div class="toolbar">
               <button class="button ghost" type="button" id="change-priority-default-button">恢复默认规则</button>
               <button class="button" id="save-change-priority-button">保存变化规则</button>
@@ -2345,6 +2410,17 @@ async function renderSettings() {
       const mode = button.dataset.fieldGroupMode ?? "check";
       document
         .querySelectorAll<HTMLInputElement>(`[data-field-group="${group}"]`)
+        .forEach((input) => {
+          input.checked = mode === "check";
+        });
+    });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-change-priority-group-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const group = button.dataset.changePriorityGroupToggle ?? "";
+      const mode = button.dataset.changePriorityGroupMode ?? "check";
+      document
+        .querySelectorAll<HTMLInputElement>(`[data-change-priority-group="${group}"]`)
         .forEach((input) => {
           input.checked = mode === "check";
         });

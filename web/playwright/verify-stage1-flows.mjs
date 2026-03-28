@@ -430,6 +430,7 @@ await page.goto('/ipq/#/settings');
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
 const fieldGroupCount = await page.locator('.field-group').count();
+const changePriorityGroupToggleCount = await page.locator('[data-change-priority-group-toggle]').count();
 const mediaUncheckButton = page.locator('[data-field-group-toggle="Media"][data-field-group-mode="uncheck"]').first();
 if ((await mediaUncheckButton.count()) > 0) {
   await mediaUncheckButton.click();
@@ -437,7 +438,7 @@ if ((await mediaUncheckButton.count()) > 0) {
 }
 await page.locator('#save-fields-button').click();
 await page.waitForTimeout(500);
-const scorePriorityToggle = page.locator('[data-change-priority-path="Score"]').first();
+const scorePriorityToggle = page.locator('[data-change-priority-path="Score.Scamalytics"]').first();
 if ((await scorePriorityToggle.count()) > 0) {
   await scorePriorityToggle.check();
   await page.waitForTimeout(200);
@@ -460,6 +461,19 @@ await page.waitForLoadState('networkidle');
 await page.waitForTimeout(800);
 const detailMediaVisibleAfterHide = await page.locator('.result-group h3', { hasText: 'Media' }).count();
 const detailPrioritySummary = await page.locator('body').innerText();
+const detailScoreChangeCard = page.locator('[data-detail-change="overview"] .change-card').filter({ hasText: 'Score' }).first();
+const detailScorePrimarySectionCount = await detailScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
+const detailScoreSecondarySectionCount = await detailScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
+const detailScorePrimaryAbuseCount = await detailScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '重点变化' })
+  .locator('.change-entry strong', { hasText: 'Abuse IPDB' })
+  .count();
+const detailScoreSecondaryScamalyticsCount = await detailScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '辅助变化' })
+  .locator('.change-entry strong', { hasText: 'Scamalytics' })
+  .count();
 
 await page.goto(`/ipq/#/nodes/${uuid}/history`);
 await page.waitForLoadState('networkidle');
@@ -467,26 +481,88 @@ await page.locator('[data-history-change-list="true"]').waitFor({ state: 'visibl
 await page.waitForTimeout(300);
 const historyMediaVisibleAfterHide = await page.locator('[data-history-structured="true"] h3', { hasText: 'Media' }).count();
 const historyPrioritySummary = await page.locator('body').innerText();
+const historyScoreChangeCard = page.locator('[data-history-change-list="true"] .change-card').filter({ hasText: 'Score' }).first();
+const historyScorePrimarySectionCount = await historyScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
+const historyScoreSecondarySectionCount = await historyScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
+const historyScorePrimaryAbuseCount = await historyScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '重点变化' })
+  .locator('.change-entry strong', { hasText: 'Abuse IPDB' })
+  .count();
+const historyScoreSecondaryScamalyticsCount = await historyScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '辅助变化' })
+  .locator('.change-entry strong', { hasText: 'Scamalytics' })
+  .count();
 
 await page.goto(`/ipq/#/nodes/${uuid}/changes`);
 await page.waitForLoadState('networkidle');
 await page.locator('[data-change-view="true"]').waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(300);
 const changeViewPrioritySummary = await page.locator('body').innerText();
+const changeViewScoreChangeCard = page.locator('[data-change-view-list="true"] .change-card').filter({ hasText: 'Score' }).first();
+const changeViewScorePrimarySectionCount = await changeViewScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '重点变化' }).count();
+const changeViewScoreSecondarySectionCount = await changeViewScoreChangeCard.locator('.change-section .summary-head strong', { hasText: '辅助变化' }).count();
+const changeViewScorePrimaryAbuseCount = await changeViewScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '重点变化' })
+  .locator('.change-entry strong', { hasText: 'Abuse IPDB' })
+  .count();
+const changeViewScoreSecondaryScamalyticsCount = await changeViewScoreChangeCard
+  .locator('.change-section')
+  .filter({ hasText: '辅助变化' })
+  .locator('.change-entry strong', { hasText: 'Scamalytics' })
+  .count();
+await page.locator('#change-trend-scope').selectOption('primary');
+await page.waitForTimeout(300);
+const changeTrendFieldTextsAfterFieldRule = await page.locator('[data-change-trend-field="true"]').allInnerTexts();
 if (fieldGroupCount === 0) {
   throw new Error('grouped field toggles not found on settings page');
+}
+if (changePriorityGroupToggleCount === 0) {
+  throw new Error('grouped change priority toggles not found on settings page');
 }
 if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {
   throw new Error('hidden Media group still visible after saving field settings');
 }
-if (!detailPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+if (!detailPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
   throw new Error('updated change priority summary not visible on detail page');
 }
-if (!historyPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+if (!historyPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
   throw new Error('updated change priority summary not visible on history page');
 }
-if (!changeViewPrioritySummary.includes('当前辅助变化: Meta、Score')) {
+if (!changeViewPrioritySummary.includes('当前辅助变化: Meta、Score.Scamalytics')) {
   throw new Error('updated change priority summary not visible on change view page');
+}
+if (
+  detailScorePrimarySectionCount === 0 ||
+  detailScoreSecondarySectionCount === 0 ||
+  detailScorePrimaryAbuseCount === 0 ||
+  detailScoreSecondaryScamalyticsCount === 0
+) {
+  throw new Error('detail page did not apply field-level change priority split inside Score group');
+}
+if (
+  historyScorePrimarySectionCount === 0 ||
+  historyScoreSecondarySectionCount === 0 ||
+  historyScorePrimaryAbuseCount === 0 ||
+  historyScoreSecondaryScamalyticsCount === 0
+) {
+  throw new Error('history page did not apply field-level change priority split inside Score group');
+}
+if (
+  changeViewScorePrimarySectionCount === 0 ||
+  changeViewScoreSecondarySectionCount === 0 ||
+  changeViewScorePrimaryAbuseCount === 0 ||
+  changeViewScoreSecondaryScamalyticsCount === 0
+) {
+  throw new Error('change view did not apply field-level change priority split inside Score group');
+}
+if (changeTrendFieldTextsAfterFieldRule.some((text) => text.includes('Score.Scamalytics'))) {
+  throw new Error('primary-only trend still includes downgraded Score.Scamalytics field');
+}
+if (!changeTrendFieldTextsAfterFieldRule.some((text) => text.includes('Score.AbuseIPDB'))) {
+  throw new Error('primary-only trend lost Score.AbuseIPDB after field-level rule update');
 }
 
 writeFileSync(
@@ -541,6 +617,20 @@ writeFileSync(
       detailMediaVisibleAfterHide,
       historyMediaVisibleAfterHide,
       codeBlocks,
+      changePriorityGroupToggleCount,
+      detailScorePrimarySectionCount,
+      detailScoreSecondarySectionCount,
+      detailScorePrimaryAbuseCount,
+      detailScoreSecondaryScamalyticsCount,
+      historyScorePrimarySectionCount,
+      historyScoreSecondarySectionCount,
+      historyScorePrimaryAbuseCount,
+      historyScoreSecondaryScamalyticsCount,
+      changeViewScorePrimarySectionCount,
+      changeViewScoreSecondarySectionCount,
+      changeViewScorePrimaryAbuseCount,
+      changeViewScoreSecondaryScamalyticsCount,
+      changeTrendFieldTextsAfterFieldRule,
       historyBodyPreview: historyBody.slice(0, 5000),
       copyButtonCount,
       dialogMessages
