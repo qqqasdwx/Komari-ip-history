@@ -58,8 +58,6 @@ type ChangePriorityConfig = {
   secondary_paths: string[];
 };
 
-type ChangeTrendScope = "filtered" | "primary";
-
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
   throw new Error("missing app container");
@@ -79,7 +77,6 @@ const state = {
     changedOnly: false,
     group: "all"
   },
-  changeTrendScope: "filtered" as ChangeTrendScope,
   displayFieldPaths: [] as string[],
   route: window.location.hash || "#/login",
   search: ""
@@ -696,28 +693,6 @@ type ChangeViewRecordSummary = {
   hasMeaningfulChange: boolean;
 };
 
-type ChangeTrendItem = {
-  key: string;
-  label: string;
-  detail: string;
-  recordCount: number;
-  changeCount: number;
-  latestRecordedAt: string;
-};
-
-type ChangeViewTrend = {
-  scope: ChangeTrendScope;
-  comparedRecordCount: number;
-  changedRecordCount: number;
-  groupCount: number;
-  fieldCount: number;
-  groups: ChangeTrendItem[];
-  fields: ChangeTrendItem[];
-};
-
-const CHANGE_TREND_GROUP_LIMIT = 3;
-const CHANGE_TREND_FIELD_LIMIT = 6;
-
 function comparePathLabel(path: string) {
   const segments = path.split(".").filter(Boolean);
   if (segments.length === 0) {
@@ -1184,27 +1159,7 @@ function renderNodeListSummary(item: NodeListItem) {
   if (!item.has_data || !structured) {
     return `
       <div class="list-summary" data-node-summary="empty">
-        <div class="summary-section">
-          <div class="summary-head">
-            <strong>风险概览</strong>
-            <span class="chip">N/A</span>
-          </div>
-          <div class="muted">等待首份检测结果</div>
-        </div>
-        <div class="summary-section">
-          <div class="summary-head">
-            <strong>媒体能力</strong>
-            <span class="chip">N/A</span>
-          </div>
-          <div class="muted">尚未获取服务可用性</div>
-        </div>
-        <div class="summary-section">
-          <div class="summary-head">
-            <strong>邮件能力</strong>
-            <span class="chip">N/A</span>
-          </div>
-          <div class="muted">尚未获取邮件相关结果</div>
-        </div>
+        <div class="muted">当前还没有检测结果</div>
       </div>
     `;
   }
@@ -1214,56 +1169,34 @@ function renderNodeListSummary(item: NodeListItem) {
     value: formatDisplayValue(value)
   }));
 
-  const mediaEntries = Object.entries(structured.media ?? {})
-    .map(([key, value]) => {
-      if (!isRecord(value)) {
-        return {
-          label: compactLabel(key),
-          value: formatDisplayValue(value)
-        };
-      }
-
-      const parts = [value.Status, value.Region, value.Type]
-        .filter((part) => part !== undefined && part !== null && part !== "")
-        .map((part) => formatDisplayValue(part));
-
-      return {
-        label: compactLabel(key),
-        value: parts.join(" / ") || "N/A"
-      };
-    })
-    .filter((entry) => entry.value !== "N/A");
-
-  const mailEntries = Object.entries(structured.mail ?? {}).map(([key, value]) => ({
-    label: compactLabel(key),
-    value: formatDisplayValue(value)
-  }));
-
   return `
     <div class="list-summary" data-node-summary="structured">
-      <div class="summary-section">
-        <div class="summary-head">
-          <strong>风险概览</strong>
-          <span class="chip">${scoreEntries.length > 0 ? `${scoreEntries.length} 项` : "N/A"}</span>
-        </div>
-        ${renderSummaryPills(scoreEntries, "没有可展示的风险分项")}
-      </div>
-      <div class="summary-section">
-        <div class="summary-head">
-          <strong>媒体能力</strong>
-          <span class="chip">${mediaEntries.length > 0 ? `${mediaEntries.length} 项` : "N/A"}</span>
-        </div>
-        ${renderSummaryPills(mediaEntries, "没有可展示的媒体能力")}
-      </div>
-      <div class="summary-section">
-        <div class="summary-head">
-          <strong>邮件能力</strong>
-          <span class="chip">${mailEntries.length > 0 ? `${mailEntries.length} 项` : "N/A"}</span>
-        </div>
-        ${renderSummaryPills(mailEntries, "没有可展示的邮件能力")}
-      </div>
+      ${renderSummaryPills(scoreEntries, "当前没有可展示的风险分项")}
     </div>
   `;
+}
+
+function focusPrimaryChangeGroups(groups: StructuredCompareGroup[]) {
+  const primaryGroups = groups
+    .map((group) => ({
+      ...group,
+      stats: {
+        changed: group.classifiedChanges.primary.filter((item) => item.status === "changed").length,
+        added: group.classifiedChanges.primary.filter((item) => item.status === "added").length,
+        unchanged: 0
+      },
+      changes: group.classifiedChanges.primary,
+      classifiedChanges: {
+        primary: group.classifiedChanges.primary,
+        secondary: []
+      }
+    }))
+    .filter((group) => group.classifiedChanges.primary.length > 0);
+
+  if (primaryGroups.length > 0) {
+    return primaryGroups;
+  }
+  return groups.filter((group) => group.stats.changed > 0 || group.stats.added > 0);
 }
 
 function buildStructuredCompareGroups(currentResult: Record<string, unknown>, previousResult?: Record<string, unknown>) {
@@ -1322,7 +1255,7 @@ function renderRecentChangeSummary(detail: NodeDetail) {
 
   const latestResult = parseResultJSON(latestRecord.result_json);
   const previousResult = parseResultJSON(previousRecord.result_json);
-  const groups = buildStructuredCompareGroups(latestResult, previousResult);
+  const groups = focusPrimaryChangeGroups(buildStructuredCompareGroups(latestResult, previousResult));
   const totalStats = groups.reduce((stats, group) => mergeCompareStats(stats, group.stats), emptyCompareStats());
 
   return `
@@ -1331,7 +1264,6 @@ function renderRecentChangeSummary(detail: NodeDetail) {
         <strong>最近变化</strong>
         <span class="chip">相对上一条历史</span>
       </div>
-      <div class="muted">当前记录: ${formatDateTime(latestRecord.recorded_at)}，对比基准: ${formatDateTime(previousRecord.recorded_at)}</div>
       ${renderCompareOverview(totalStats, "最近一次与上一条之间没有可比较字段。")}
       <div class="change-summary-grid">
         ${renderChangeGroupCards(groups, {
@@ -1415,180 +1347,6 @@ function filterChangeGroups(groups: StructuredCompareGroup[]) {
     });
 }
 
-function upsertTrendItem(
-  bucket: Map<string, ChangeTrendItem>,
-  key: string,
-  next: Omit<ChangeTrendItem, "recordCount" | "changeCount" | "latestRecordedAt">,
-  recordedAt: string,
-  changeCount = 1
-) {
-  const current = bucket.get(key);
-  if (!current) {
-    bucket.set(key, {
-      ...next,
-      recordCount: 1,
-      changeCount,
-      latestRecordedAt: recordedAt
-    });
-    return;
-  }
-
-  current.recordCount += 1;
-  current.changeCount += changeCount;
-  if (new Date(recordedAt).getTime() > new Date(current.latestRecordedAt).getTime()) {
-    current.latestRecordedAt = recordedAt;
-  }
-}
-
-function sortTrendItems(items: ChangeTrendItem[]) {
-  return items.sort((left, right) => {
-    if (right.recordCount !== left.recordCount) {
-      return right.recordCount - left.recordCount;
-    }
-    if (right.changeCount !== left.changeCount) {
-      return right.changeCount - left.changeCount;
-    }
-    return left.label.localeCompare(right.label);
-  });
-}
-
-function trendScopeLabel(scope: ChangeTrendScope) {
-  return scope === "primary" ? "只看重点变化趋势" : "当前筛选下全部趋势";
-}
-
-function trendLimitSummary(total: number, limit: number, noun: string) {
-  if (total > limit) {
-    return `当前共 ${total} 个${noun}，仅展示前 ${limit} 项。`;
-  }
-  return `当前共 ${total} 个${noun}，已全部展示。`;
-}
-
-function projectTrendGroups(groups: StructuredCompareGroup[], scope: ChangeTrendScope) {
-  return groups
-    .map((group) => {
-      const primaryChanges = group.classifiedChanges.primary;
-      const secondaryChanges = scope === "primary" ? [] : group.classifiedChanges.secondary;
-      const stats = {
-        changed: primaryChanges.filter((item) => item.status === "changed").length + secondaryChanges.filter((item) => item.status === "changed").length,
-        added: primaryChanges.filter((item) => item.status === "added").length + secondaryChanges.filter((item) => item.status === "added").length,
-        unchanged: 0
-      };
-
-      return {
-        ...group,
-        stats,
-        changes: [...primaryChanges, ...secondaryChanges],
-        classifiedChanges: {
-          primary: primaryChanges,
-          secondary: secondaryChanges
-        }
-      };
-    })
-    .filter((group) => group.stats.changed > 0 || group.stats.added > 0);
-}
-
-function buildChangeViewTrend(records: ChangeViewRecordSummary[], scope: ChangeTrendScope): ChangeViewTrend {
-  const groupBucket = new Map<string, ChangeTrendItem>();
-  const fieldBucket = new Map<string, ChangeTrendItem>();
-  let comparedRecordCount = 0;
-  let changedRecordCount = 0;
-
-  for (const record of records) {
-    if (!record.baseline) {
-      continue;
-    }
-
-    comparedRecordCount += 1;
-    const trendGroups = projectTrendGroups(record.filteredGroups, scope);
-    if (trendGroups.length > 0) {
-      changedRecordCount += 1;
-    }
-
-    for (const group of trendGroups) {
-      const groupChangeCount = group.stats.changed + group.stats.added;
-      if (groupChangeCount === 0) {
-        continue;
-      }
-
-      upsertTrendItem(
-        groupBucket,
-        group.key,
-        {
-          key: group.key,
-          label: group.title,
-          detail: group.chip
-        },
-        record.item.recorded_at,
-        groupChangeCount
-      );
-
-      const fieldSeen = new Set<string>();
-      for (const change of [...group.classifiedChanges.primary, ...group.classifiedChanges.secondary]) {
-        if (fieldSeen.has(change.fullPath)) {
-          continue;
-        }
-        fieldSeen.add(change.fullPath);
-        upsertTrendItem(
-          fieldBucket,
-          change.fullPath,
-          {
-            key: change.fullPath,
-            label: comparePathLabel(change.fullPath),
-            detail: change.fullPath
-          },
-          record.item.recorded_at
-        );
-      }
-    }
-  }
-
-  const groups = sortTrendItems(Array.from(groupBucket.values())).slice(0, CHANGE_TREND_GROUP_LIMIT);
-  const fields = sortTrendItems(Array.from(fieldBucket.values())).slice(0, CHANGE_TREND_FIELD_LIMIT);
-
-  return {
-    scope,
-    comparedRecordCount,
-    changedRecordCount,
-    groupCount: groupBucket.size,
-    fieldCount: fieldBucket.size,
-    groups,
-    fields
-  };
-}
-
-function renderChangeTrendItems(
-  items: ChangeTrendItem[],
-  options: {
-    dataAttr: string;
-    emptyText: string;
-  }
-) {
-  if (items.length === 0) {
-    return `<div class="muted">${escapeHtml(options.emptyText)}</div>`;
-  }
-
-  return `
-    <div class="trend-grid">
-      ${items
-        .map(
-          (item) => `
-            <div class="card trend-card" ${options.dataAttr}="true">
-              <div class="summary-head">
-                <strong>${escapeHtml(item.label)}</strong>
-                <span class="chip">${item.recordCount} 次记录</span>
-              </div>
-              <div class="muted">${escapeHtml(item.detail)}</div>
-              <div class="compare-overview">
-                <span class="summary-pill summary-pill-compare changed"><strong>累计变化</strong><span>${item.changeCount}</span></span>
-                <span class="summary-pill"><strong>最近出现</strong><span>${escapeHtml(formatDateTime(item.latestRecordedAt))}</span></span>
-              </div>
-            </div>
-          `
-        )
-        .join("")}
-    </div>
-  `;
-}
 
 function renderNodeDetail(embed = false) {
   const detail = state.nodeDetail;
@@ -1770,9 +1528,7 @@ function renderHistoryPage() {
   const previousResult = previousRecord ? parseResultJSON(previousRecord.result_json) : undefined;
   const historyCompareGroups = previousRecord ? buildStructuredCompareGroups(selectedResult, previousResult) : [];
   const historyResult = renderHistoricalResult(selectedResult, previousResult);
-  const compareSummary = previousRecord
-    ? renderCompareOverview(historyResult.stats, "当前记录与上一条之间没有可对比字段。")
-    : `<div class="muted">这是首条历史记录，没有更早的基准可比较。</div>`;
+  const compareSummary = previousRecord ? renderCompareOverview(historyResult.stats, "当前记录与上一条之间没有可对比字段。") : "";
   const historyChangeMarkup = previousRecord
     ? renderChangeGroupCards(historyCompareGroups, {
         dataAttr: "data-history-change-entry",
@@ -1852,11 +1608,6 @@ function renderHistoryPage() {
             ${compareSummary}
             ${historyChangeMarkup}
           </div>
-          <div data-history-structured="true">${historyResult.markup}</div>
-          <details class="raw-json details-panel">
-            <summary>原始数据</summary>
-            <pre class="code-block">${escapeHtml(selectedRecord?.result_json || "N/A")}</pre>
-          </details>
         </div>
       </section>
     </div>

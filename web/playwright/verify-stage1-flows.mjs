@@ -317,7 +317,6 @@ await page.waitForTimeout(300);
 const historyBody = await page.locator('body').innerText();
 const historyUrl = page.url();
 const historyCards = await page.locator('[data-history-record]').count();
-const historyStructuredCount = await page.locator('[data-history-structured="true"]').count();
 const historyChangeEntryCount = await page.locator('[data-history-change-entry="true"]').count();
 const historyPrimaryChangeLabelCount = await page.locator('[data-history-change-list="true"] strong', { hasText: '重点变化' }).count();
 const changedBadgeCount = await page.locator('.diff-badge.changed').count();
@@ -325,10 +324,6 @@ const addedBadgeCount = await page.locator('.diff-badge.added').count();
 const unchangedBadgeCount = await page.locator('.diff-badge.unchanged').count();
 const codeBlocks = await page.locator('.code-block').count();
 const historyBackButtonCount = await page.locator(`button[data-back="/nodes/${uuid}"]`).count();
-const historyMetaTitleCount = await page.locator('[data-history-structured="true"] h3', { hasText: 'Meta' }).count();
-if (historyStructuredCount === 0) {
-  throw new Error('structured history comparison not found');
-}
 if (historyChangeEntryCount === 0) {
   throw new Error('history change entries not found');
 }
@@ -338,7 +333,7 @@ if (historyPrimaryChangeLabelCount === 0) {
 if (historyBackButtonCount === 0) {
   throw new Error('back button not found on history page');
 }
-if (historyMetaTitleCount > 0 || historyBody.includes('UUID')) {
+if (historyBody.includes('Meta') || historyBody.includes('UUID')) {
   throw new Error('history page still shows hidden metadata');
 }
 
@@ -501,11 +496,11 @@ if (
 }
 if (
   detailScorePrimarySectionCount === 0 ||
-  detailScoreSecondarySectionCount === 0 ||
   detailScorePrimaryAbuseCount === 0 ||
-  detailScoreSecondaryScamalyticsCount === 0
+  detailScoreSecondarySectionCount !== 0 ||
+  detailScoreSecondaryScamalyticsCount !== 0
 ) {
-  throw new Error('detail page did not apply field-level change priority split inside Score group');
+  throw new Error('detail page did not stay focused on primary Score changes');
 }
 if (
   historyScorePrimarySectionCount === 0 ||
@@ -543,7 +538,6 @@ writeFileSync(
       embedGroupTitles,
       historyUrl,
       historyCards,
-      historyStructuredCount,
       historyChangeEntryCount,
       historyPrimaryChangeLabelCount,
       historyBackButtonCount,
