@@ -182,16 +182,12 @@ async function copyText(text: string) {
 
 function renderLogin() {
   app.innerHTML = `
-    <div class="shell">
-      <div class="hero">
-        <div class="chip-row">
-          <span class="chip">Komari IP Quality</span>
-          <span class="chip">Admin Only</span>
+    <div class="auth-shell">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <h1>Komari IP Quality</h1>
+          <p>登录后直接进入后台工作区。</p>
         </div>
-        <h1>登录你的管理面板</h1>
-        <p>系统配置、字段开关、节点列表和 header 生成都只在这里管理，不嵌入 Komari 后台。</p>
-      </div>
-      <div class="panel">
         <div class="section">
           <label>用户名<input class="input" id="username" value="admin" /></label>
           <label>密码<input class="input" id="password" type="password" value="admin" /></label>
@@ -216,22 +212,38 @@ function renderLogin() {
   });
 }
 
-function topbar(active: "nodes" | "settings") {
+function sidebar(active: "nodes" | "settings") {
   return `
-    <header class="topbar">
-      <div class="topbar-brand">
-        <h2>Komari IP Quality</h2>
-        <span class="muted">| Komari Monitor</span>
-        <div class="nav nav-inline">
-          <button class="${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点</button>
-          <button class="${active === "settings" ? "active" : ""}" data-nav="/settings">配置</button>
+    <aside class="admin-sidebar">
+      <div class="sidebar-brand">
+        <strong>Komari</strong>
+        <span class="muted">IP Quality</span>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="sidebar-item ${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点结果</button>
+        <button class="sidebar-item ${active === "settings" ? "active" : ""}" data-nav="/settings">接入配置</button>
+      </nav>
+    </aside>
+  `;
+}
+
+function appLayout(active: "nodes" | "settings", content: string) {
+  return `
+    <div class="admin-shell">
+      ${sidebar(active)}
+      <div class="admin-main">
+        <header class="admin-toolbar">
+          <div class="admin-toolbar-spacer"></div>
+          <div class="topbar-actions">
+            <span class="chip">模式 ${escapeHtml(state.me?.app_env ?? "unknown")}</span>
+            <button class="button ghost" id="logout-button">退出登录</button>
+          </div>
+        </header>
+        <div class="shell app-shell">
+          ${content}
         </div>
       </div>
-      <div class="topbar-actions">
-        <span class="chip">模式: ${state.me?.app_env ?? "unknown"}</span>
-        <button class="button ghost" id="logout-button">退出登录</button>
-      </div>
-    </header>
+    </div>
   `;
 }
 
@@ -275,50 +287,52 @@ function bindShellEvents() {
 }
 
 function renderNodes() {
-  const cards = state.nodes
+  const rows = state.nodes
     .map(
       (item) => `
-        <a class="card row-link" href="#/nodes/${item.komari_node_uuid}">
-          <div class="section-head">
-            <h3>${escapeHtml(item.name)}</h3>
-            <span class="status ${item.has_data ? "ok" : "empty"}">${item.has_data ? "有数据" : "无数据"}</span>
+        <a class="card row-link node-list-row" href="#/nodes/${item.komari_node_uuid}">
+          <div class="node-list-main">
+            <div class="section-head">
+              <h3>${escapeHtml(item.name)}</h3>
+              <span class="status ${item.has_data ? "ok" : "empty"}">${item.has_data ? "有数据" : "无数据"}</span>
+            </div>
+            <div class="muted">最近更新: ${formatDateTime(item.updated_at)}</div>
+            ${renderNodeListSummary(item)}
           </div>
-          <div class="muted">最近更新: ${formatDateTime(item.updated_at)}</div>
-          ${renderNodeListSummary(item)}
-          <div class="inline-button">查看当前结果与历史变化</div>
+          <span class="inline-button">查看</span>
         </a>`
     )
     .join("");
 
-  app.innerHTML = `
-    <div class="shell app-shell">
-      ${topbar("nodes")}
+  app.innerHTML = appLayout(
+    "nodes",
+    `
       ${pageHeader({
-        title: "节点",
-        subtitle: `${state.nodes.length} 个节点`,
-        actions: `
-          <input class="input search-input" id="node-search" placeholder="搜索节点名称" value="${escapeHtml(state.search)}" />
-          <button class="button ghost" data-nav="/settings">复制 Header</button>
-        `
+        title: "节点列表",
+        subtitle: `${state.nodes.length} 个已接入节点`,
+        actions:
+          state.nodes.length > 0
+            ? `<input class="input search-input" id="node-search" placeholder="搜索节点名称" value="${escapeHtml(state.search)}" />`
+            : ""
       })}
       <section class="panel">
         <div class="section">
           <div class="section-head">
-            <h2>已接入节点</h2>
+            <h2>IP 质量结果</h2>
             <span class="chip">${state.nodes.length} 个节点</span>
           </div>
-          <div class="grid">${cards || `
+          <div class="list">${rows || `
             <div class="card empty-state-card">
               <h3>还没有节点</h3>
-              <p class="muted">先去系统配置页复制 Header，填到 Komari 的自定义 header，然后在节点详情页点击“添加 IP 质量检测”。</p>
+              <p class="muted">先复制 Header 到 Komari，然后在节点详情页点击“添加 IP 质量检测”。</p>
               <div class="toolbar">
-                <button class="button" data-nav="/settings">去复制 Header</button>
+                <button class="button" data-nav="/settings">去接入</button>
               </div>
             </div>`}</div>
         </div>
       </section>
-    </div>
-  `;
+    `
+  );
 
   bindShellEvents();
   document.querySelector<HTMLInputElement>("#node-search")?.addEventListener("keydown", async (event) => {
@@ -1389,9 +1403,9 @@ function renderNodeDetail(embed = false) {
     return;
   }
 
-  app.innerHTML = `
-    <div class="shell app-shell">
-      ${topbar("nodes")}
+  app.innerHTML = appLayout(
+    "nodes",
+    `
       ${pageHeader({
         title: detail.name,
         subtitle: detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at)}` : "当前还没有检测结果",
@@ -1417,7 +1431,7 @@ function renderNodeDetail(embed = false) {
         </div>
 
         <details class="panel details-panel" data-node-report-config="true">
-          <summary>高级接入配置</summary>
+          <summary>节点上报设置</summary>
           <div class="section report-config">
             <div class="summary-section">
               <div class="summary-head">
@@ -1462,8 +1476,8 @@ function renderNodeDetail(embed = false) {
           </div>
         </details>
       </section>
-    </div>
-  `;
+    `
+  );
 
   bindShellEvents();
   document.querySelector<HTMLButtonElement>("#history-button")?.addEventListener("click", () => {
@@ -1562,9 +1576,9 @@ function renderHistoryPage() {
     })
     .join("");
 
-  app.innerHTML = `
-    <div class="shell app-shell">
-      ${topbar("nodes")}
+  app.innerHTML = appLayout(
+    "nodes",
+    `
       ${pageHeader({
         title: `${detail.name} 的历史变化`,
         subtitle: detail.history.length > 0 ? `共 ${detail.history.length} 条记录` : "当前还没有历史记录",
@@ -1611,8 +1625,8 @@ function renderHistoryPage() {
           </div>
         </div>
       </section>
-    </div>
-  `;
+    `
+  );
 
   bindShellEvents();
   document.querySelector<HTMLButtonElement>("#open-change-view-button")?.addEventListener("click", () => {
@@ -1729,12 +1743,12 @@ function renderChangeViewPage() {
     })
     .join("");
 
-  app.innerHTML = `
-    <div class="shell app-shell">
-      ${topbar("nodes")}
+  app.innerHTML = appLayout(
+    "nodes",
+    `
       ${pageHeader({
         title: `${detail.name} 的变化`,
-        subtitle: "这里只看历史里发生了什么变化，不展示无关元数据。",
+        subtitle: "这里只看历史里发生了什么变化。",
         backPath: `/nodes/${encodeURIComponent(detail.komari_node_uuid)}`,
         backLabel: "返回当前结果",
         actions: `<button class="button ghost" id="change-view-history-button">历史记录</button>`
@@ -1811,8 +1825,8 @@ function renderChangeViewPage() {
           </div>
         </div>
       </section>
-    </div>
-  `;
+    `
+  );
 
   bindShellEvents();
   document.querySelector<HTMLButtonElement>("#change-view-history-button")?.addEventListener("click", () => {
@@ -1947,31 +1961,31 @@ async function renderSettings() {
     })
     .join("");
 
-  app.innerHTML = `
-    <div class="shell app-shell">
-      ${topbar("settings")}
+  app.innerHTML = appLayout(
+    "settings",
+    `
       ${pageHeader({
-        title: "配置",
+        title: "接入配置",
         subtitle: "复制 Header 到 Komari"
       })}
       <section class="panel">
         <div class="section">
           <div class="section-head">
             <h2>接入 Komari</h2>
-            <span class="chip">推荐短 loader 版</span>
+            <span class="chip">推荐 loader 版</span>
           </div>
           <div class="grid">
             <div class="card">
               <h3>1. 复制 Header</h3>
-              <p class="muted">推荐短 loader 版。后续更新时通常不需要重新复制。</p>
+              <p class="muted">推荐使用 loader 版，后续更新通常不用重新复制。</p>
               <div class="toolbar">
-                <button class="button" id="copy-loader-button">复制短 loader 版</button>
+                <button class="button" id="copy-loader-button">复制 loader 版</button>
                 <button class="button ghost" id="copy-inline-button">复制完整内联版</button>
               </div>
             </div>
             <div class="card">
               <h3>2. 填到 Komari</h3>
-              <p class="muted">把代码填到 Komari 的自定义 header。之后进入任意节点详情页，就会出现 IP 质量入口。</p>
+              <p class="muted">填入自定义 Header 后，进入节点详情页即可看到 IP 质量入口。</p>
               <div class="chip-row">
                 <span class="chip">${escapeHtml(runtime.app_env)}</span>
                 <span class="chip">${escapeHtml(runtime.base_path)}</span>
@@ -1980,7 +1994,7 @@ async function renderSettings() {
           </div>
           <div class="card">
             <div class="section-head">
-              <h3>短 loader 版</h3>
+              <h3>loader 版代码</h3>
               <button class="button ghost" id="copy-loader-inline-button">再次复制</button>
             </div>
             <pre class="code-block">${escapeHtml(loaderPreview.code)}</pre>
@@ -1988,17 +2002,15 @@ async function renderSettings() {
         </div>
 
         <details class="panel details-panel">
-          <summary>完整内联版</summary>
+          <summary>更多设置</summary>
           <div class="section">
+            <h2>完整内联版</h2>
             <p class="muted">只有在你明确不想依赖 loader 时再用它。后续逻辑更新后需要重新复制。</p>
             <pre class="code-block">${escapeHtml(inlinePreview.code)}</pre>
           </div>
-        </details>
 
-        <details class="panel details-panel">
-          <summary>高级展示配置</summary>
           <div class="section">
-            <h2>全局展示字段开关</h2>
+            <h2>展示字段</h2>
             <div class="list">${fieldCards || `<div class="card"><strong>还没有可配置字段</strong><p class="muted">先让节点产生一份检测结果，这里才会出现字段路径。</p></div>`}</div>
             <button class="button" id="save-fields-button">保存字段配置</button>
           </div>
@@ -2018,19 +2030,17 @@ async function renderSettings() {
               <button class="button" id="save-change-priority-button">保存变化规则</button>
             </div>
           </div>
-        </details>
 
-        <details class="panel details-panel">
-          <summary>管理员设置</summary>
           <div class="section">
+            <h2>管理员设置</h2>
             <label>新用户名<input class="input" id="profile-username" value="${escapeHtml(state.me?.username ?? "admin")}" /></label>
             <label>新密码<input class="input" id="profile-password" type="password" placeholder="留空表示不修改密码" /></label>
             <button class="button" id="profile-save-button">保存并重新登录</button>
           </div>
         </details>
       </section>
-    </div>
-  `;
+    `
+  );
 
   bindShellEvents();
   document.querySelectorAll<HTMLButtonElement>("[data-field-group-toggle]").forEach((button) => {
