@@ -50,10 +50,6 @@ type NodeDetail = {
   };
 };
 
-type DisplayFieldsConfig = {
-  hidden_paths: string[];
-};
-
 type ChangePriorityConfig = {
   secondary_paths: string[];
 };
@@ -70,14 +66,12 @@ const state = {
   me: null as MeResponse | null,
   nodes: [] as NodeListItem[],
   nodeDetail: null as NodeDetail | null,
-  displayFields: { hidden_paths: [] } as DisplayFieldsConfig,
   changePriority: { secondary_paths: ["Meta"] } as ChangePriorityConfig,
   changeViewFilters: {
     primaryOnly: false,
     changedOnly: false,
     group: "all"
   },
-  displayFieldPaths: [] as string[],
   route: window.location.hash || "#/login",
   search: ""
 };
@@ -136,24 +130,8 @@ async function loadNode(uuid: string) {
   state.nodeDetail = await api<NodeDetail>(`/nodes/${uuid}`);
 }
 
-async function loadDisplayFields() {
-  state.displayFields = await api<DisplayFieldsConfig>("/admin/display-fields");
-}
-
-async function loadDisplayFieldPaths() {
-  const response = await api<{ items: string[] }>("/admin/display-fields/paths");
-  state.displayFieldPaths = response.items;
-}
-
 async function loadChangePriority() {
   state.changePriority = await api<ChangePriorityConfig>("/admin/change-priority");
-}
-
-async function saveDisplayFields(hiddenPaths: string[]) {
-  state.displayFields = await api<DisplayFieldsConfig>("/admin/display-fields", {
-    method: "PUT",
-    body: JSON.stringify({ hidden_paths: hiddenPaths })
-  });
 }
 
 async function saveChangePriority(secondaryPaths: string[]) {
@@ -212,7 +190,7 @@ function renderLogin() {
   });
 }
 
-type AppSection = "nodes" | "settings-integration" | "settings-fields" | "settings-priority" | "settings-admin";
+type AppSection = "nodes" | "settings-integration" | "settings-priority" | "settings-admin";
 
 function sidebar(active: AppSection) {
   return `
@@ -224,7 +202,6 @@ function sidebar(active: AppSection) {
       <nav class="sidebar-nav">
         <button class="sidebar-item ${active === "nodes" ? "active" : ""}" data-nav="/nodes">节点结果</button>
         <button class="sidebar-item ${active === "settings-integration" ? "active" : ""}" data-nav="/settings/integration">接入配置</button>
-        <button class="sidebar-item ${active === "settings-fields" ? "active" : ""}" data-nav="/settings/fields">展示字段</button>
         <button class="sidebar-item ${active === "settings-priority" ? "active" : ""}" data-nav="/settings/priority">变化规则</button>
         <button class="sidebar-item ${active === "settings-admin" ? "active" : ""}" data-nav="/settings/admin">管理员设置</button>
       </nav>
@@ -691,8 +668,7 @@ function takeStructuredGroup(record: Record<string, unknown>, key: string) {
 }
 
 function getFilteredCurrentResult(result: Record<string, unknown>) {
-  const hidden = new Set(state.displayFields.hidden_paths);
-  const filtered = filterHiddenFields(result, "", hidden);
+  const filtered = cloneRecord(result);
   if (!isRecord(filtered) || Object.keys(filtered).length === 0) {
     return null;
   }
@@ -718,6 +694,41 @@ function parseResultJSON(raw: string) {
   } catch {
     return {};
   }
+}
+
+function collectFieldPathsFromValue(value: unknown, prefix = "", seen = new Set<string>()) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectFieldPathsFromValue(item, prefix, seen);
+    }
+    return seen;
+  }
+
+  if (!isRecord(value)) {
+    return seen;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    const next = prefix ? `${prefix}.${key}` : key;
+    seen.add(next);
+    collectFieldPathsFromValue(child, next, seen);
+  }
+
+  return seen;
+}
+
+function collectAvailableFieldPaths() {
+  const seen = new Set<string>();
+  for (const node of state.nodes) {
+    collectFieldPathsFromValue(node.current_result, "", seen);
+  }
+  if (state.nodeDetail) {
+    collectFieldPathsFromValue(state.nodeDetail.current_result, "", seen);
+    for (const record of state.nodeDetail.history) {
+      collectFieldPathsFromValue(parseResultJSON(record.result_json), "", seen);
+    }
+  }
+  return Array.from(seen).sort((left, right) => left.localeCompare(right));
 }
 
 function compareLabel(status: CompareStatus) {
@@ -2492,54 +2503,16 @@ function renderChangeViewPage() {
   });
 }
 
-async function renderSettings(section: "integration" | "fields" | "priority" | "admin") {
+async function renderSettings(section: "integration" | "priority" | "admin") {
   const [runtime, loaderPreview, inlinePreview] = await Promise.all([
     api<{ app_name: string; app_env: string; base_path: string }>("/admin/runtime"),
     api<{ code: string }>("/admin/header-preview?variant=loader"),
     api<{ code: string }>("/admin/header-preview?variant=inline")
   ]);
 
-  const hidden = new Set(state.displayFields.hidden_paths);
-  const fieldGroups = groupDisplayFieldPaths(state.displayFieldPaths);
   const secondaryPaths = new Set(state.changePriority.secondary_paths);
-  const priorityTargets = changePriorityTargets(state.displayFieldPaths, state.changePriority.secondary_paths);
-  const hiddenCount = state.displayFields.hidden_paths.length;
+  const priorityTargets = changePriorityTargets(collectAvailableFieldPaths(), state.changePriority.secondary_paths);
   const secondaryCount = state.changePriority.secondary_paths.length;
-  const fieldCards = fieldGroups
-    .map((group) => {
-      const checkedCount = group.paths.filter((path) => !hidden.has(path)).length;
-      return `
-        <div class="card field-group">
-          <div class="section-head">
-            <div>
-              <h3>${escapeHtml(group.group)}</h3>
-              <p class="muted">已开启 ${checkedCount} / ${group.paths.length}</p>
-            </div>
-            <div class="toolbar">
-              <button class="button ghost" type="button" data-field-group-toggle="${escapeHtml(group.group)}" data-field-group-mode="check">全选</button>
-              <button class="button ghost" type="button" data-field-group-toggle="${escapeHtml(group.group)}" data-field-group-mode="uncheck">全不选</button>
-            </div>
-          </div>
-          <div class="list">
-            ${group.paths
-              .map(
-                (path) => `
-                  <label class="card field-toggle">
-                    <span>${escapeHtml(path)}</span>
-                    <input
-                      type="checkbox"
-                      data-field="${escapeHtml(path)}"
-                      data-field-group="${escapeHtml(group.group)}"
-                      ${hidden.has(path) ? "" : "checked"}
-                    />
-                  </label>`
-              )
-              .join("")}
-          </div>
-        </div>
-      `;
-    })
-    .join("");
   const priorityCards = priorityTargets
     .map((target) => {
       const entries = [target.rootPath, ...target.paths];
@@ -2598,7 +2571,6 @@ async function renderSettings(section: "integration" | "fields" | "priority" | "
 
   const activeMap = {
     integration: "settings-integration",
-    fields: "settings-fields",
     priority: "settings-priority",
     admin: "settings-admin"
   } as const;
@@ -2654,13 +2626,6 @@ async function renderSettings(section: "integration" | "fields" | "priority" | "
             </div>
             <div class="grid">
               <div class="card">
-                <h3>展示字段</h3>
-                <p class="muted">控制结果页里哪些字段显示，哪些字段隐藏。</p>
-                <div class="toolbar">
-                  <button class="button ghost" data-nav="/settings/fields">去设置</button>
-                </div>
-              </div>
-              <div class="card">
                 <h3>变化规则</h3>
                 <p class="muted">控制哪些变化算重点，哪些变化算辅助。</p>
                 <div class="toolbar">
@@ -2675,31 +2640,6 @@ async function renderSettings(section: "integration" | "fields" | "priority" | "
                 </div>
               </div>
             </div>
-          </div>
-        </section>
-      `
-    },
-    fields: {
-      title: "展示字段",
-      subtitle: "控制结果页里显示哪些字段",
-      content: `
-        <section class="panel">
-          <div class="grid">
-            <div class="card">
-              <h3>字段分组</h3>
-              <div class="metric-value">${fieldGroups.length}</div>
-              <p class="muted">当前可配置的结构化分组数量。</p>
-            </div>
-            <div class="card">
-              <h3>已隐藏字段</h3>
-              <div class="metric-value">${hiddenCount}</div>
-              <p class="muted">这些字段不会出现在当前结果页和历史页。</p>
-            </div>
-          </div>
-          <div class="section">
-            <h2>展示字段</h2>
-            <div class="list">${fieldCards || `<div class="card"><strong>还没有可配置字段</strong><p class="muted">先让节点产生一份检测结果，这里才会出现字段路径。</p></div>`}</div>
-            <button class="button" id="save-fields-button">保存字段配置</button>
           </div>
         </section>
       `
@@ -2775,17 +2715,6 @@ async function renderSettings(section: "integration" | "fields" | "priority" | "
   );
 
   bindShellEvents();
-  document.querySelectorAll<HTMLButtonElement>("[data-field-group-toggle]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const group = button.dataset.fieldGroupToggle ?? "";
-      const mode = button.dataset.fieldGroupMode ?? "check";
-      document
-        .querySelectorAll<HTMLInputElement>(`[data-field-group="${group}"]`)
-        .forEach((input) => {
-          input.checked = mode === "check";
-        });
-    });
-  });
   document.querySelectorAll<HTMLButtonElement>("[data-change-priority-group-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
       const group = button.dataset.changePriorityGroupToggle ?? "";
@@ -2796,15 +2725,6 @@ async function renderSettings(section: "integration" | "fields" | "priority" | "
           input.checked = mode === "check";
         });
     });
-  });
-
-  document.querySelector<HTMLButtonElement>("#save-fields-button")?.addEventListener("click", async () => {
-    const hiddenPaths = Array.from(document.querySelectorAll<HTMLInputElement>("[data-field]"))
-      .filter((input) => !input.checked)
-      .map((input) => input.dataset.field ?? "")
-      .filter(Boolean);
-    await saveDisplayFields(hiddenPaths);
-    alert("字段配置已保存。");
   });
 
   document.querySelector<HTMLButtonElement>("#change-priority-default-button")?.addEventListener("click", () => {
@@ -2867,51 +2787,50 @@ async function boot() {
   const route = currentRoute();
   const path = route.path;
   if (path === "/settings" || path === "/settings/integration") {
-    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths(), loadChangePriority()]);
+    await loadChangePriority();
     await renderSettings("integration");
     return;
   }
 
   if (path === "/settings/fields") {
-    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths(), loadChangePriority()]);
-    await renderSettings("fields");
+    navigate("/nodes");
     return;
   }
 
   if (path === "/settings/priority") {
-    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths(), loadChangePriority()]);
+    await Promise.all([loadNodes(), loadChangePriority()]);
     await renderSettings("priority");
     return;
   }
 
   if (path === "/settings/admin") {
-    await Promise.all([loadDisplayFields(), loadDisplayFieldPaths(), loadChangePriority()]);
+    await loadChangePriority();
     await renderSettings("admin");
     return;
   }
 
   if (/^\/nodes\/[^/]+\/history$/.test(path)) {
     const uuid = path.replace(/^\/nodes\/([^/]+)\/history$/, "$1");
-    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadChangePriority()]);
     renderHistoryPage();
     return;
   }
 
   if (/^\/nodes\/[^/]+\/changes$/.test(path)) {
     const uuid = path.replace(/^\/nodes\/([^/]+)\/changes$/, "$1");
-    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
+    await Promise.all([loadNode(decodeURIComponent(uuid)), loadChangePriority()]);
     renderChangeViewPage();
     return;
   }
 
   if (path.startsWith("/nodes/")) {
     const uuid = path.replace("/nodes/", "");
-    await Promise.all([loadNode(decodeURIComponent(uuid)), loadDisplayFields(), loadChangePriority()]);
+    await loadNode(decodeURIComponent(uuid));
     renderNodeDetail(route.query.get("embed") === "1");
     return;
   }
 
-  await Promise.all([loadNodes(), loadDisplayFields()]);
+  await loadNodes();
   renderNodes();
 }
 

@@ -2,19 +2,31 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"komari-ip-history/internal/config"
 )
 
-func HeaderPreview(cfg config.Config, variant string) string {
+func HeaderPreview(cfg config.Config, publicBaseURL string, variant string) string {
 	if variant == "inline" {
-		return strings.TrimSpace("<script>\n" + LoaderScript(cfg) + "\n</script>")
+		return strings.TrimSpace("<script>\n" + LoaderScript(cfg, publicBaseURL) + "\n</script>")
 	}
 
 	loaderSrcExpr := fmt.Sprintf(`(window.location.origin + %q).replace(/\/+$/, "") + "/embed/loader.js"`, cfg.BasePath)
-	if cfg.PublicBaseURL != "" {
-		loaderSrcExpr = fmt.Sprintf(`%q + "/embed/loader.js"`, cfg.PublicBaseURL)
+	if publicBaseURL != "" {
+		loaderSrcExpr = fmt.Sprintf(`%q + "/embed/loader.js"`, publicBaseURL)
+		if parsed, err := url.Parse(publicBaseURL); err == nil {
+			host := parsed.Hostname()
+			port := parsed.Port()
+			if host != "" && regexpLikeLocalhost(host) {
+				if port != "" {
+					loaderSrcExpr = fmt.Sprintf(`(window.location.protocol + "//" + window.location.hostname + ":%s" + %q).replace(/\/+$/, "") + "/embed/loader.js"`, port, cfg.BasePath)
+				} else {
+					loaderSrcExpr = fmt.Sprintf(`(window.location.protocol + "//" + window.location.hostname + %q).replace(/\/+$/, "") + "/embed/loader.js"`, cfg.BasePath)
+				}
+			}
+		}
 	}
 
 	return strings.TrimSpace(fmt.Sprintf(`<script>
@@ -27,7 +39,15 @@ func HeaderPreview(cfg config.Config, variant string) string {
 </script>`, loaderSrcExpr))
 }
 
-func LoaderScript(cfg config.Config) string {
+func regexpLikeLocalhost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" || host == "0.0.0.0" {
+		return true
+	}
+	return strings.HasPrefix(host, "127.")
+}
+
+func LoaderScript(cfg config.Config, publicBaseURL string) string {
 	return fmt.Sprintf(`(() => {
   const BASE_PATH = %q;
   const CONFIGURED_APP_BASE = %q;
@@ -52,6 +72,14 @@ func LoaderScript(cfg config.Config) string {
 
   function getAppBase() {
     if (CONFIGURED_APP_BASE) {
+      try {
+        const configured = new URL(CONFIGURED_APP_BASE, window.location.href);
+        if (configured.hostname && /^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(configured.hostname)) {
+          if (document.currentScript && document.currentScript.src) {
+            return (new URL(document.currentScript.src, window.location.href)).origin + BASE_PATH;
+          }
+        }
+      } catch (_) {}
       return CONFIGURED_APP_BASE.replace(/\/+$/, "");
     }
     try {
@@ -64,7 +92,6 @@ func LoaderScript(cfg config.Config) string {
 
   const APP_BASE = getAppBase().replace(/\/+$/, "");
   const API_BASE = APP_BASE + "/api/v1/embed";
-  const LOGIN_URL = APP_BASE + "/#/login";
 
   function scheduleSync(delay) {
     window.clearTimeout(state.syncTimer);
@@ -299,17 +326,34 @@ func LoaderScript(cfg config.Config) string {
     state.overlay.setAttribute("data-open", "false");
   }
 
-  function openModal(uuid, name) {
+  function buildURLs(context, forceConnect) {
+    const safeUUID = encodeURIComponent(context.uuid);
+    const safeName = encodeURIComponent(context.name || "未命名节点");
+    const detailURL = APP_BASE + "/#/nodes/" + safeUUID;
+    const connectURL = APP_BASE + "/#/connect?uuid=" + safeUUID + "&name=" + safeName;
+
+    if (forceConnect) {
+      return {
+        fullPageURL: connectURL,
+        embedURL: connectURL + "&embed=1"
+      };
+    }
+
+    return {
+      fullPageURL: detailURL,
+      embedURL: detailURL + "?embed=1"
+    };
+  }
+
+  function openModal(context, forceConnect) {
     const overlay = ensureOverlay();
-    const safeUUID = encodeURIComponent(uuid);
-    const fullPageURL = APP_BASE + "/#/nodes/" + safeUUID;
-    const embedURL = fullPageURL + "?embed=1";
+    const urls = buildURLs(context, !!forceConnect);
     if (state.iframe) {
-      state.iframe.src = embedURL;
-      state.iframe.title = (name || "节点") + " IP 质量详情";
+      state.iframe.src = urls.embedURL;
+      state.iframe.title = (context.name || "节点") + " IP 质量详情";
     }
     if (state.openLink) {
-      state.openLink.href = fullPageURL;
+      state.openLink.href = urls.fullPageURL;
     }
     overlay.setAttribute("data-open", "true");
   }
@@ -530,7 +574,7 @@ func LoaderScript(cfg config.Config) string {
     button.disabled = false;
 
     if (!state.status) {
-      button.textContent = "添加 IP 质量检测";
+      button.textContent = "打开 IP 质量";
       return;
     }
     if (state.status.loading) {
@@ -539,11 +583,11 @@ func LoaderScript(cfg config.Config) string {
       return;
     }
     if (state.status.login_required) {
-      button.textContent = "登录 IP 质量服务";
+      button.textContent = "打开 IP 质量";
       return;
     }
     if (state.status.error) {
-      button.textContent = "重试加载 IP 质量";
+      button.textContent = "打开 IP 质量";
       return;
     }
     button.textContent = state.status.exists ? "查看 IP 质量" : "添加 IP 质量检测";
@@ -590,75 +634,18 @@ func LoaderScript(cfg config.Config) string {
     return response.json();
   }
 
-  function openLogin() {
-    const popup = window.open(LOGIN_URL, "_blank", "noopener,noreferrer");
-    if (!popup) {
-      window.location.href = LOGIN_URL;
-    }
-  }
-
-  async function registerNode(context) {
-    const response = await fetch(API_BASE + "/nodes/register", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        uuid: context.uuid,
-        name: context.name
-      })
-    });
-
-    if (response.status === 401) {
-      openLogin();
-      return false;
-    }
-
-    const body = await response.json().catch(function () {
-      return {};
-    });
-
-    if (!response.ok) {
-      window.alert(body.message || "添加节点失败");
-      return false;
-    }
-
-    state.status = {
-      exists: true,
-      has_data: !!(body.node && body.node.has_data),
-      node_name: body.node && body.node.name ? body.node.name : context.name
-    };
-    renderButton();
-    return true;
-  }
-
   async function handleAction() {
     const context = detectContext();
     if (!context) return;
 
-    if (!state.status || state.status.loading) {
-      scheduleSync(0);
-      return;
-    }
+    const forceConnect =
+      !state.status ||
+      state.status.loading ||
+      state.status.login_required ||
+      state.status.error ||
+      !state.status.exists;
 
-    if (state.status.login_required) {
-      openLogin();
-      return;
-    }
-
-    if (state.status.error) {
-      state.contextKey = "";
-      scheduleSync(0);
-      return;
-    }
-
-    if (!state.status.exists) {
-      const ok = await registerNode(context);
-      if (!ok) return;
-    }
-
-    openModal(context.uuid, context.name);
+    openModal(context, forceConnect);
   }
 
   async function sync() {
@@ -714,7 +701,5 @@ func LoaderScript(cfg config.Config) string {
   window.addEventListener("popstate", function () { scheduleSync(60); });
   observer.observe(document.documentElement, { childList: true, subtree: true });
   scheduleSync(0);
-})();`, cfg.BasePath, cfg.PublicBaseURL)
+})();`, cfg.BasePath, publicBaseURL)
 }
-
-

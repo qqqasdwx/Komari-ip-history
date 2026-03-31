@@ -1,4 +1,5 @@
 import { compactLabel, formatDisplayValue, isRecord } from "./format";
+import ipqualityTemplate from "./ipquality-template.json";
 
 export type StructuredCurrentResult = {
   head?: Record<string, unknown>;
@@ -55,9 +56,36 @@ function filterHiddenFields(value: unknown, prefix: string, hiddenPaths: Set<str
   return value;
 }
 
+function nullifyTemplate(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return [];
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, nullifyTemplate(child)]));
+  }
+  return null;
+}
+
+function mergeIntoTemplate(template: unknown, actual: unknown): unknown {
+  if (Array.isArray(template)) {
+    return Array.isArray(actual) ? actual : template;
+  }
+
+  if (isRecord(template)) {
+    const actualRecord = isRecord(actual) ? actual : {};
+    return Object.fromEntries(
+      Object.entries(template).map(([key, childTemplate]) => [key, mergeIntoTemplate(childTemplate, actualRecord[key])])
+    );
+  }
+
+  return actual === undefined ? template : actual;
+}
+
 export function getFilteredCurrentResult(result: Record<string, unknown>, hiddenPaths: string[]): StructuredCurrentResult | null {
+  const template = nullifyTemplate(ipqualityTemplate) as Record<string, unknown>;
+  const normalized = mergeIntoTemplate(template, result);
   const hidden = new Set(hiddenPaths);
-  const filtered = filterHiddenFields(result, "", hidden);
+  const filtered = filterHiddenFields(normalized, "", hidden);
 
   if (!isRecord(filtered) || Object.keys(filtered).length === 0) {
     return null;

@@ -1,16 +1,4 @@
 :8080 {
-	handle /ipq/api/* {
-		reverse_proxy workspace:8090
-	}
-
-	handle /ipq/embed/* {
-		reverse_proxy workspace:8090
-	}
-
-	handle /ipq/* {
-		reverse_proxy workspace:5173
-	}
-
 	handle {
 		reverse_proxy komari:25774
 	}

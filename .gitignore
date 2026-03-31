@@ -41,7 +41,9 @@ public/index.html
 # Local data and build cache
 data/ipq/
 data/komari/
+data/*.db
 .cache/
+tmp/
 
 # Local reference repos
 references/

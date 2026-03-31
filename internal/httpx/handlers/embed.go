@@ -77,5 +77,10 @@ func (h EmbedHandler) Current(c *gin.Context) {
 
 func (h EmbedHandler) Loader(c *gin.Context) {
 	c.Header("Content-Type", "application/javascript; charset=utf-8")
-	c.String(http.StatusOK, service.LoaderScript(h.Cfg))
+	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "console.error(%q);", "failed to load integration settings")
+		return
+	}
+	c.String(http.StatusOK, service.LoaderScript(h.Cfg, integration.EffectivePublicBaseURL))
 }

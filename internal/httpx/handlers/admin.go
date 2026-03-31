@@ -20,33 +20,45 @@ type AdminHandler struct {
 }
 
 func (h AdminHandler) Runtime(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"app_name":  h.Cfg.AppName,
-		"app_env":   h.Cfg.AppEnv,
-		"base_path": h.Cfg.BasePath,
-	})
-}
-
-func (h AdminHandler) GetDisplayFields(c *gin.Context) {
-	cfg, err := service.GetDisplayFieldsConfig(h.DB)
+	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
 		return
 	}
-	c.JSON(http.StatusOK, cfg)
+
+	c.JSON(http.StatusOK, gin.H{
+		"app_name":                  h.Cfg.AppName,
+		"app_env":                   h.Cfg.AppEnv,
+		"base_path":                 h.Cfg.BasePath,
+		"public_base_url":           integration.PublicBaseURL,
+		"effective_public_base_url": integration.EffectivePublicBaseURL,
+	})
 }
 
-func (h AdminHandler) PutDisplayFields(c *gin.Context) {
-	var req service.DisplayFieldsConfig
+func (h AdminHandler) GetIntegrationSettings(c *gin.Context) {
+	settings, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h AdminHandler) PutIntegrationSettings(c *gin.Context) {
+	var req struct {
+		PublicBaseURL string `json:"public_base_url"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
 		return
 	}
-	if err := service.SetDisplayFieldsConfig(h.DB, req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save settings"})
+
+	settings, err := service.SetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL, req.PublicBaseURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, req)
+	c.JSON(http.StatusOK, settings)
 }
 
 func (h AdminHandler) GetChangePriority(c *gin.Context) {
@@ -70,15 +82,6 @@ func (h AdminHandler) PutChangePriority(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, cfg)
-}
-
-func (h AdminHandler) ListDisplayFieldPaths(c *gin.Context) {
-	paths, err := service.ListDisplayFieldPaths(h.DB)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load field paths"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": paths})
 }
 
 func (h AdminHandler) UpdateProfile(c *gin.Context) {
@@ -129,8 +132,22 @@ func (h AdminHandler) UpdateProfile(c *gin.Context) {
 
 func (h AdminHandler) HeaderPreview(c *gin.Context) {
 	variant := c.DefaultQuery("variant", "loader")
+	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
+		return
+	}
+	publicBaseURL := c.Query("public_base_url")
+	if strings.TrimSpace(publicBaseURL) != "" {
+		normalized, err := service.ValidatePublicBaseURL(publicBaseURL)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		integration.EffectivePublicBaseURL = normalized
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"variant": variant,
-		"code":    service.HeaderPreview(h.Cfg, variant),
+		"code":    service.HeaderPreview(h.Cfg, integration.EffectivePublicBaseURL, variant),
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"komari-ip-history/internal/config"
 	"komari-ip-history/internal/httpx/middleware"
 	"komari-ip-history/internal/models"
+	"komari-ip-history/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -86,12 +87,18 @@ func (h AuthHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"logged_in": false})
 		return
 	}
+	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"logged_in":       true,
-		"username":        user.Username,
-		"app_env":         h.Cfg.AppEnv,
-		"base_path":       h.Cfg.BasePath,
-		"public_base_url": h.Cfg.PublicBaseURL,
+		"logged_in":                 true,
+		"username":                  user.Username,
+		"app_env":                   h.Cfg.AppEnv,
+		"base_path":                 h.Cfg.BasePath,
+		"public_base_url":           integration.PublicBaseURL,
+		"effective_public_base_url": integration.EffectivePublicBaseURL,
 	})
 }
 

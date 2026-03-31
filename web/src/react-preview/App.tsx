@@ -19,22 +19,14 @@ import {
 } from "react-router-dom";
 import { apiRequest, UnauthorizedError } from "./lib/api";
 import { formatDateTime } from "./lib/format";
-import {
-  buildRecentChangeSummary,
-  buildStructuredCompareGroups,
-  groupHistoryPath,
-  parseHistoryRecordResult,
-  renderChangeValue
-} from "./lib/changes";
-import { renderCurrentReportMarkup } from "./lib/report";
+import { CurrentReportView } from "./lib/report";
 import { getNodeListSummaryEntries } from "./lib/result";
-import { mergeCompareStats } from "../compare";
 import type {
-  ChangePriorityConfig,
-  DisplayFieldsConfig,
+  IntegrationSettings,
   MeResponse,
   NodeDetail,
-  NodeListItem
+  NodeListItem,
+  RuntimeResponse
 } from "./lib/types";
 
 type NavItem = {
@@ -47,24 +39,12 @@ const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <R
 
 const settingsNavItems: NavItem[] = [
   { to: "/settings/integration", label: "接入配置", icon: <GearIcon /> },
-  { to: "/settings/fields", label: "展示字段", icon: <GearIcon /> },
-  { to: "/settings/priority", label: "变化规则", icon: <GearIcon /> },
   { to: "/settings/admin", label: "管理员设置", icon: <GearIcon /> }
 ];
-
-function legacyHref() {
-  return `${window.location.pathname}${window.location.hash || "#/nodes"}`;
-}
 
 function routeLabel(pathname: string) {
   if (pathname === "/nodes") {
     return "节点结果";
-  }
-  if (/^\/nodes\/[^/]+\/history$/.test(pathname)) {
-    return "历史变化";
-  }
-  if (/^\/nodes\/[^/]+\/changes$/.test(pathname)) {
-    return "变化视图";
   }
   if (pathname.startsWith("/nodes/")) {
     return "节点详情";
@@ -72,38 +52,20 @@ function routeLabel(pathname: string) {
   if (pathname === "/settings/integration") {
     return "接入配置";
   }
-  if (pathname === "/settings/fields") {
-    return "展示字段";
-  }
-  if (pathname === "/settings/priority") {
-    return "变化规则";
-  }
   if (pathname === "/settings/admin") {
     return "管理员设置";
   }
-  return "迁移预览";
+  return "工作区";
 }
 
 async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
 }
 
-function compareStatusLabel(status: "changed" | "added" | "unchanged") {
-  if (status === "added") {
-    return "新增";
-  }
-  if (status === "changed") {
-    return "变化";
-  }
-  return "未变化";
-}
-
 function useNodePageData(uuid: string, onUnauthorized: () => void) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<NodeDetail | null>(null);
-  const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
-  const [priority, setPriority] = useState<ChangePriorityConfig>({ secondary_paths: ["Meta"] });
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -120,19 +82,13 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
       setError("");
 
       try {
-        const [detailResponse, displayFields, priorityResponse] = await Promise.all([
-          apiRequest<NodeDetail>(`/nodes/${uuid}`),
-          apiRequest<DisplayFieldsConfig>("/admin/display-fields"),
-          apiRequest<ChangePriorityConfig>("/admin/change-priority")
-        ]);
+        const detailResponse = await apiRequest<NodeDetail>(`/nodes/${uuid}`);
 
         if (cancelled) {
           return;
         }
 
         setDetail(detailResponse);
-        setHiddenPaths(displayFields.hidden_paths ?? []);
-        setPriority(priorityResponse);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -160,8 +116,6 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
     loading,
     error,
     detail,
-    hiddenPaths,
-    priority,
     reload: () => setReloadToken((value) => value + 1)
   };
 }
@@ -172,7 +126,7 @@ function AppLoading() {
       <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
         <div className="space-y-3">
           <p className="text-3xl font-medium tracking-tight text-slate-950">Komari IP Quality</p>
-          <p className="text-sm text-slate-500">正在载入 React 迁移预览...</p>
+          <p className="text-sm text-slate-500">正在载入后台工作区...</p>
         </div>
       </div>
     </div>
@@ -204,12 +158,20 @@ function SidebarSection(props: { title: string; items: NavItem[] }) {
   );
 }
 
-function LoginPage(props: { onAuthenticated: (me: MeResponse) => void }) {
+function LoginPage(props: { me: MeResponse | null; onAuthenticated: (me: MeResponse) => void }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const redirectTarget = searchParams.get("redirect") || "/nodes";
+
+  useEffect(() => {
+    if (props.me) {
+      navigate(redirectTarget, { replace: true });
+    }
+  }, [navigate, props.me, redirectTarget]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -222,12 +184,16 @@ function LoginPage(props: { onAuthenticated: (me: MeResponse) => void }) {
       });
       const me = await apiRequest<MeResponse>("/auth/me");
       props.onAuthenticated(me);
-      navigate("/nodes", { replace: true });
+      navigate(redirectTarget, { replace: true });
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "登录失败");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (props.me) {
+    return <AppLoading />;
   }
 
   return (
@@ -268,6 +234,83 @@ function LoginPage(props: { onAuthenticated: (me: MeResponse) => void }) {
         </form>
       </div>
     </div>
+  );
+}
+
+function ConnectPage(props: { onUnauthorized: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const uuid = searchParams.get("uuid")?.trim() || "";
+  const name = searchParams.get("name")?.trim() || "未命名节点";
+  const isEmbed = searchParams.get("embed") === "1";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function connectNode() {
+      if (!uuid) {
+        setError("缺少节点 UUID，无法继续接入。");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        await apiRequest("/embed/nodes/register", {
+          method: "POST",
+          body: JSON.stringify({ uuid, name })
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        navigate(`/nodes/${uuid}${isEmbed ? "?embed=1" : ""}`, { replace: true });
+      } catch (connectError) {
+        if (cancelled) {
+          return;
+        }
+        if (connectError instanceof UnauthorizedError) {
+          props.onUnauthorized();
+          navigate(`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`, { replace: true });
+          return;
+        }
+        setError(connectError instanceof Error ? connectError.message : "节点接入失败");
+        setLoading(false);
+      }
+    }
+
+    void connectNode();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, uuid]);
+
+  if (loading) {
+    return (
+      <section className="space-y-6">
+        <PageHeader title="接入节点" subtitle="正在为当前节点创建或恢复 IP 质量视图。" backTo={isEmbed ? undefined : "/nodes"} />
+        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="space-y-3">
+            <div className="h-6 w-40 animate-pulse rounded-xl bg-slate-100" />
+            <div className="h-4 w-64 animate-pulse rounded-xl bg-slate-100" />
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <NodePageError
+      title="接入节点"
+      subtitle={name}
+      backTo="/nodes"
+      error={error || "节点接入失败。"}
+      onRetry={() => window.location.reload()}
+    />
   );
 }
 
@@ -366,7 +409,6 @@ function NodesPage(props: { onUnauthorized: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [nodes, setNodes] = useState<NodeListItem[]>([]);
-  const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
@@ -378,17 +420,13 @@ function NodesPage(props: { onUnauthorized: () => void }) {
       setLoading(true);
       setError("");
       try {
-        const [nodeResponse, displayFields] = await Promise.all([
-          apiRequest<{ items: NodeListItem[] }>(`/nodes${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ""}`),
-          apiRequest<DisplayFieldsConfig>("/admin/display-fields")
-        ]);
+        const nodeResponse = await apiRequest<{ items: NodeListItem[] }>(`/nodes${searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : ""}`);
 
         if (cancelled) {
           return;
         }
 
         setNodes(nodeResponse.items);
-        setHiddenPaths(displayFields.hidden_paths ?? []);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -500,7 +538,7 @@ function NodesPage(props: { onUnauthorized: () => void }) {
                   </div>
                   <div className="min-w-0 text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
                   <div className="min-w-0">
-                    <NodeSummary item={item} hiddenPaths={hiddenPaths} />
+                    <NodeSummary item={item} hiddenPaths={[]} />
                   </div>
                   <div className="text-sm font-semibold text-indigo-600">查看</div>
                 </Link>
@@ -524,102 +562,6 @@ function NodeDetailLoading() {
       <div className="h-80 animate-pulse rounded-[24px] bg-slate-100" />
       <div className="h-40 animate-pulse rounded-[24px] bg-slate-100" />
     </section>
-  );
-}
-
-function OverviewPill(props: { label: string; value: number; tone: "changed" | "added" | "unchanged" }) {
-  return (
-    <span className={`summary-pill summary-pill-compare ${props.tone}`}>
-      <strong>{props.label}</strong>
-      <span>{props.value}</span>
-    </span>
-  );
-}
-
-function RecentChangeSection(props: {
-  detail: NodeDetail;
-  hiddenPaths: string[];
-  priority: ChangePriorityConfig;
-}) {
-  const summary = buildRecentChangeSummary(props.detail, props.hiddenPaths, props.priority);
-
-  if (summary.state === "empty") {
-    return (
-      <div className="summary-section" data-detail-change="empty">
-        <div className="summary-head">
-          <strong>最近变化</strong>
-          <span className="chip">N/A</span>
-        </div>
-        <div className="muted">当前还没有历史记录，暂时无法判断最近一次变化。</div>
-      </div>
-    );
-  }
-
-  if (summary.state === "single") {
-    return (
-      <div className="summary-section" data-detail-change="single">
-        <div className="summary-head">
-          <strong>最近变化</strong>
-          <span className="chip">无对比基准</span>
-        </div>
-        <div className="muted">当前只有 1 条历史记录，需等待下一次结果落库后才能比较变化。</div>
-        <div className="muted">最新记录时间: {formatDateTime(summary.latestRecordedAt)}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="summary-section" data-detail-change="overview">
-      <div className="summary-head">
-        <strong>最近变化</strong>
-        <span className="chip">相对上一条历史</span>
-      </div>
-      <div className="compare-overview">
-        <OverviewPill label="变化" value={summary.stats.changed} tone="changed" />
-        <OverviewPill label="新增" value={summary.stats.added} tone="added" />
-        <OverviewPill label="未变化" value={summary.stats.unchanged} tone="unchanged" />
-      </div>
-      <div className="change-summary-grid">
-        {summary.groups.length > 0 ? (
-          summary.groups.map((group) => (
-            <div key={group.key} className="card change-card">
-              <div className="summary-head">
-                <strong>{group.title}</strong>
-                <span className="chip">{group.chip}</span>
-              </div>
-              <div className="compare-overview">
-                <OverviewPill label="变化" value={group.stats.changed} tone="changed" />
-                <OverviewPill label="新增" value={group.stats.added} tone="added" />
-              </div>
-              <div className="change-section">
-                <div className="summary-head">
-                  <strong>重点变化</strong>
-                  <span className="chip">{group.classifiedChanges.primary.length} 项</span>
-                </div>
-                <div className="change-list">
-                  {group.classifiedChanges.primary.slice(0, 3).map((change) => (
-                    <div key={`${group.key}:${change.fullPath}`} className="summary-section" data-detail-change-entry="true">
-                      <div className="summary-head">
-                        <strong>{groupHistoryPath(change.path || change.fullPath)}</strong>
-                        <span className={`diff-badge ${change.status}`}>{change.status === "added" ? "新增" : "变化"}</span>
-                      </div>
-                      <div className="muted">{renderChangeValue(change)}</div>
-                    </div>
-                  ))}
-                  {group.classifiedChanges.primary.length === 0 ? (
-                    <div className="muted">当前没有重点变化。</div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="card change-card change-card-empty">
-            <div className="muted">最近一次没有字段变化。</div>
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -725,95 +667,12 @@ function NodePageError(props: {
   );
 }
 
-function ChangeGroupCards(props: {
-  groups: ReturnType<typeof buildStructuredCompareGroups>;
-  emptyText: string;
-  dataAttr: "history" | "change";
-  includeSecondary?: boolean;
-}) {
-  if (props.groups.length === 0) {
-    return (
-      <div className="card change-card change-card-empty">
-        <div className="muted">{props.emptyText}</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="change-summary-grid">
-      {props.groups.map((group) => (
-        <div key={group.key} className="card change-card">
-          <div className="summary-head">
-            <strong>{group.title}</strong>
-            <span className="chip">{group.chip}</span>
-          </div>
-          <div className="compare-overview">
-            <OverviewPill label="变化" value={group.stats.changed} tone="changed" />
-            <OverviewPill label="新增" value={group.stats.added} tone="added" />
-          </div>
-
-          <div className="change-section">
-            <div className="summary-head">
-              <strong>重点变化</strong>
-              <span className="chip">{group.classifiedChanges.primary.length} 项</span>
-            </div>
-            <div className="change-list">
-              {group.classifiedChanges.primary.length > 0 ? (
-                group.classifiedChanges.primary.map((change) => (
-                  <div
-                    key={`${group.key}:${change.fullPath}`}
-                    className="summary-section"
-                    {...(props.dataAttr === "history"
-                      ? { "data-history-change-entry": "true" }
-                      : { "data-change-view-entry": "true" })}
-                  >
-                    <div className="summary-head">
-                      <strong>{groupHistoryPath(change.path || change.fullPath)}</strong>
-                      <span className={`diff-badge ${change.status}`}>{compareStatusLabel(change.status)}</span>
-                    </div>
-                    <div className="muted">{renderChangeValue(change)}</div>
-                  </div>
-                ))
-              ) : (
-                <div className="muted">当前没有重点变化。</div>
-              )}
-            </div>
-          </div>
-
-          {props.includeSecondary && group.classifiedChanges.secondary.length > 0 ? (
-            <div className="change-section change-section-secondary">
-              <div className="summary-head">
-                <strong>辅助变化</strong>
-                <span className="chip">{group.classifiedChanges.secondary.length} 项</span>
-              </div>
-              <div className="change-list">
-                {group.classifiedChanges.secondary.map((change) => (
-                  <div
-                    key={`${group.key}:${change.fullPath}:secondary`}
-                    className="summary-section"
-                    {...(props.dataAttr === "history"
-                      ? { "data-history-change-entry": "true" }
-                      : { "data-change-view-entry": "true" })}
-                  >
-                    <div className="summary-head">
-                      <strong>{groupHistoryPath(change.path || change.fullPath)}</strong>
-                      <span className={`diff-badge ${change.status}`}>{compareStatusLabel(change.status)}</span>
-                    </div>
-                    <div className="muted">{renderChangeValue(change)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const { uuid = "" } = useParams();
-  const { loading, error, detail, hiddenPaths, priority, reload } = useNodePageData(uuid, props.onUnauthorized);
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
+  const { loading, error, detail, reload } = useNodePageData(uuid, props.onUnauthorized);
 
   if (loading) {
     return <NodeDetailLoading />;
@@ -836,504 +695,332 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       <PageHeader
         title={detail.name}
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有检测结果"}
-        backTo="/nodes"
-        actions={
-          <>
-            <Link
-              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-              to={`/nodes/${detail.komari_node_uuid}/history`}
-            >
-              历史变化
-            </Link>
-            <Link
-              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-              to={`/nodes/${detail.komari_node_uuid}/changes`}
-            >
-              变化视图
-            </Link>
-          </>
-        }
+        backTo={isEmbed ? undefined : "/nodes"}
       />
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section">
           <h2 className="text-base font-semibold text-slate-900">当前 IP 质量</h2>
-          <div
-            data-detail-report="true"
-            dangerouslySetInnerHTML={{
-              __html: renderCurrentReportMarkup(detail.current_result, hiddenPaths)
-            }}
+          <div data-detail-report="true">
+          <CurrentReportView
+            result={detail.current_result}
+            hiddenPaths={[]}
           />
-        </div>
-
-        <div className="section">
-          <div className="section-head">
-            <h2>最近变化</h2>
-            <Link
-              className="button ghost"
-              to={`/nodes/${detail.komari_node_uuid}/history`}
-            >
-              查看完整历史
-            </Link>
           </div>
-          <RecentChangeSection detail={detail} hiddenPaths={hiddenPaths} priority={priority} />
         </div>
 
-        <ReportConfigSection me={props.me} detail={detail} />
+        {!isEmbed ? (
+          <ReportConfigSection me={props.me} detail={detail} />
+        ) : null}
       </section>
     </section>
   );
 }
 
-function HistoryPage(props: { onUnauthorized: () => void }) {
-  const { uuid = "" } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { loading, error, detail, hiddenPaths, priority, reload } = useNodePageData(uuid, props.onUnauthorized);
+function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [runtime, setRuntime] = useState<RuntimeResponse | null>(null);
+  const [integration, setIntegration] = useState<IntegrationSettings | null>(null);
+  const [publicBaseURLInput, setPublicBaseURLInput] = useState("");
+  const [loaderCode, setLoaderCode] = useState("");
+  const [inlineCode, setInlineCode] = useState("");
+  const [savingAddress, setSavingAddress] = useState(false);
+  const publicBaseURL = (integration?.public_base_url ?? props.me.public_base_url ?? "").trim();
+  const basePath = runtime?.base_path || props.me.base_path || "";
+  const suggestedPublicBaseURL = `${window.location.origin}${basePath || ""}`.replace(/\/$/, "");
+  const previewPublicBaseURL = publicBaseURL || suggestedPublicBaseURL;
 
-  if (loading) {
-    return <NodeDetailLoading />;
+  function buildPreviewPath(variant: "loader" | "inline", baseURL: string) {
+    const query = new URLSearchParams({ variant });
+    if (baseURL) {
+      query.set("public_base_url", baseURL);
+    }
+    return `/admin/header-preview?${query.toString()}`;
   }
 
-  if (error || !detail) {
-    return (
-      <NodePageError
-        title="历史变化"
-        subtitle={error || "节点不存在"}
-        backTo="/nodes"
-        error={error || "节点不存在。"}
-        onRetry={reload}
-      />
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
 
-  const selectedID = Number(searchParams.get("record") ?? "");
-  const selectedIndex = detail.history.findIndex((item) => item.id === selectedID);
-  const resolvedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-  const selectedRecord = detail.history[resolvedIndex] ?? null;
-  const previousRecord = resolvedIndex >= 0 ? detail.history[resolvedIndex + 1] ?? null : null;
-  const selectedResult = parseHistoryRecordResult(selectedRecord);
-  const previousResult = previousRecord ? parseHistoryRecordResult(previousRecord) : undefined;
-  const historyCompareGroups = previousRecord
-    ? buildStructuredCompareGroups(selectedResult, previousResult, hiddenPaths, priority.secondary_paths)
-    : [];
-  const historyStats = historyCompareGroups.reduce(
-    (summary, group) => {
-      mergeCompareStats(summary, group.stats);
-      return summary;
-    },
-    { changed: 0, added: 0, unchanged: 0 }
-  );
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const [runtimeResponse, integrationResponse, loaderPreview, inlinePreview] = await Promise.all([
+          apiRequest<RuntimeResponse>("/admin/runtime"),
+          apiRequest<IntegrationSettings>("/admin/integration"),
+          apiRequest<{ code: string }>(buildPreviewPath("loader", previewPublicBaseURL)),
+          apiRequest<{ code: string }>(buildPreviewPath("inline", previewPublicBaseURL))
+        ]);
 
-  return (
-    <section className="space-y-6">
-      <PageHeader
-        title={`${detail.name} 的历史变化`}
-        subtitle={detail.history.length > 0 ? `共 ${detail.history.length} 条记录` : "当前还没有历史记录"}
-        backTo={`/nodes/${detail.komari_node_uuid}`}
-        actions={
-          <Link
-            className="button ghost"
-            to={`/nodes/${detail.komari_node_uuid}/changes${selectedRecord ? `?record=${selectedRecord.id}` : ""}`}
-          >
-            变化视图
-          </Link>
+        if (cancelled) {
+          return;
         }
-      />
 
-      <section className="panel">
-        <div className="section">
-          <h2>历史记录</h2>
-          <div className="list">
-            {detail.history.length > 0 ? (
-              detail.history.map((item, index) => {
-                const active = selectedRecord?.id === item.id;
-                const baseline = detail.history[index + 1] ?? null;
-                const stats = baseline
-                  ? buildStructuredCompareGroups(
-                      parseHistoryRecordResult(item),
-                      parseHistoryRecordResult(baseline),
-                      hiddenPaths,
-                      priority.secondary_paths
-                    ).reduce(
-                      (summary, group) => {
-                        mergeCompareStats(summary, group.stats);
-                        return summary;
-                      },
-                      { changed: 0, added: 0, unchanged: 0 }
-                    )
-                  : { changed: 0, added: 0, unchanged: 0 };
-                const deltaText = baseline
-                  ? `变化 ${stats.changed} 项 / 新增 ${stats.added} 项 / 未变化 ${stats.unchanged} 项`
-                  : "首条记录，无上一条可比较";
-
-                return (
-                  <button
-                    key={item.id}
-                    className={`card history-card${active ? " active" : ""}`}
-                    data-history-record={item.id}
-                    onClick={() => setSearchParams({ record: String(item.id) })}
-                    type="button"
-                  >
-                    <div className="section-head">
-                      <strong>{item.summary || "无摘要"}</strong>
-                      <span className="chip">{formatDateTime(item.recorded_at)}</span>
-                    </div>
-                    <div className="muted">记录 ID: {item.id}</div>
-                    <div className="muted">{deltaText}</div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="card empty-state-card">
-                <strong>暂无历史记录</strong>
-                <p className="muted">等待节点继续上报后，这里会出现历史变化。</p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="section">
-          <div className="section-head">
-            <h2>选中记录</h2>
-            {selectedRecord ? <span className="chip">{formatDateTime(selectedRecord.recorded_at)}</span> : null}
-          </div>
-          <div className="history-compare-meta">
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>当前记录</strong>
-                <span className="chip">{selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
-              </div>
-              <div className="muted">{selectedRecord?.summary || "无摘要"}</div>
-            </div>
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>对比上一条</strong>
-                <span className="chip">{previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
-              </div>
-              <div className="muted">{previousRecord?.summary || "没有更早记录"}</div>
-            </div>
-          </div>
-          <div className="summary-section" data-history-change-list="true">
-            <div className="summary-head">
-              <strong>变化内容</strong>
-              <span className="chip">{previousRecord ? "相对上一条" : "无对比"}</span>
-            </div>
-            {previousRecord ? (
-              <>
-                <div className="compare-overview">
-                  <OverviewPill label="变化" value={historyStats.changed} tone="changed" />
-                  <OverviewPill label="新增" value={historyStats.added} tone="added" />
-                  <OverviewPill label="未变化" value={historyStats.unchanged} tone="unchanged" />
-                </div>
-                <ChangeGroupCards
-                  groups={historyCompareGroups}
-                  emptyText="当前记录相对上一条没有字段变化。"
-                  dataAttr="history"
-                  includeSecondary
-                />
-              </>
-            ) : (
-              <div className="muted">这是首条历史记录，没有更早的基准可比较。</div>
-            )}
-          </div>
-        </div>
-      </section>
-    </section>
-  );
-}
-
-type ChangeViewFilters = {
-  primaryOnly: boolean;
-  changedOnly: boolean;
-  group: string;
-};
-
-function ChangeViewPage(props: { onUnauthorized: () => void }) {
-  const { uuid = "" } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const { loading, error, detail, hiddenPaths, priority, reload } = useNodePageData(uuid, props.onUnauthorized);
-  const [filters, setFilters] = useState<ChangeViewFilters>({
-    primaryOnly: false,
-    changedOnly: false,
-    group: "all"
-  });
-
-  if (loading) {
-    return <NodeDetailLoading />;
-  }
-
-  if (error || !detail) {
-    return (
-      <NodePageError
-        title="变化视图"
-        subtitle={error || "节点不存在"}
-        backTo="/nodes"
-        error={error || "节点不存在。"}
-        onRetry={reload}
-      />
-    );
-  }
-
-  const filterGroups = (groups: ReturnType<typeof buildStructuredCompareGroups>) =>
-    groups
-      .map((group) => {
-        const primaryChanges = group.classifiedChanges.primary;
-        const secondaryChanges = filters.primaryOnly ? [] : group.classifiedChanges.secondary;
-        const stats = {
-          changed: primaryChanges.filter((item) => item.status === "changed").length + secondaryChanges.filter((item) => item.status === "changed").length,
-          added: primaryChanges.filter((item) => item.status === "added").length + secondaryChanges.filter((item) => item.status === "added").length,
-          unchanged: 0
-        };
-
-        return {
-          ...group,
-          stats,
-          classifiedChanges: {
-            primary: primaryChanges,
-            secondary: secondaryChanges
-          }
-        };
-      })
-      .filter((group) => {
-        if (filters.group !== "all" && group.key !== filters.group) {
-          return false;
+        setRuntime(runtimeResponse);
+        setIntegration(integrationResponse);
+        setPublicBaseURLInput(integrationResponse.public_base_url ?? "");
+        setLoaderCode(loaderPreview.code);
+        setInlineCode(inlinePreview.code);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
         }
-        if (filters.changedOnly) {
-          return group.stats.changed > 0 || group.stats.added > 0;
+        if (loadError instanceof UnauthorizedError) {
+          props.onUnauthorized();
+          return;
         }
-        return true;
-      });
+        setError(loadError instanceof Error ? loadError.message : "加载接入配置失败");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
 
-  const recordSummaries = detail.history.map((item, index) => {
-    const baseline = detail.history[index + 1] ?? null;
-    const groups = baseline
-      ? buildStructuredCompareGroups(
-          parseHistoryRecordResult(item),
-          parseHistoryRecordResult(baseline),
-          hiddenPaths,
-          priority.secondary_paths
-        )
-      : [];
-    const filteredGroups = filterGroups(groups);
-    const filteredStats = filteredGroups.reduce(
-      (summary, group) => {
-        mergeCompareStats(summary, group.stats);
-        return summary;
-      },
-      { changed: 0, added: 0, unchanged: 0 }
-    );
-    const hasMeaningfulChange = filteredStats.changed > 0 || filteredStats.added > 0;
+    void load();
 
-    return {
-      item,
-      baseline,
-      groups,
-      filteredGroups,
-      filteredStats,
-      hasMeaningfulChange
+    return () => {
+      cancelled = true;
     };
-  });
+  }, [props.onUnauthorized, previewPublicBaseURL]);
 
-  const selectedID = Number(searchParams.get("record") ?? "");
-  const selectedIndex = detail.history.findIndex((item) => item.id === selectedID);
-  const resolvedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-  const selectedRecordSummary = recordSummaries[resolvedIndex] ?? null;
-  const selectedRecord = selectedRecordSummary?.item ?? null;
-  const previousRecord = selectedRecordSummary?.baseline ?? null;
-  const visibleRecordSummaries = recordSummaries.filter((record) => (filters.changedOnly ? record.hasMeaningfulChange : true));
-  const groupOptions = Array.from(
-    new Map(
-      recordSummaries.flatMap((record) => record.groups.map((group) => [group.key, group.title]))
-    ).entries()
-  );
+  async function handleCopy(value: string, successText: string) {
+    try {
+      await copyText(value);
+      window.alert(successText);
+    } catch {
+      window.alert("复制失败，请手动复制。");
+    }
+  }
+
+  async function savePublicBaseURL(nextValue: string) {
+    setSavingAddress(true);
+    setError("");
+    try {
+      const saved = await apiRequest<IntegrationSettings>("/admin/integration", {
+        method: "PUT",
+        body: JSON.stringify({ public_base_url: nextValue })
+      });
+      setIntegration(saved);
+      setPublicBaseURLInput(saved.public_base_url ?? "");
+      const nextPreviewPublicBaseURL = saved.public_base_url || suggestedPublicBaseURL;
+
+      const [runtimeResponse, loaderPreview, inlinePreview] = await Promise.all([
+        apiRequest<RuntimeResponse>("/admin/runtime"),
+        apiRequest<{ code: string }>(buildPreviewPath("loader", nextPreviewPublicBaseURL)),
+        apiRequest<{ code: string }>(buildPreviewPath("inline", nextPreviewPublicBaseURL))
+      ]);
+      setRuntime(runtimeResponse);
+      setLoaderCode(loaderPreview.code);
+      setInlineCode(inlinePreview.code);
+      window.alert(saved.public_base_url ? "接入地址已保存。" : "已恢复为自动推导地址。");
+    } catch (saveError) {
+      if (saveError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(saveError instanceof Error ? saveError.message : "保存接入地址失败");
+    } finally {
+      setSavingAddress(false);
+    }
+  }
 
   return (
     <section className="space-y-6">
-      <PageHeader
-        title={`${detail.name} 的变化`}
-        subtitle="这里只看历史里发生了什么变化。"
-        backTo={`/nodes/${detail.komari_node_uuid}`}
-        actions={
-          <Link
-            className="button ghost"
-            to={`/nodes/${detail.komari_node_uuid}/history${selectedRecord ? `?record=${selectedRecord.id}` : ""}`}
-          >
-            历史记录
-          </Link>
-        }
-      />
+      <PageHeader title="接入配置" subtitle="复制 Header 到 Komari。默认按独立部署接入，需要时再兼容子路径。" />
 
-      <section className="panel" data-change-view="true">
-        <div className="section">
-          <div className="section-head">
-            <h2>变化记录</h2>
-            <span className="chip">{visibleRecordSummaries.length} 条</span>
-          </div>
-          <div className="change-filter-bar" data-change-view-filters="true">
-            <label className="card change-filter">
-              <span>只看重点变化</span>
-              <input
-                checked={filters.primaryOnly}
-                onChange={(event) => setFilters((value) => ({ ...value, primaryOnly: event.target.checked }))}
-                type="checkbox"
-              />
-            </label>
-            <label className="card change-filter">
-              <span>只看有变化记录</span>
-              <input
-                checked={filters.changedOnly}
-                onChange={(event) => setFilters((value) => ({ ...value, changedOnly: event.target.checked }))}
-                type="checkbox"
-              />
-            </label>
-            <label className="card change-filter change-filter-select">
-              <span>分组筛选</span>
-              <select
-                className="input"
-                onChange={(event) => setFilters((value) => ({ ...value, group: event.target.value }))}
-                value={filters.group}
-              >
-                <option value="all">全部分组</option>
-                {groupOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="list">
-            {visibleRecordSummaries.length > 0 ? (
-              visibleRecordSummaries.map((record) => {
-                const active = selectedRecord?.id === record.item.id;
-                const statusText = record.baseline
-                  ? record.hasMeaningfulChange
-                    ? `变化 ${record.filteredStats.changed} 项 / 新增 ${record.filteredStats.added} 项`
-                    : "无重点变化"
-                  : "首条记录，无上一条可比较";
-
-                return (
-                  <button
-                    key={record.item.id}
-                    className={`card history-card${active ? " active" : ""}`}
-                    data-change-record={record.item.id}
-                    onClick={() => setSearchParams({ record: String(record.item.id) })}
-                    type="button"
-                  >
-                    <div className="section-head">
-                      <strong>{record.item.summary || "无摘要"}</strong>
-                      <span className="chip">{formatDateTime(record.item.recorded_at)}</span>
-                    </div>
-                    <div className="muted">{statusText}</div>
-                    <div className="compare-overview">
-                      <OverviewPill label="变化" value={record.filteredStats.changed} tone="changed" />
-                      <OverviewPill label="新增" value={record.filteredStats.added} tone="added" />
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="card empty-state-card" data-change-view-empty="true">
-                <strong>当前没有可看的变化记录</strong>
-                <p className="muted">等下一次结果进入历史，或放宽筛选条件后再看。</p>
-              </div>
-            )}
-          </div>
+      {loading ? (
+        <div className="grid gap-4">
+          <div className="h-36 animate-pulse rounded-[24px] bg-slate-100" />
+          <div className="h-44 animate-pulse rounded-[24px] bg-slate-100" />
+          <div className="h-44 animate-pulse rounded-[24px] bg-slate-100" />
         </div>
+      ) : error ? (
+        <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">{error}</div>
+      ) : (
+        <>
+          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <h2 className="text-base font-semibold text-slate-900">接入地址</h2>
+                <p className="text-sm leading-6 text-slate-500">
+                  默认留空即可，系统会按你当前访问本服务时的地址生成 Header。只有在你需要固定域名、端口，或希望用户统一通过某个外部地址访问时，再手动填写。
+                </p>
+              </div>
 
-        <div className="section">
-          <div className="section-head">
-            <h2>本次变化</h2>
-            {selectedRecord ? <span className="chip">{formatDateTime(selectedRecord.recorded_at)}</span> : null}
-          </div>
-          <div className="history-compare-meta">
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>当前记录</strong>
-                <span className="chip">{selectedRecord ? formatDateTime(selectedRecord.recorded_at) : "N/A"}</span>
+              <label className="flex w-full flex-col gap-2 text-sm text-slate-700">
+                <span className="font-medium text-slate-900">手动覆盖地址（可选）</span>
+                <input
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+                  placeholder={suggestedPublicBaseURL || window.location.origin}
+                  value={publicBaseURLInput}
+                  onChange={(event) => setPublicBaseURLInput(event.target.value)}
+                  type="text"
+                />
+              </label>
+
+              <p className="text-sm leading-6 text-slate-500">
+                {publicBaseURL
+                  ? `当前已固定为：${publicBaseURL}`
+                  : `留空时将使用：${suggestedPublicBaseURL || window.location.origin}`}
+              </p>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="button"
+                  disabled={savingAddress}
+                  onClick={() => void savePublicBaseURL(publicBaseURLInput)}
+                  type="button"
+                >
+                  {savingAddress ? "保存中…" : "保存"}
+                </button>
+                <button
+                  className="button ghost"
+                  disabled={savingAddress}
+                  onClick={() => void savePublicBaseURL("")}
+                  type="button"
+                >
+                  恢复默认
+                </button>
               </div>
-              <div className="muted">{selectedRecord?.summary || "无摘要"}</div>
             </div>
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>对比上一条</strong>
-                <span className="chip">{previousRecord ? formatDateTime(previousRecord.recorded_at) : "N/A"}</span>
+          </section>
+
+          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="section-head">
+              <div>
+                <h2>推荐方案：loader 版</h2>
+                <p className="muted">推荐优先使用 loader 版，后续更新通常不需要重新复制整段代码。</p>
               </div>
-              <div className="muted">{previousRecord?.summary || "没有更早记录"}</div>
+              <button className="button" onClick={() => void handleCopy(loaderCode, "短 loader 版代码已复制。")} type="button">
+                复制 loader 版
+              </button>
             </div>
-          </div>
-          <div className="summary-section" data-change-view-overview="true">
-            <div className="summary-head">
-              <strong>变化摘要</strong>
-              <span className="chip">{previousRecord ? "相对上一条" : "无对比"}</span>
-            </div>
-            {selectedRecordSummary ? (
-              <div className="compare-overview">
-                <OverviewPill label="变化" value={selectedRecordSummary.filteredStats.changed} tone="changed" />
-                <OverviewPill label="新增" value={selectedRecordSummary.filteredStats.added} tone="added" />
-                <OverviewPill label="未变化" value={selectedRecordSummary.filteredStats.unchanged} tone="unchanged" />
+            <pre className="code-block code-block-compact">{loaderCode}</pre>
+          </section>
+
+          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="section-head">
+              <div>
+                <h2>完整内联版</h2>
+                <p className="muted">只有在你明确不想依赖 loader 时再使用。逻辑更新后需要重新复制。</p>
               </div>
-            ) : (
-              <div className="muted">当前还没有历史记录，暂时无法查看变化。</div>
-            )}
-          </div>
-          <div className="summary-section" data-change-view-list="true">
-            <div className="summary-head">
-              <strong>变化明细</strong>
-              <span className="chip">{previousRecord ? "字段级" : "无对比"}</span>
+              <button className="button ghost" onClick={() => void handleCopy(inlineCode, "完整内联版代码已复制。")} type="button">
+                复制完整内联版
+              </button>
             </div>
-            {selectedRecordSummary ? (
-              <ChangeGroupCards
-                groups={selectedRecordSummary.filteredGroups}
-                emptyText="当前记录在筛选条件下没有可展示变化。"
-                dataAttr="change"
-                includeSecondary={!filters.primaryOnly}
-              />
-            ) : (
-              <div className="muted">当前还没有历史记录，暂时无法查看变化。</div>
-            )}
-          </div>
-        </div>
-      </section>
+            <pre className="code-block code-block-compact">{inlineCode}</pre>
+          </section>
+        </>
+      )}
     </section>
   );
 }
 
-function PlaceholderPage(props: { title: string; subtitle: string; bullets: string[]; backTo?: string }) {
+function AdminPage(props: { me: MeResponse; onUnauthorized: () => void }) {
+  const navigate = useNavigate();
+  const [username, setUsername] = useState(props.me.username ?? "admin");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest("/admin/profile", {
+        method: "PUT",
+        body: JSON.stringify({ username: username.trim(), password })
+      });
+      window.alert("管理员信息已保存，请重新登录。");
+      navigate("/login", { replace: true });
+    } catch (saveError) {
+      if (saveError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(saveError instanceof Error ? saveError.message : "保存管理员设置失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="space-y-6">
-      <PageHeader title={props.title} subtitle={props.subtitle} backTo={props.backTo} />
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="space-y-4">
-            <div className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-              Stage C
-            </div>
-            <p className="max-w-2xl text-sm leading-6 text-slate-600">
-              这页还没有开始正式搬业务逻辑，当前先保留在 React 壳子里占位，等节点详情页稳定后继续逐页迁移。
-            </p>
+      <PageHeader title="管理员设置" subtitle="修改登录账号和密码。" />
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="summary-section">
+          <div className="summary-head">
+            <strong>当前管理员</strong>
+            <span className="chip">单管理员模式</span>
           </div>
+          <div className="muted">当前登录账号：{props.me.username ?? "admin"}。修改后会要求重新登录。</div>
         </div>
-        <aside className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">本页下一步</h2>
-            <ul className="space-y-3 text-sm text-slate-700">
-              {props.bullets.map((bullet) => (
-                <li key={bullet} className="flex gap-3">
-                  <span className="mt-1 inline-block h-2 w-2 rounded-full bg-indigo-500" />
-                  <span>{bullet}</span>
-                </li>
-              ))}
-            </ul>
+
+        <form className="section space-y-4" onSubmit={handleSave}>
+          <label className="grid gap-2 text-sm text-slate-700">
+            <span>新用户名</span>
+            <input
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+            />
+          </label>
+          <label className="grid gap-2 text-sm text-slate-700">
+            <span>新密码</span>
+            <input
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              type="password"
+              placeholder="留空表示不修改密码"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          <div>
+            <button className="button" type="submit" disabled={saving}>
+              {saving ? "保存中..." : "保存并重新登录"}
+            </button>
           </div>
-        </aside>
-      </div>
+        </form>
+      </section>
     </section>
   );
 }
 
 function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnauthorized: () => void }) {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
+
+  const content = (
+    <Routes>
+      <Route path="/" element={<Navigate to="/nodes" replace />} />
+      <Route path="/connect" element={<ConnectPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes" element={<NodesPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes/:uuid" element={<NodeDetailPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes/:uuid/history" element={<Navigate to=".." relative="path" replace />} />
+      <Route path="/nodes/:uuid/changes" element={<Navigate to=".." relative="path" replace />} />
+      <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />
+      <Route
+        path="/settings/admin"
+        element={<AdminPage me={props.me} onUnauthorized={props.onUnauthorized} />}
+      />
+      <Route path="*" element={<Navigate to="/nodes" replace />} />
+    </Routes>
+  );
+
+  if (isEmbed) {
+    return (
+      <div className="embed-shell bg-slate-50 text-slate-900">
+        <div className="embed-panel mx-auto max-w-[1120px] space-y-6">{content}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -1351,16 +1038,10 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
         <main className="min-w-0">
           <header className="flex flex-wrap items-center justify-between gap-4 px-6 py-5 lg:px-8">
             <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Migration Phase C</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Komari IP Quality</p>
               <p className="text-sm text-slate-500">{routeLabel(location.pathname)}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <a
-                className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600"
-                href={legacyHref()}
-              >
-                返回旧前端
-              </a>
               <span className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-xs font-medium text-slate-500">
                 模式 {props.me.app_env ?? "unknown"}
               </span>
@@ -1374,56 +1055,7 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
               </button>
             </div>
           </header>
-          <div className="space-y-6 px-6 pb-8 lg:px-8">
-            <Routes>
-              <Route path="/" element={<Navigate to="/nodes" replace />} />
-              <Route path="/nodes" element={<NodesPage onUnauthorized={props.onUnauthorized} />} />
-              <Route path="/nodes/:uuid" element={<NodeDetailPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
-              <Route path="/nodes/:uuid/history" element={<HistoryPage onUnauthorized={props.onUnauthorized} />} />
-              <Route path="/nodes/:uuid/changes" element={<ChangeViewPage onUnauthorized={props.onUnauthorized} />} />
-              <Route
-                path="/settings/integration"
-                element={
-                  <PlaceholderPage
-                    title="接入配置"
-                    subtitle="会优先把 loader / inline 代码复制体验和说明文案迁过来。"
-                    bullets={["迁移 Header 预览接口", "迁移代码高亮与固定高度代码框", "迁移其他设置快捷入口"]}
-                  />
-                }
-              />
-              <Route
-                path="/settings/fields"
-                element={
-                  <PlaceholderPage
-                    title="展示字段"
-                    subtitle="这页后续会承载全局字段显隐配置。"
-                    bullets={["迁移字段分组展示", "迁移全选/全不选操作", "迁移保存接口和提示反馈"]}
-                  />
-                }
-              />
-              <Route
-                path="/settings/priority"
-                element={
-                  <PlaceholderPage
-                    title="变化规则"
-                    subtitle="这页后续会承载重点变化和辅助变化的规则配置。"
-                    bullets={["迁移规则分组展示", "迁移默认规则按钮", "迁移保存后立即刷新规则"]}
-                  />
-                }
-              />
-              <Route
-                path="/settings/admin"
-                element={
-                  <PlaceholderPage
-                    title="管理员设置"
-                    subtitle="这页后续会承载单管理员账号和密码修改。"
-                    bullets={["迁移当前管理员信息", "迁移改名改密表单", "迁移保存后重新登录流程"]}
-                  />
-                }
-              />
-              <Route path="*" element={<Navigate to="/nodes" replace />} />
-            </Routes>
-          </div>
+          <div className="space-y-6 px-6 pb-8 lg:px-8">{content}</div>
         </main>
       </div>
     </div>
@@ -1432,6 +1064,7 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
 
 export function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<MeResponse | null>(null);
 
@@ -1481,7 +1114,7 @@ export function App() {
       <Route path="/" element={<Navigate to={me ? "/nodes" : "/login"} replace />} />
       <Route
         path="/login"
-        element={me ? <Navigate to="/nodes" replace /> : <LoginPage onAuthenticated={(nextMe) => setMe(nextMe)} />}
+        element={<LoginPage me={me} onAuthenticated={(nextMe) => setMe(nextMe)} />}
       />
       <Route
         path="/*"
@@ -1492,11 +1125,10 @@ export function App() {
               onLogout={handleLogout}
               onUnauthorized={() => {
                 setMe(null);
-                navigate("/login", { replace: true });
               }}
             />
           ) : (
-            <Navigate to="/login" replace />
+            <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
           )
         }
       />

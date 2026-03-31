@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           for _ in {1..60}; do
-            if curl -fsS http://localhost:8080/ >/dev/null && curl -fsS http://localhost:8080/ipq/ >/dev/null; then
+            if curl -fsS http://localhost:8080/ >/dev/null && curl -fsS http://localhost:8090/ >/dev/null; then
               exit 0
             fi
             sleep 2

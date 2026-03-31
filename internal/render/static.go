@@ -15,8 +15,12 @@ import (
 func MountSPA(router *gin.Engine, cfg config.Config) {
 	base := cfg.BasePath
 
-	router.GET(base, serveIndex(cfg))
-	router.GET(base+"/", serveIndex(cfg))
+	if base == "" {
+		router.GET("/", serveIndex(cfg))
+	} else {
+		router.GET(base, serveIndex(cfg))
+		router.GET(base+"/", serveIndex(cfg))
+	}
 	router.NoRoute(func(c *gin.Context) {
 		if c.Request.Method != http.MethodGet {
 			c.Status(http.StatusNotFound)

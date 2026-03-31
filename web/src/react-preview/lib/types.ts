@@ -4,10 +4,20 @@ export type MeResponse = {
   app_env?: string;
   base_path?: string;
   public_base_url?: string;
+  effective_public_base_url?: string;
 };
 
-export type DisplayFieldsConfig = {
-  hidden_paths: string[];
+export type RuntimeResponse = {
+  app_name: string;
+  app_env: string;
+  base_path: string;
+  public_base_url?: string;
+  effective_public_base_url?: string;
+};
+
+export type IntegrationSettings = {
+  public_base_url: string;
+  effective_public_base_url: string;
 };
 
 export type ChangePriorityConfig = {

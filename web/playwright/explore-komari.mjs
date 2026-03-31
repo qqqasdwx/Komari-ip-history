@@ -1,7 +1,8 @@
 import { chromium } from '@playwright/test';
 import { writeFileSync, mkdirSync } from 'node:fs';
 
-const baseURL = 'http://proxy:8080';
+const komariBaseURL = (process.env.KOMARI_BASE_URL || 'http://proxy:8080').replace(/\/$/, '');
+const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || 'http://localhost:8090').replace(/\/$/, '');
 const outputDir = '/workspace/web/playwright-output';
 mkdirSync(outputDir, { recursive: true });
 
@@ -20,18 +21,25 @@ async function jsonFetch(page, url, options) {
   }, { url, options });
 }
 
+async function loginApp(page) {
+  await page.goto(`${appBaseURL}/#/login`);
+  await page.getByRole('textbox', { name: '用户名' }).fill('admin');
+  await page.getByLabel('密码').fill('admin');
+  await page.getByRole('button', { name: '登录' }).click();
+  await page.waitForURL('**/#/nodes');
+}
+
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ baseURL, viewport: { width: 1440, height: 1024 } });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1024 } });
 const page = await context.newPage();
 
-await page.goto('/');
+await loginApp(page);
+
+const appLogin = await jsonFetch(page, '/api/v1/auth/me');
+
+await page.goto(`${komariBaseURL}/`);
 
 const komariLogin = await jsonFetch(page, '/api/login', {
-  method: 'POST',
-  body: JSON.stringify({ username: 'admin', password: 'admin' })
-});
-
-const appLogin = await jsonFetch(page, '/ipq/api/v1/auth/login', {
   method: 'POST',
   body: JSON.stringify({ username: 'admin', password: 'admin' })
 });
@@ -48,7 +56,7 @@ try {
   clientData = { raw: addClient.text };
 }
 
-await page.goto('/');
+await page.goto(`${komariBaseURL}/`);
 await page.waitForLoadState('networkidle');
 await page.screenshot({ path: `${outputDir}/komari-home.png`, fullPage: true });
 

@@ -26,7 +26,7 @@ func Load() Config {
 		AppName:           env("IPQ_APP_NAME", "Komari IP Quality"),
 		AppEnv:            env("IPQ_APP_ENV", "production"),
 		ListenAddr:        env("IPQ_LISTEN", ":8090"),
-		BasePath:          normalizeBasePath(env("IPQ_BASE_PATH", "/ipq")),
+		BasePath:          normalizeBasePath(env("IPQ_BASE_PATH", "")),
 		DatabasePath:      filepath.Clean(env("IPQ_DB_PATH", "./data/ipq.db")),
 		SessionCookieName: env("IPQ_SESSION_COOKIE", "ipq_session"),
 		SessionTTL:        30 * 24 * time.Hour,

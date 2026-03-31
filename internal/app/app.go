@@ -47,9 +47,8 @@ func Run() error {
 		admin.Use(middleware.RequireAdmin())
 		{
 			admin.GET("/runtime", adminHandler.Runtime)
-			admin.GET("/display-fields", adminHandler.GetDisplayFields)
-			admin.GET("/display-fields/paths", adminHandler.ListDisplayFieldPaths)
-			admin.PUT("/display-fields", adminHandler.PutDisplayFields)
+			admin.GET("/integration", adminHandler.GetIntegrationSettings)
+			admin.PUT("/integration", adminHandler.PutIntegrationSettings)
 			admin.GET("/change-priority", adminHandler.GetChangePriority)
 			admin.PUT("/change-priority", adminHandler.PutChangePriority)
 			admin.PUT("/profile", adminHandler.UpdateProfile)
