@@ -382,18 +382,23 @@ page.on('dialog', async (dialog) => {
   dialogMessages.push(dialog.message());
   await dialog.accept();
 });
-await page.goto('/ipq/#/settings');
+await page.goto('/ipq/#/settings/integration');
 await page.waitForLoadState('networkidle');
 await page.waitForTimeout(500);
 const settingsBody = await page.locator('body').innerText();
-const advancedDisplaySummary = page.locator('summary', { hasText: '更多设置' }).first();
-const saveFieldsButton = page.locator('#save-fields-button');
-if ((await advancedDisplaySummary.count()) > 0 && !(await saveFieldsButton.isVisible().catch(() => false))) {
-  await advancedDisplaySummary.click();
-  await page.waitForTimeout(200);
+if (!settingsBody.includes('接入 Komari') || !settingsBody.includes('完整内联版')) {
+  throw new Error('integration settings page does not emphasize Komari setup flow');
 }
+const copyButtonCount = await page.locator('#copy-loader-button').count();
+if (copyButtonCount > 0) {
+  await page.locator('#copy-loader-button').click();
+  await page.waitForTimeout(500);
+}
+
+await page.goto('/ipq/#/settings/fields');
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(300);
 const fieldGroupCount = await page.locator('.field-group').count();
-const changePriorityGroupToggleCount = await page.locator('[data-change-priority-group-toggle]').count();
 const mediaUncheckButton = page.locator('[data-field-group-toggle="Media"][data-field-group-mode="uncheck"]').first();
 if ((await mediaUncheckButton.count()) > 0) {
   await mediaUncheckButton.click();
@@ -401,6 +406,11 @@ if ((await mediaUncheckButton.count()) > 0) {
 }
 await page.locator('#save-fields-button').click();
 await page.waitForTimeout(500);
+
+await page.goto('/ipq/#/settings/priority');
+await page.waitForLoadState('networkidle');
+await page.waitForTimeout(300);
+const changePriorityGroupToggleCount = await page.locator('[data-change-priority-group-toggle]').count();
 const scorePriorityToggle = page.locator('[data-change-priority-path="Score.Scamalytics"]').first();
 if ((await scorePriorityToggle.count()) > 0) {
   await scorePriorityToggle.check();
@@ -408,11 +418,6 @@ if ((await scorePriorityToggle.count()) > 0) {
 }
 await page.locator('#save-change-priority-button').click();
 await page.waitForTimeout(500);
-const copyButtonCount = await page.locator('#copy-loader-button').count();
-if (copyButtonCount > 0) {
-  await page.locator('#copy-loader-button').click();
-  await page.waitForTimeout(500);
-}
 
 await page.goto('/ipq/#/nodes');
 await page.waitForLoadState('networkidle');
@@ -481,9 +486,6 @@ if (fieldGroupCount === 0) {
 }
 if (changePriorityGroupToggleCount === 0) {
   throw new Error('grouped change priority toggles not found on settings page');
-}
-if (!settingsBody.includes('接入 Komari') || !settingsBody.includes('更多设置')) {
-  throw new Error('settings page does not emphasize Komari setup flow');
 }
 if (detailMediaVisibleAfterHide > 0 || historyMediaVisibleAfterHide > 0) {
   throw new Error('hidden Media group still visible after saving field settings');

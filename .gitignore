@@ -44,8 +44,7 @@ data/komari/
 .cache/
 
 # Local reference repos
-references/IPQuality/
-references/komari-official/
+references/
 
 # SQLite side files
 *.db-shm

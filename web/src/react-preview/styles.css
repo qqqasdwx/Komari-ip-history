@@ -1,0 +1,61 @@
+@import "tailwindcss";
+@import "../style.css";
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    "Segoe UI",
+    "PingFang SC",
+    "Noto Sans SC",
+    sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+@media (min-width: 1024px) {
+  .react-preview-shell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+}
+
+.react-node-list-head {
+  display: none;
+}
+
+.react-node-list-body {
+  display: block;
+}
+
+.react-node-list-row {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+
+@media (min-width: 1180px) {
+  .react-node-list-head,
+  .react-node-list-row {
+    grid-template-columns: minmax(180px, 1.3fr) 92px 180px minmax(260px, 2fr) 56px;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .react-node-list-head {
+    display: grid;
+  }
+}
