@@ -333,7 +333,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       '  <div class="ipq-loader-dialog-header">',
       '    <div class="ipq-loader-dialog-title">',
       '      <strong>IP 质量详情</strong>',
-      '      <span>当前状态总览由本服务页面承载，注入端只负责轻量挂载。</span>',
+      '      <span>当前结果由本服务页面提供。</span>',
       '    </div>',
       '    <div class="ipq-loader-dialog-actions">',
       '      <a class="ipq-loader-link" target="_blank" rel="noopener noreferrer">在独立页面打开</a>',

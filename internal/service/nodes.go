@@ -19,13 +19,6 @@ type RegisterNodeInput struct {
 	Name           string `json:"name"`
 }
 
-type NodeStatus struct {
-	Exists    bool       `json:"exists"`
-	HasData   bool       `json:"has_data"`
-	NodeName  string     `json:"node_name,omitempty"`
-	UpdatedAt *time.Time `json:"updated_at,omitempty"`
-}
-
 type NodeListItem struct {
 	KomariNodeUUID string         `json:"komari_node_uuid"`
 	Name           string         `json:"name"`
@@ -163,22 +156,6 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 		})
 	}
 	return items, nil
-}
-
-func GetNodeStatus(db *gorm.DB, uuid string) (NodeStatus, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return NodeStatus{Exists: false}, nil
-		}
-		return NodeStatus{}, err
-	}
-	return NodeStatus{
-		Exists:    true,
-		HasData:   node.HasData,
-		NodeName:  node.Name,
-		UpdatedAt: node.CurrentResultUpdatedAt,
-	}, nil
 }
 
 func GetNodeDetail(db *gorm.DB, uuid string) (NodeDetail, error) {

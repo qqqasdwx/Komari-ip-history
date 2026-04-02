@@ -16,22 +16,6 @@ type EmbedHandler struct {
 	Cfg config.Config
 }
 
-func (h EmbedHandler) Status(c *gin.Context) {
-	if _, ok := middleware.GetCurrentUser(c); !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"login_required": true,
-		})
-		return
-	}
-
-	status, err := service.GetNodeStatus(h.DB, c.Param("uuid"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load status"})
-		return
-	}
-	c.JSON(http.StatusOK, status)
-}
-
 func (h EmbedHandler) Register(c *gin.Context) {
 	if _, ok := middleware.GetCurrentUser(c); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"login_required": true})
@@ -59,20 +43,6 @@ func (h EmbedHandler) Register(c *gin.Context) {
 			"has_data":         node.HasData,
 		},
 	})
-}
-
-func (h EmbedHandler) Current(c *gin.Context) {
-	if _, ok := middleware.GetCurrentUser(c); !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"login_required": true})
-		return
-	}
-
-	detail, err := service.GetNodeDetail(h.DB, c.Param("uuid"))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
-		return
-	}
-	c.JSON(http.StatusOK, detail)
 }
 
 func (h EmbedHandler) Loader(c *gin.Context) {

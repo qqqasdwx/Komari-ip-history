@@ -39,9 +39,7 @@ func Run() error {
 		api.POST("/auth/login", authHandler.Login)
 		api.POST("/auth/logout", authHandler.Logout)
 
-		api.GET("/embed/nodes/:uuid/status", embedHandler.Status)
 		api.POST("/embed/nodes/register", embedHandler.Register)
-		api.GET("/embed/nodes/:uuid/current", embedHandler.Current)
 		api.GET("/public/nodes/:uuid/current", publicHandler.Current)
 		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
