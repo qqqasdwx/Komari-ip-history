@@ -5,6 +5,9 @@ import path from "node:path";
 const komariBaseURL = (process.env.KOMARI_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || "http://127.0.0.1:8090").replace(/\/$/, "");
 const integrationPublicBaseURL = (process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+const restoreIntegrationPublicBaseURL = (
+  process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL_RESTORE || "http://127.0.0.1:8090"
+).replace(/\/$/, "");
 const outputDir = path.resolve("playwright-output");
 mkdirSync(outputDir, { recursive: true });
 
@@ -230,8 +233,19 @@ try {
     await loginKomari(komariCleanupPage);
     await jsonFetch(appCleanupPage, `${appBaseURL}/api/v1/admin/integration`, {
       method: "PUT",
-      body: JSON.stringify({ public_base_url: "", guest_read_enabled: false })
+      body: JSON.stringify({ public_base_url: restoreIntegrationPublicBaseURL, guest_read_enabled: false })
     }).catch(() => {});
+    const preview = await jsonFetch(
+      appCleanupPage,
+      `${appBaseURL}/api/v1/admin/header-preview?variant=loader&public_base_url=${encodeURIComponent(restoreIntegrationPublicBaseURL)}`
+    ).catch(() => null);
+    if (preview && preview.status >= 200 && preview.status < 300) {
+      const payload = parseJSON(preview);
+      await jsonFetch(komariCleanupPage, `${komariBaseURL}/api/admin/settings/`, {
+        method: "POST",
+        body: JSON.stringify({ custom_head: payload.code || "" })
+      }).catch(() => {});
+    }
     for (const uuid of createdNodeUUIDs) {
       await removeIpqNode(appCleanupPage, uuid).catch(() => {});
       await removeKomariNode(komariCleanupPage, uuid).catch(() => {});
