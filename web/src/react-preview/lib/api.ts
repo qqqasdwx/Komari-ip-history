@@ -1,6 +1,16 @@
-export class UnauthorizedError extends Error {
-  constructor(message = "unauthorized") {
+export class RequestError extends Error {
+  status: number;
+
+  constructor(status: number, message = "request failed") {
     super(message);
+    this.name = "RequestError";
+    this.status = status;
+  }
+}
+
+export class UnauthorizedError extends RequestError {
+  constructor(message = "unauthorized") {
+    super(401, message);
     this.name = "UnauthorizedError";
   }
 }
@@ -39,7 +49,7 @@ export async function apiRequest<T = unknown>(path: string, init?: RequestInit):
       throw new UnauthorizedError(message);
     }
 
-    throw new Error(message);
+    throw new RequestError(response.status, message);
   }
 
   return payload as T;

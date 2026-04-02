@@ -32,12 +32,12 @@ func (h NodeHandler) Detail(c *gin.Context) {
 }
 
 func (h NodeHandler) History(c *gin.Context) {
-	detail, err := service.GetNodeDetail(h.DB, c.Param("uuid"))
+	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": detail.History})
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 func (h NodeHandler) Delete(c *gin.Context) {

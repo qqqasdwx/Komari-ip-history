@@ -74,14 +74,15 @@ func (h AdminHandler) GetIntegrationSettings(c *gin.Context) {
 
 func (h AdminHandler) PutIntegrationSettings(c *gin.Context) {
 	var req struct {
-		PublicBaseURL string `json:"public_base_url"`
+		PublicBaseURL    string `json:"public_base_url"`
+		GuestReadEnabled bool   `json:"guest_read_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
 		return
 	}
 
-	settings, err := service.SetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL, req.PublicBaseURL)
+	settings, err := service.SetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL, req.PublicBaseURL, req.GuestReadEnabled)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
@@ -154,7 +155,7 @@ func (h AdminHandler) UpdateProfile(c *gin.Context) {
 	if token != "" {
 		_ = h.DB.Delete(&models.Session{}, "token = ?", token).Error
 	}
-	c.SetCookie(h.Cfg.SessionCookieName, "", -1, cookiePath(h.Cfg), "", h.Cfg.CookieSecure, true)
+	setSessionCookie(c, h.Cfg, "", -1)
 	c.JSON(http.StatusOK, gin.H{"status": "reauth_required"})
 }
 
@@ -179,6 +180,6 @@ func (h AdminHandler) HeaderPreview(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"variant": variant,
-		"code":    service.HeaderPreview(h.Cfg, integration.EffectivePublicBaseURL, variant),
+		"code":    service.HeaderPreview(h.Cfg, integration.EffectivePublicBaseURL, integration.GuestReadEnabled, variant),
 	})
 }

@@ -55,15 +55,7 @@ func (h AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie(
-		h.Cfg.SessionCookieName,
-		token,
-		int(h.Cfg.SessionTTL.Seconds()),
-		cookiePath(h.Cfg),
-		"",
-		h.Cfg.CookieSecure,
-		true,
-	)
+	setSessionCookie(c, h.Cfg, token, int(h.Cfg.SessionTTL.Seconds()))
 
 	c.JSON(http.StatusOK, gin.H{
 		"username":  user.Username,
@@ -77,7 +69,7 @@ func (h AuthHandler) Logout(c *gin.Context) {
 		_ = h.DB.Delete(&models.Session{}, "token = ?", token).Error
 	}
 
-	c.SetCookie(h.Cfg.SessionCookieName, "", -1, cookiePath(h.Cfg), "", h.Cfg.CookieSecure, true)
+	setSessionCookie(c, h.Cfg, "", -1)
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
@@ -107,4 +99,22 @@ func cookiePath(cfg config.Config) string {
 		return "/"
 	}
 	return cfg.BasePath
+}
+
+func setSessionCookie(c *gin.Context, cfg config.Config, value string, maxAge int) {
+	if cfg.CookieSecure {
+		c.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		c.SetSameSite(http.SameSiteLaxMode)
+	}
+
+	c.SetCookie(
+		cfg.SessionCookieName,
+		value,
+		maxAge,
+		cookiePath(cfg),
+		"",
+		cfg.CookieSecure,
+		true,
+	)
 }

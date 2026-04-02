@@ -17,7 +17,7 @@ import {
   useParams,
   useSearchParams
 } from "react-router-dom";
-import { apiRequest, UnauthorizedError } from "./lib/api";
+import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { formatDateTime } from "./lib/format";
 import { CurrentReportView } from "./lib/report";
 import { getNodeListSummaryEntries } from "./lib/result";
@@ -26,6 +26,7 @@ import type {
   MeResponse,
   NodeDetail,
   NodeListItem,
+  PublicNodeDetail,
   RuntimeResponse
 } from "./lib/types";
 
@@ -34,6 +35,8 @@ type NavItem = {
   label: string;
   icon: ReactNode;
 };
+
+const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
 
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <RowsIcon /> }];
 
@@ -65,6 +68,7 @@ async function copyText(value: string) {
 function useNodePageData(uuid: string, onUnauthorized: () => void) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -80,6 +84,7 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
 
       setLoading(true);
       setError("");
+      setErrorStatus(null);
 
       try {
         const detailResponse = await apiRequest<NodeDetail>(`/nodes/${uuid}`);
@@ -96,6 +101,9 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
         if (loadError instanceof UnauthorizedError) {
           onUnauthorized();
           return;
+        }
+        if (loadError instanceof RequestError) {
+          setErrorStatus(loadError.status);
         }
         setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
       } finally {
@@ -115,9 +123,114 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
   return {
     loading,
     error,
+    errorStatus,
     detail,
     reload: () => setReloadToken((value) => value + 1)
   };
+}
+
+function usePublicNodePageData(uuid: string, displayIP: string) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [detail, setDetail] = useState<PublicNodeDetail | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid) {
+        setError("节点不存在");
+        setErrorStatus(404);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      setErrorStatus(null);
+
+      try {
+        const query = new URLSearchParams();
+        if (displayIP.trim()) {
+          query.set("display_ip", displayIP.trim());
+        }
+        const detailResponse = await apiRequest<PublicNodeDetail>(
+          `/public/nodes/${uuid}/current${query.size > 0 ? `?${query.toString()}` : ""}`
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setDetail(detailResponse);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof RequestError) {
+          setErrorStatus(loadError.status);
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [displayIP, reloadToken, uuid]);
+
+  return {
+    loading,
+    error,
+    errorStatus,
+    detail,
+    reload: () => setReloadToken((value) => value + 1)
+  };
+}
+
+function buildConnectPath(uuid: string, name: string, options?: { returnTo?: string; resumePopup?: boolean }) {
+  const params = new URLSearchParams({ uuid, name });
+  if (options?.returnTo) {
+    params.set("return_to", options.returnTo);
+  }
+  if (options?.resumePopup) {
+    params.set("resume", "popup");
+  }
+  return `/connect?${params.toString()}`;
+}
+
+function buildKomariResumeURL(returnTo: string, uuid: string, name: string) {
+  try {
+    const target = new URL(returnTo);
+    target.searchParams.set("ipq_resume", "1");
+    target.searchParams.set("ipq_uuid", uuid);
+    if (name.trim()) {
+      target.searchParams.set("ipq_name", name.trim());
+    }
+    return target.toString();
+  } catch {
+    return `/nodes/${encodeURIComponent(uuid)}`;
+  }
+}
+
+function toStandaloneAppURL(path: string) {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${standaloneAppBase}/#${normalizedPath}`;
+}
+
+function postEmbedAction(type: string, payload: Record<string, string>) {
+  if (window.parent === window) {
+    return;
+  }
+  window.parent.postMessage({ source: "ipq-embed", type, ...payload }, "*");
 }
 
 function AppLoading() {
@@ -246,6 +359,8 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
   const uuid = searchParams.get("uuid")?.trim() || "";
   const name = searchParams.get("name")?.trim() || "未命名节点";
   const isEmbed = searchParams.get("embed") === "1";
+  const returnTo = searchParams.get("return_to")?.trim() || "";
+  const resumePopup = searchParams.get("resume") === "popup";
 
   useEffect(() => {
     let cancelled = false;
@@ -264,6 +379,11 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
         });
 
         if (cancelled) {
+          return;
+        }
+
+        if (returnTo) {
+          window.location.replace(buildKomariResumeURL(returnTo, uuid, name));
           return;
         }
 
@@ -287,12 +407,16 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, uuid]);
+  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, returnTo, resumePopup, uuid]);
 
   if (loading) {
     return (
       <section className="space-y-6">
-        <PageHeader title="接入节点" subtitle="正在为当前节点创建或恢复 IP 质量视图。" backTo={isEmbed ? undefined : "/nodes"} />
+        <PageHeader
+          title="接入节点"
+          subtitle={returnTo && resumePopup ? "正在完成登录并返回 Komari 弹窗。" : "正在为当前节点创建或恢复 IP 质量视图。"}
+          backTo={isEmbed ? undefined : "/nodes"}
+        />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="space-y-3">
             <div className="h-6 w-40 animate-pulse rounded-xl bg-slate-100" />
@@ -311,6 +435,21 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
       error={error || "节点接入失败。"}
       onRetry={() => window.location.reload()}
     />
+  );
+}
+
+function EmbedBridgePage(props: { title: string; description: string; actionURL: string }) {
+  useEffect(() => {
+    postEmbedAction("open-standalone", { url: toStandaloneAppURL(props.actionURL) });
+  }, [props.actionURL]);
+
+  return (
+    <section className="space-y-6">
+      <PageHeader title={props.title} subtitle={props.description} />
+      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-sm leading-6 text-slate-500">当前操作需要跳到独立页面完成，正在继续处理。</p>
+      </section>
+    </section>
   );
 }
 
@@ -672,10 +811,22 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const { uuid = "" } = useParams();
   const [searchParams] = useSearchParams();
   const isEmbed = searchParams.get("embed") === "1";
-  const { loading, error, detail, reload } = useNodePageData(uuid, props.onUnauthorized);
+  const komariReturn = searchParams.get("komari_return")?.trim() || "";
+  const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
+  const { loading, error, errorStatus, detail, reload } = useNodePageData(uuid, props.onUnauthorized);
 
   if (loading) {
     return <NodeDetailLoading />;
+  }
+
+  if (isEmbed && errorStatus === 404 && komariReturn) {
+    return (
+      <EmbedBridgePage
+        title="接入节点"
+        description="当前节点还没有接入 IP 质量，正在跳到独立页面继续。"
+        actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+      />
+    );
   }
 
   if (error || !detail) {
@@ -718,12 +869,51 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   );
 }
 
+function PublicNodeDetailPage() {
+  const { uuid = "" } = useParams();
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
+  const displayIP = searchParams.get("display_ip")?.trim() || "";
+  const { loading, error, detail, reload } = usePublicNodePageData(uuid, displayIP);
+
+  if (loading) {
+    return <NodeDetailLoading />;
+  }
+
+  if (error || !detail) {
+    return (
+      <NodePageError
+        title="IP质量体检报告"
+        subtitle={error || "当前结果不可用"}
+        backTo="/"
+        error={error || "当前结果不可用。"}
+        onRetry={reload}
+      />
+    );
+  }
+
+  return (
+    <section className="space-y-6">
+      {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="游客只读视图" backTo="/" /> : null}
+      <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="section">
+          <h2 className="text-base font-semibold text-slate-900">当前 IP 质量</h2>
+          <div data-detail-report="true">
+            <CurrentReportView result={detail.current_result} hiddenPaths={[]} compact={isEmbed} />
+          </div>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [runtime, setRuntime] = useState<RuntimeResponse | null>(null);
   const [integration, setIntegration] = useState<IntegrationSettings | null>(null);
   const [publicBaseURLInput, setPublicBaseURLInput] = useState("");
+  const [guestReadEnabledInput, setGuestReadEnabledInput] = useState(false);
   const [loaderCode, setLoaderCode] = useState("");
   const [inlineCode, setInlineCode] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
@@ -761,6 +951,7 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
         setRuntime(runtimeResponse);
         setIntegration(integrationResponse);
         setPublicBaseURLInput(integrationResponse.public_base_url ?? "");
+        setGuestReadEnabledInput(Boolean(integrationResponse.guest_read_enabled));
         setLoaderCode(loaderPreview.code);
         setInlineCode(inlinePreview.code);
       } catch (loadError) {
@@ -795,16 +986,17 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
     }
   }
 
-  async function savePublicBaseURL(nextValue: string) {
+  async function saveIntegrationSettings(nextValue: string, guestReadEnabled: boolean) {
     setSavingAddress(true);
     setError("");
     try {
       const saved = await apiRequest<IntegrationSettings>("/admin/integration", {
         method: "PUT",
-        body: JSON.stringify({ public_base_url: nextValue })
+        body: JSON.stringify({ public_base_url: nextValue, guest_read_enabled: guestReadEnabled })
       });
       setIntegration(saved);
       setPublicBaseURLInput(saved.public_base_url ?? "");
+      setGuestReadEnabledInput(Boolean(saved.guest_read_enabled));
       const nextPreviewPublicBaseURL = saved.public_base_url || suggestedPublicBaseURL;
 
       const [runtimeResponse, loaderPreview, inlinePreview] = await Promise.all([
@@ -871,7 +1063,7 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
                 <button
                   className="button"
                   disabled={savingAddress}
-                  onClick={() => void savePublicBaseURL(publicBaseURLInput)}
+                  onClick={() => void saveIntegrationSettings(publicBaseURLInput, guestReadEnabledInput)}
                   type="button"
                 >
                   {savingAddress ? "保存中…" : "保存"}
@@ -879,12 +1071,36 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
                 <button
                   className="button ghost"
                   disabled={savingAddress}
-                  onClick={() => void savePublicBaseURL("")}
+                  onClick={() => void saveIntegrationSettings("", false)}
                   type="button"
                 >
                   恢复默认
                 </button>
               </div>
+            </div>
+          </section>
+
+          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <h2 className="text-base font-semibold text-slate-900">游客只读</h2>
+                <p className="text-sm leading-6 text-slate-500">
+                  只影响 Komari 注入弹窗。开启后，Komari 游客在节点本身公开时可查看当前结果；关闭后，游客点击按钮只会收到提示。
+                </p>
+              </div>
+
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                <input
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  checked={guestReadEnabledInput}
+                  onChange={(event) => setGuestReadEnabledInput(event.target.checked)}
+                  type="checkbox"
+                />
+                <span className="space-y-1">
+                  <span className="block font-medium text-slate-900">允许游客查看已接入节点的当前结果</span>
+                  <span className="block text-slate-500">默认关闭。管理员链路和后台页面不受影响。</span>
+                </span>
+              </label>
             </div>
           </section>
 
@@ -992,6 +1208,34 @@ function AdminPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   );
 }
 
+function EmbedAdminAccessBridge() {
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const match = location.pathname.match(/^\/nodes\/([^/]+)$/);
+  const uuid = match?.[1] ?? "";
+  const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
+  const komariReturn = searchParams.get("komari_return")?.trim() || "";
+
+  if (!uuid || !komariReturn) {
+    return (
+      <section className="space-y-6">
+        <PageHeader title="需要登录" subtitle="当前嵌入视图无法直接继续。" />
+        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm leading-6 text-slate-500">请在独立页面登录后重试。</p>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <EmbedBridgePage
+      title="需要登录"
+      description="当前管理员链路需要先在独立页面完成登录。"
+      actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+    />
+  );
+}
+
 function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnauthorized: () => void }) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -1068,6 +1312,8 @@ export function App() {
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
 
   useEffect(() => {
     let cancelled = false;
@@ -1113,6 +1359,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to={me ? "/nodes" : "/login"} replace />} />
+      <Route path="/public/nodes/:uuid" element={<PublicNodeDetailPage />} />
       <Route
         path="/login"
         element={<LoginPage me={me} onAuthenticated={(nextMe) => setMe(nextMe)} />}
@@ -1129,7 +1376,11 @@ export function App() {
               }}
             />
           ) : (
-            <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
+            isEmbed ? (
+              <EmbedAdminAccessBridge />
+            ) : (
+              <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
+            )
           )
         }
       />

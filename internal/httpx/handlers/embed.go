@@ -85,5 +85,5 @@ func (h EmbedHandler) Loader(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "console.error(%q);", "failed to load integration settings")
 		return
 	}
-	c.String(http.StatusOK, service.LoaderScript(h.Cfg, integration.EffectivePublicBaseURL))
+	c.String(http.StatusOK, service.LoaderScript(h.Cfg, integration.EffectivePublicBaseURL, integration.GuestReadEnabled))
 }

@@ -8,9 +8,9 @@ import (
 	"komari-ip-history/internal/config"
 )
 
-func HeaderPreview(cfg config.Config, publicBaseURL string, variant string) string {
+func HeaderPreview(cfg config.Config, publicBaseURL string, guestReadEnabled bool, variant string) string {
 	if variant == "inline" {
-		return strings.TrimSpace("<script>\n" + LoaderScript(cfg, publicBaseURL) + "\n</script>")
+		return strings.TrimSpace("<script>\n" + LoaderScript(cfg, publicBaseURL, guestReadEnabled) + "\n</script>")
 	}
 
 	loaderSrcExpr := fmt.Sprintf(`(window.location.origin + %q).replace(/\/+$/, "") + "/embed/loader.js"`, cfg.BasePath)
@@ -47,24 +47,26 @@ func regexpLikeLocalhost(host string) bool {
 	return strings.HasPrefix(host, "127.")
 }
 
-func LoaderScript(cfg config.Config, publicBaseURL string) string {
+func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool) string {
 	return fmt.Sprintf(`(() => {
   const BASE_PATH = %q;
   const CONFIGURED_APP_BASE = %q;
+  const GUEST_READ_ENABLED = %t;
   const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
   const ROUTE_HINT_RE = /(client|clients|node|nodes|server|servers)/i;
   const ACTION_HINT_RE = /(编辑|删除|终端|命令|执行|Edit|Delete|Terminal|Command|Run)/i;
   const TITLE_BLACKLIST = /^(komari|dashboard|nodes|node|clients|client|服务器|节点)$/i;
   const state = {
     contextKey: "",
-    status: null,
+    resumeHandledKey: "",
     button: null,
     portal: null,
     overlay: null,
     iframe: null,
     openLink: null,
-    syncTimer: 0,
-    fetchToken: 0
+    retryTimers: [],
+    routeCycle: 0,
+    busy: false
   };
 
   if (window.__IPQ_LOADER_ATTACHED__) return;
@@ -94,9 +96,24 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
   const API_BASE = APP_BASE + "/api/v1/embed";
   const CACHE_BUST = Date.now().toString(36);
 
-  function scheduleSync(delay) {
-    window.clearTimeout(state.syncTimer);
-    state.syncTimer = window.setTimeout(sync, typeof delay === "number" ? delay : 120);
+  function clearRetryTimers() {
+    while (state.retryTimers.length) {
+      window.clearTimeout(state.retryTimers.pop());
+    }
+  }
+
+  function scheduleRouteSync() {
+    state.routeCycle += 1;
+    const cycle = state.routeCycle;
+    clearRetryTimers();
+
+    [0, 80, 220, 520, 1100, 1800].forEach(function (delay) {
+      const timer = window.setTimeout(function () {
+        if (cycle !== state.routeCycle) return;
+        sync();
+      }, delay);
+      state.retryTimers.push(timer);
+    });
   }
 
   function ensureStyle() {
@@ -216,6 +233,28 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
       "  border: 0;",
       "  background: #f8fafc;",
       "}",
+      ".ipq-loader-toast {",
+      "  position: fixed;",
+      "  right: 24px;",
+      "  top: 24px;",
+      "  z-index: 100000;",
+      "  min-width: 220px;",
+      "  max-width: min(420px, calc(100vw - 32px));",
+      "  border-radius: 16px;",
+      "  background: rgba(15, 23, 42, 0.96);",
+      "  color: #fff;",
+      "  padding: 12px 14px;",
+      "  font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
+      "  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.35);",
+      "  opacity: 0;",
+      "  transform: translateY(-6px);",
+      "  transition: opacity .18s ease, transform .18s ease;",
+      "  pointer-events: none;",
+      "}",
+      ".ipq-loader-toast[data-open=\"true\"] {",
+      "  opacity: 1;",
+      "  transform: translateY(0);",
+      "}",
       "@media (max-width: 720px) {",
       "  #ipq-loader-portal {",
       "    right: 16px;",
@@ -238,6 +277,13 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
       "    width: 100%%;",
       "    height: 100%%;",
       "    border-radius: 18px;",
+      "  }",
+      "  .ipq-loader-toast {",
+      "    top: auto;",
+      "    right: 16px;",
+      "    bottom: 16px;",
+      "    left: 16px;",
+      "    max-width: none;",
       "  }",
       "  .ipq-loader-dialog-header {",
       "    align-items: flex-start;",
@@ -322,33 +368,66 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
     return overlay;
   }
 
+  function ensureToast() {
+    let toast = document.getElementById("ipq-loader-toast");
+    if (toast) return toast;
+    toast = document.createElement("div");
+    toast.id = "ipq-loader-toast";
+    toast.className = "ipq-loader-toast";
+    document.body.appendChild(toast);
+    return toast;
+  }
+
   function closeModal() {
     if (!state.overlay) return;
     state.overlay.setAttribute("data-open", "false");
   }
 
-  function buildURLs(context, forceConnect) {
+  function showToast(message) {
+    const toast = ensureToast();
+    toast.textContent = message;
+    toast.setAttribute("data-open", "true");
+    window.clearTimeout(showToast._timer);
+    showToast._timer = window.setTimeout(function () {
+      toast.setAttribute("data-open", "false");
+    }, 2800);
+  }
+
+  function buildURLs(context, options) {
     const safeUUID = encodeURIComponent(context.uuid);
     const safeName = encodeURIComponent(context.name || "未命名节点");
-    const detailURL = APP_BASE + "/?v=" + CACHE_BUST + "#/nodes/" + safeUUID;
-    const connectURL = APP_BASE + "/?v=" + CACHE_BUST + "#/connect?uuid=" + safeUUID + "&name=" + safeName;
-
-    if (forceConnect) {
+    if (options.mode === "public") {
+      const params = new URLSearchParams();
+      if (options.displayIP) {
+        params.set("display_ip", options.displayIP);
+      }
+      const query = params.toString();
+      const publicURL = APP_BASE + "/?v=" + CACHE_BUST + "#/public/nodes/" + safeUUID + (query ? "?" + query : "");
       return {
-        fullPageURL: connectURL,
-        embedURL: connectURL + "&embed=1"
+        fullPageURL: publicURL,
+        embedURL: publicURL + (query ? "&" : "?") + "embed=1"
       };
     }
 
+    const params = new URLSearchParams();
+    if (options.komariReturn) {
+      params.set("komari_return", options.komariReturn);
+    }
+    if (context.name) {
+      params.set("node_name", context.name);
+    }
+    const query = params.toString();
+    const detailURL = APP_BASE + "/?v=" + CACHE_BUST + "#/nodes/" + safeUUID + (query ? "?" + query : "");
+
     return {
       fullPageURL: detailURL,
-      embedURL: detailURL + "?embed=1"
+      embedURL: detailURL + (query ? "&" : "?") + "embed=1"
     };
   }
 
-  function openModal(context, forceConnect) {
+  function openModal(context, options) {
     const overlay = ensureOverlay();
-    const urls = buildURLs(context, !!forceConnect);
+    const urls = buildURLs(context, options || { mode: "admin" });
     if (state.iframe) {
       state.iframe.src = urls.embedURL;
       state.iframe.title = (context.name || "节点") + " IP 质量详情";
@@ -392,14 +471,17 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
       if (found) return found;
     }
 
+    if (!UUID_RE.test(routeSources.join(" "))) {
+      return "";
+    }
+
     const selectors = [
       "[data-uuid]",
       "[data-id]",
       "[data-client-id]",
       "[data-node-id]",
-      "[href]",
-      "code",
-      "pre"
+      "a[href*='/instance/']",
+      "a[href*='#/instance/']"
     ];
 
     for (const selector of selectors) {
@@ -418,10 +500,6 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
           if (found) return found;
         }
       }
-    }
-
-    if (document.body) {
-      return extractUUIDFromValue(document.body.innerText);
     }
     return "";
   }
@@ -572,26 +650,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
   }
   function renderButton() {
     const button = ensureButton();
-    button.disabled = false;
-
-    if (!state.status) {
-      button.textContent = "打开 IP 质量";
-      return;
-    }
-    if (state.status.loading) {
-      button.textContent = "加载 IP 质量入口";
-      button.disabled = true;
-      return;
-    }
-    if (state.status.login_required) {
-      button.textContent = "打开 IP 质量";
-      return;
-    }
-    if (state.status.error) {
-      button.textContent = "打开 IP 质量";
-      return;
-    }
-    button.textContent = state.status.exists ? "查看 IP 质量" : "添加 IP 质量检测";
+    button.disabled = state.busy;
+    button.textContent = state.busy ? "处理中..." : "打开 IP 质量";
   }
 
   function mountButton() {
@@ -603,7 +663,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
         container.appendChild(button);
       }
       cleanupPortal();
-      return;
+      return true;
     }
 
     button.classList.add("ipq-floating");
@@ -611,6 +671,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
     if (button.parentElement !== state.portal) {
       state.portal.appendChild(button);
     }
+    return false;
   }
 
   function unmountButton() {
@@ -621,76 +682,108 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
     closeModal();
   }
 
-  async function fetchStatus(uuid) {
-    const response = await fetch(API_BASE + "/nodes/" + encodeURIComponent(uuid) + "/status", {
-      credentials: "include"
-    });
-
-    if (response.status === 401) {
-      return { login_required: true };
-    }
-    if (!response.ok) {
-      throw new Error("failed to load status");
-    }
-    return response.json();
-  }
-
   async function handleAction() {
     const context = detectContext();
     if (!context) return;
+    state.busy = true;
+    renderButton();
 
-    const forceConnect =
-      !state.status ||
-      state.status.loading ||
-      state.status.login_required ||
-      state.status.error ||
-      !state.status.exists;
+    try {
+      const meResponse = await fetch(window.location.origin + "/api/me", { credentials: "include" });
+      if (!meResponse.ok) {
+        throw new Error("failed to load Komari viewer state");
+      }
 
-    openModal(context, forceConnect);
+      const me = await meResponse.json();
+      if (me && me.logged_in) {
+        openModal(context, { mode: "admin", komariReturn: window.location.href });
+        return;
+      }
+
+      if (!GUEST_READ_ENABLED) {
+        showToast("管理员未开放该功能");
+        return;
+      }
+
+      const nodesResponse = await fetch(window.location.origin + "/api/nodes", { credentials: "include" });
+      if (!nodesResponse.ok) {
+        throw new Error("failed to load Komari public nodes");
+      }
+
+      const payload = await nodesResponse.json();
+      const items = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload && payload.data)
+          ? payload.data
+          : Object.values(payload || {});
+      const currentNode = items.find(function (item) {
+        return item && String(item.uuid || "").toLowerCase() === String(context.uuid).toLowerCase();
+      });
+
+      if (!currentNode) {
+        showToast("管理员未开放该功能");
+        return;
+      }
+
+      const displayIP = String(currentNode.ipv4 || currentNode.ipv6 || "").trim();
+      openModal(context, { mode: "public", displayIP: displayIP });
+    } catch (_) {
+      showToast("打开 IP 质量失败，请稍后重试");
+    } finally {
+      state.busy = false;
+      renderButton();
+    }
+  }
+
+  function consumeResume(context) {
+    const currentURL = new URL(window.location.href);
+    if (currentURL.searchParams.get("ipq_resume") !== "1") {
+      return;
+    }
+
+    const resumeUUID = currentURL.searchParams.get("ipq_uuid") || "";
+    if (!resumeUUID || resumeUUID.toLowerCase() !== String(context.uuid).toLowerCase()) {
+      return;
+    }
+
+    const resumeName = currentURL.searchParams.get("ipq_name") || context.name || "未命名节点";
+    currentURL.searchParams.delete("ipq_resume");
+    currentURL.searchParams.delete("ipq_uuid");
+    currentURL.searchParams.delete("ipq_name");
+    const cleanURL = currentURL.toString();
+    history.replaceState(history.state, "", cleanURL);
+    state.resumeHandledKey = context.key;
+    openModal({ uuid: context.uuid, name: resumeName }, { mode: "admin", komariReturn: cleanURL });
   }
 
   async function sync() {
     const context = detectContext();
     if (!context) {
       state.contextKey = "";
-      state.status = null;
+      state.resumeHandledKey = "";
+      clearRetryTimers();
       unmountButton();
       return;
     }
 
-    mountButton();
-
-    if (state.contextKey === context.key && state.status && !state.status.loading) {
-      renderButton();
-      return;
-    }
-
+    const mountedInline = mountButton();
     state.contextKey = context.key;
-    const fetchToken = ++state.fetchToken;
-    state.status = { loading: true };
     renderButton();
 
-    try {
-      const status = await fetchStatus(context.uuid);
-      if (fetchToken !== state.fetchToken) return;
-      state.status = status;
-    } catch (_) {
-      if (fetchToken !== state.fetchToken) return;
-      state.status = { error: true };
+    if (state.resumeHandledKey !== context.key) {
+      consumeResume(context);
     }
 
-    renderButton();
+    if (mountedInline) {
+      clearRetryTimers();
+    }
   }
-
-  const observer = new MutationObserver(function () {
-    scheduleSync(140);
-  });
 
   function hookHistory(method) {
     const original = history[method];
     history[method] = function () {
       const result = original.apply(this, arguments);
-      scheduleSync(60);
+      scheduleRouteSync();
       return result;
     };
   }
@@ -698,9 +791,25 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
   ensureStyle();
   hookHistory("pushState");
   hookHistory("replaceState");
-  window.addEventListener("hashchange", function () { scheduleSync(60); });
-  window.addEventListener("popstate", function () { scheduleSync(60); });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-  scheduleSync(0);
-})();`, cfg.BasePath, publicBaseURL)
+  window.addEventListener("hashchange", scheduleRouteSync);
+  window.addEventListener("popstate", scheduleRouteSync);
+  window.addEventListener("message", function (event) {
+    if (!event || !event.data || event.data.source !== "ipq-embed") {
+      return;
+    }
+    try {
+      if (event.origin !== new URL(APP_BASE).origin) {
+        return;
+      }
+    } catch (_) {
+      return;
+    }
+
+    if (event.data.type === "open-standalone" && event.data.url) {
+      closeModal();
+      window.location.assign(event.data.url);
+    }
+  });
+  scheduleRouteSync();
+})();`, cfg.BasePath, publicBaseURL, guestReadEnabled)
 }

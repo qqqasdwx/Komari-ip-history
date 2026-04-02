@@ -42,14 +42,18 @@ type NodeReportConfig struct {
 }
 
 type NodeDetail struct {
-	KomariNodeUUID string               `json:"komari_node_uuid"`
-	Name           string               `json:"name"`
-	HasData        bool                 `json:"has_data"`
-	CurrentSummary string               `json:"current_summary"`
-	UpdatedAt      *time.Time           `json:"updated_at"`
-	CurrentResult  map[string]any       `json:"current_result"`
-	History        []models.NodeHistory `json:"history"`
-	ReportConfig   NodeReportConfig     `json:"report_config"`
+	KomariNodeUUID string           `json:"komari_node_uuid"`
+	Name           string           `json:"name"`
+	HasData        bool             `json:"has_data"`
+	CurrentSummary string           `json:"current_summary"`
+	UpdatedAt      *time.Time       `json:"updated_at"`
+	CurrentResult  map[string]any   `json:"current_result"`
+	ReportConfig   NodeReportConfig `json:"report_config"`
+}
+
+type PublicNodeDetail struct {
+	HasData       bool           `json:"has_data"`
+	CurrentResult map[string]any `json:"current_result"`
 }
 
 type ReportNodeInput struct {
@@ -188,11 +192,6 @@ func GetNodeDetail(db *gorm.DB, uuid string) (NodeDetail, error) {
 		_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
 	}
 
-	var history []models.NodeHistory
-	if err := db.Where("node_id = ?", node.ID).Order("recorded_at DESC").Find(&history).Error; err != nil {
-		return NodeDetail{}, err
-	}
-
 	return NodeDetail{
 		KomariNodeUUID: node.KomariNodeUUID,
 		Name:           node.Name,
@@ -200,12 +199,79 @@ func GetNodeDetail(db *gorm.DB, uuid string) (NodeDetail, error) {
 		CurrentSummary: node.CurrentSummary,
 		UpdatedAt:      node.CurrentResultUpdatedAt,
 		CurrentResult:  current,
-		History:        history,
 		ReportConfig: NodeReportConfig{
 			EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
 			ReporterToken: node.ReporterToken,
 		},
 	}, nil
+}
+
+func GetNodeHistory(db *gorm.DB, uuid string) ([]models.NodeHistory, error) {
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return nil, err
+	}
+
+	var history []models.NodeHistory
+	if err := db.Where("node_id = ?", node.ID).Order("recorded_at DESC").Find(&history).Error; err != nil {
+		return nil, err
+	}
+	return history, nil
+}
+
+func GetPublicNodeDetail(db *gorm.DB, uuid string, displayIP string) (PublicNodeDetail, error) {
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return PublicNodeDetail{}, err
+	}
+
+	current := map[string]any{}
+	if node.CurrentResultJSON != "" {
+		_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
+	}
+
+	current = sanitizePublicCurrentResult(current)
+	applyPublicDisplayIP(current, displayIP)
+
+	return PublicNodeDetail{
+		HasData:       node.HasData,
+		CurrentResult: current,
+	}, nil
+}
+
+func sanitizePublicCurrentResult(result map[string]any) map[string]any {
+	allowedKeys := map[string]struct{}{
+		"Head":   {},
+		"Info":   {},
+		"Type":   {},
+		"Score":  {},
+		"Factor": {},
+		"Media":  {},
+		"Mail":   {},
+	}
+
+	filtered := make(map[string]any, len(allowedKeys))
+	for key, value := range result {
+		if _, ok := allowedKeys[key]; ok {
+			filtered[key] = value
+		}
+	}
+	return filtered
+}
+
+func applyPublicDisplayIP(result map[string]any, displayIP string) {
+	head, ok := result["Head"].(map[string]any)
+	if !ok || head == nil {
+		head = map[string]any{}
+		result["Head"] = head
+	}
+
+	displayIP = strings.TrimSpace(displayIP)
+	if displayIP == "" {
+		head["IP"] = nil
+		return
+	}
+	head["IP"] = displayIP
 }
 
 func DeleteNode(db *gorm.DB, uuid string) error {

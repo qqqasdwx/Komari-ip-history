@@ -18,6 +18,7 @@ export type RuntimeResponse = {
 export type IntegrationSettings = {
   public_base_url: string;
   effective_public_base_url: string;
+  guest_read_enabled: boolean;
 };
 
 export type ChangePriorityConfig = {
@@ -50,9 +51,13 @@ export type NodeDetail = {
   current_summary: string;
   updated_at?: string | null;
   current_result: Record<string, unknown>;
-  history: NodeHistoryItem[];
   report_config: {
     endpoint_path: string;
     reporter_token: string;
   };
+};
+
+export type PublicNodeDetail = {
+  has_data: boolean;
+  current_result: Record<string, unknown>;
 };

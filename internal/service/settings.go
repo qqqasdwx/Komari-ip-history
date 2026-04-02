@@ -15,6 +15,7 @@ import (
 
 const changePrioritySettingKey = "change_priority"
 const integrationBaseURLSettingKey = "integration_public_base_url"
+const integrationGuestReadEnabledSettingKey = "integration_guest_read_enabled"
 
 type ChangePriorityConfig struct {
 	SecondaryPaths []string `json:"secondary_paths"`
@@ -23,8 +24,8 @@ type ChangePriorityConfig struct {
 type IntegrationSettings struct {
 	PublicBaseURL          string `json:"public_base_url"`
 	EffectivePublicBaseURL string `json:"effective_public_base_url"`
+	GuestReadEnabled       bool   `json:"guest_read_enabled"`
 }
-
 
 func defaultChangePriorityConfig() ChangePriorityConfig {
 	return ChangePriorityConfig{
@@ -49,7 +50,6 @@ func normalizePaths(paths []string) []string {
 	sort.Strings(items)
 	return items
 }
-
 
 func GetChangePriorityConfig(db *gorm.DB) (ChangePriorityConfig, error) {
 	var setting models.AppSetting
@@ -128,13 +128,52 @@ func EffectivePublicBaseURL(cfgPublicBaseURL string, override string) string {
 	return value
 }
 
+func getBoolSetting(db *gorm.DB, key string, fallback bool) (bool, error) {
+	var setting models.AppSetting
+	if err := db.First(&setting, "key = ?", key).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return fallback, nil
+		}
+		return fallback, err
+	}
+
+	value := strings.TrimSpace(strings.ToLower(setting.Value))
+	switch value {
+	case "", "0", "false", "no", "off":
+		return false, nil
+	case "1", "true", "yes", "on":
+		return true, nil
+	default:
+		return fallback, nil
+	}
+}
+
+func setBoolSetting(db *gorm.DB, key string, value bool) error {
+	storedValue := "false"
+	if value {
+		storedValue = "true"
+	}
+
+	return db.Save(&models.AppSetting{
+		Key:       key,
+		Value:     storedValue,
+		UpdatedAt: time.Now(),
+	}).Error
+}
+
 func GetIntegrationSettings(db *gorm.DB, cfgPublicBaseURL string) (IntegrationSettings, error) {
+	guestReadEnabled, err := getBoolSetting(db, integrationGuestReadEnabledSettingKey, false)
+	if err != nil {
+		return IntegrationSettings{}, err
+	}
+
 	var setting models.AppSetting
 	if err := db.First(&setting, "key = ?", integrationBaseURLSettingKey).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return IntegrationSettings{
 				PublicBaseURL:          "",
 				EffectivePublicBaseURL: EffectivePublicBaseURL(cfgPublicBaseURL, ""),
+				GuestReadEnabled:       guestReadEnabled,
 			}, nil
 		}
 		return IntegrationSettings{}, err
@@ -147,25 +186,32 @@ func GetIntegrationSettings(db *gorm.DB, cfgPublicBaseURL string) (IntegrationSe
 	return IntegrationSettings{
 		PublicBaseURL:          value,
 		EffectivePublicBaseURL: EffectivePublicBaseURL(cfgPublicBaseURL, value),
+		GuestReadEnabled:       guestReadEnabled,
 	}, nil
 }
 
-func SetIntegrationSettings(db *gorm.DB, cfgPublicBaseURL string, raw string) (IntegrationSettings, error) {
+func SetIntegrationSettings(db *gorm.DB, cfgPublicBaseURL string, raw string, guestReadEnabled bool) (IntegrationSettings, error) {
 	value, err := ValidatePublicBaseURL(raw)
 	if err != nil {
 		return IntegrationSettings{}, err
 	}
 
-	if err := db.Save(&models.AppSetting{
-		Key:       integrationBaseURLSettingKey,
-		Value:     value,
-		UpdatedAt: time.Now(),
-	}).Error; err != nil {
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&models.AppSetting{
+			Key:       integrationBaseURLSettingKey,
+			Value:     value,
+			UpdatedAt: time.Now(),
+		}).Error; err != nil {
+			return err
+		}
+		return setBoolSetting(tx, integrationGuestReadEnabledSettingKey, guestReadEnabled)
+	}); err != nil {
 		return IntegrationSettings{}, err
 	}
 
 	return IntegrationSettings{
 		PublicBaseURL:          value,
 		EffectivePublicBaseURL: EffectivePublicBaseURL(cfgPublicBaseURL, value),
+		GuestReadEnabled:       guestReadEnabled,
 	}, nil
 }

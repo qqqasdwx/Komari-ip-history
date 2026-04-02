@@ -29,6 +29,7 @@ func Run() error {
 	adminHandler := handlers.AdminHandler{DB: db, Cfg: cfg}
 	nodeHandler := handlers.NodeHandler{DB: db}
 	embedHandler := handlers.EmbedHandler{DB: db, Cfg: cfg}
+	publicHandler := handlers.PublicHandler{DB: db, Cfg: cfg}
 	reportHandler := handlers.ReportHandler{DB: db}
 
 	api := router.Group(cfg.APIBase())
@@ -41,6 +42,7 @@ func Run() error {
 		api.GET("/embed/nodes/:uuid/status", embedHandler.Status)
 		api.POST("/embed/nodes/register", embedHandler.Register)
 		api.GET("/embed/nodes/:uuid/current", embedHandler.Current)
+		api.GET("/public/nodes/:uuid/current", publicHandler.Current)
 		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
 		admin := api.Group("/admin")
