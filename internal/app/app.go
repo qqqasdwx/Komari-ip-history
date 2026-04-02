@@ -30,7 +30,7 @@ func Run() error {
 	nodeHandler := handlers.NodeHandler{DB: db, Cfg: cfg}
 	embedHandler := handlers.EmbedHandler{DB: db, Cfg: cfg}
 	publicHandler := handlers.PublicHandler{DB: db, Cfg: cfg}
-	reportHandler := handlers.ReportHandler{DB: db}
+	reportHandler := handlers.ReportHandler{DB: db, Cfg: cfg}
 
 	api := router.Group(cfg.APIBase())
 	{
@@ -41,6 +41,7 @@ func Run() error {
 
 		api.POST("/embed/nodes/register", embedHandler.Register)
 		api.GET("/public/nodes/:uuid/current", publicHandler.Current)
+		api.GET("/report/nodes/:uuid/install.sh", reportHandler.InstallScript)
 		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
 		admin := api.Group("/admin")

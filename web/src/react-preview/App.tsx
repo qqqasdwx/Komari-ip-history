@@ -698,7 +698,7 @@ function resolveReportEndpointURL(me: MeResponse, path: string) {
   return `${base}${path}`;
 }
 
-function resolveComposeReportEndpointURL(me: MeResponse, path: string) {
+function resolveComposeDevURL(me: MeResponse, path: string) {
   const publicBaseURL = (me.public_base_url ?? "").replace(/\/$/, "");
   if (me.app_env !== "development" || publicBaseURL) {
     return "";
@@ -706,9 +706,18 @@ function resolveComposeReportEndpointURL(me: MeResponse, path: string) {
   return `http://proxy:8080${path}`;
 }
 
+function buildInstallCommand(installerURL: string, reporterToken: string) {
+  return `curl -fsSL -H 'X-IPQ-Reporter-Token: ${reporterToken}' '${installerURL}' | sudo bash`;
+}
+
 function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
   const reportEndpointURL = resolveReportEndpointURL(props.me, props.detail.report_config.endpoint_path);
-  const composeReportEndpointURL = resolveComposeReportEndpointURL(props.me, props.detail.report_config.endpoint_path);
+  const installerURL = resolveReportEndpointURL(props.me, props.detail.report_config.installer_path);
+  const installCommand = buildInstallCommand(installerURL, props.detail.report_config.reporter_token);
+  const composeReportEndpointURL = resolveComposeDevURL(props.me, props.detail.report_config.endpoint_path);
+  const composeInstallerURL = resolveComposeDevURL(props.me, props.detail.report_config.installer_path);
+  const composeInstallCommand =
+    composeInstallerURL === "" ? "" : buildInstallCommand(composeInstallerURL, props.detail.report_config.reporter_token);
 
   async function handleCopy(value: string, successText: string) {
     try {
@@ -739,9 +748,35 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
               ))}
             </div>
           ) : (
-            <p className="text-sm leading-6 text-slate-500">请先添加目标 IP，接入命令和上报配置才会生效。</p>
+            <p className="text-sm leading-6 text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
           )}
         </div>
+        {props.detail.report_config.target_ips.length > 0 ? (
+          <div className="summary-section">
+            <div className="summary-head">
+              <strong>接入命令</strong>
+              <button className="button ghost" onClick={() => void handleCopy(installCommand, "接入命令已复制。")} type="button">
+                复制
+              </button>
+            </div>
+            <pre className="code-block code-block-compact">{installCommand}</pre>
+          </div>
+        ) : null}
+        {composeInstallCommand ? (
+          <div className="summary-section">
+            <div className="summary-head">
+              <strong>容器网络命令（仅联调）</strong>
+              <button
+                className="button ghost"
+                onClick={() => void handleCopy(composeInstallCommand, "容器网络接入命令已复制。")}
+                type="button"
+              >
+                复制
+              </button>
+            </div>
+            <pre className="code-block code-block-compact">{composeInstallCommand}</pre>
+          </div>
+        ) : null}
         <div className="summary-section">
           <div className="summary-head">
             <strong>上报地址</strong>

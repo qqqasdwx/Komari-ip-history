@@ -55,6 +55,7 @@ export type NodeDetail = {
   current_target?: NodeTargetDetail | null;
   report_config: {
     endpoint_path: string;
+    installer_path: string;
     reporter_token: string;
     target_ips: string[];
   };

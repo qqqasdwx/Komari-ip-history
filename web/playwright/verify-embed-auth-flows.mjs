@@ -4,6 +4,7 @@ import path from "node:path";
 
 const komariBaseURL = (process.env.KOMARI_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || "http://127.0.0.1:8090").replace(/\/$/, "");
+const integrationPublicBaseURL = (process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL || "").replace(/\/$/, "");
 const outputDir = path.resolve("playwright-output");
 mkdirSync(outputDir, { recursive: true });
 
@@ -56,7 +57,7 @@ async function configureLoader(appPage, komariPage, guestReadEnabled) {
   await appPage.goto(`${appBaseURL}/#/nodes`);
   expectOK(await jsonFetch(appPage, `${appBaseURL}/api/v1/admin/integration`, {
     method: "PUT",
-    body: JSON.stringify({ public_base_url: "", guest_read_enabled: guestReadEnabled })
+    body: JSON.stringify({ public_base_url: integrationPublicBaseURL, guest_read_enabled: guestReadEnabled })
   }), "update integration settings");
   const preview = expectOK(
     await jsonFetch(appPage, `${appBaseURL}/api/v1/admin/header-preview?variant=loader`),
@@ -175,7 +176,7 @@ try {
   await adminReturnPage.getByLabel("密码").fill("admin");
   await adminReturnPage.getByRole("button", { name: "登录" }).click();
   await adminReturnPage.waitForURL(`${komariBaseURL}/instance/**`, { timeout: 25000 });
-  await adminReturnPage.waitForLoadState("networkidle");
+  await adminReturnPage.waitForLoadState("domcontentloaded");
   await adminReturnPage.waitForTimeout(8000);
   const adminReturnOverlay = await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
   const adminReturnIframeSrc =

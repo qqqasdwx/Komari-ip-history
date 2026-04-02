@@ -71,26 +71,27 @@ type PublicTargetDetail struct {
 
 type NodeReportConfig struct {
 	EndpointPath  string   `json:"endpoint_path"`
+	InstallerPath string   `json:"installer_path"`
 	ReporterToken string   `json:"reporter_token"`
 	TargetIPs     []string `json:"target_ips"`
 }
 
 type NodeDetail struct {
-	KomariNodeUUID   string             `json:"komari_node_uuid"`
-	Name             string             `json:"name"`
-	HasData          bool               `json:"has_data"`
-	UpdatedAt        *time.Time         `json:"updated_at"`
+	KomariNodeUUID   string               `json:"komari_node_uuid"`
+	Name             string               `json:"name"`
+	HasData          bool                 `json:"has_data"`
+	UpdatedAt        *time.Time           `json:"updated_at"`
 	Targets          []NodeTargetListItem `json:"targets"`
-	SelectedTargetID *uint              `json:"selected_target_id"`
-	CurrentTarget    *NodeTargetDetail  `json:"current_target"`
-	ReportConfig     NodeReportConfig   `json:"report_config"`
+	SelectedTargetID *uint                `json:"selected_target_id"`
+	CurrentTarget    *NodeTargetDetail    `json:"current_target"`
+	ReportConfig     NodeReportConfig     `json:"report_config"`
 }
 
 type PublicNodeDetail struct {
-	HasData          bool                `json:"has_data"`
+	HasData          bool                   `json:"has_data"`
 	Targets          []PublicTargetListItem `json:"targets"`
-	SelectedTargetID *uint               `json:"selected_target_id"`
-	CurrentTarget    *PublicTargetDetail `json:"current_target"`
+	SelectedTargetID *uint                  `json:"selected_target_id"`
+	CurrentTarget    *PublicTargetDetail    `json:"current_target"`
 }
 
 type NodeHistoryEntry struct {
@@ -209,6 +210,7 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 		Targets:        targetItems,
 		ReportConfig: NodeReportConfig{
 			EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
+			InstallerPath: "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
 			ReporterToken: node.ReporterToken,
 			TargetIPs:     reportIPs,
 		},
@@ -506,9 +508,34 @@ func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error)
 
 	return NodeReportConfig{
 		EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
+		InstallerPath: "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
 		ReporterToken: token,
 		TargetIPs:     targetIPs,
 	}, nil
+}
+
+func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string) (string, error) {
+	if strings.TrimSpace(token) == "" {
+		return "", errors.New("missing reporter token")
+	}
+
+	node, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
+		return "", err
+	}
+	if node.ReporterToken == "" || token != node.ReporterToken {
+		return "", errors.New("invalid reporter token")
+	}
+	if len(targets) == 0 {
+		return "", errors.New("no target ip configured")
+	}
+
+	targetIPs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIPs = append(targetIPs, target.TargetIP)
+	}
+
+	return buildNodeInstallScript(node, targetIPs, reportEndpointURL), nil
 }
 
 func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
@@ -707,4 +734,95 @@ func recomputeNodeState(tx *gorm.DB, nodeID uint) error {
 		"current_result_updated_at": updatedAt,
 	}
 	return tx.Model(&models.Node{}).Where("id = ?", nodeID).Updates(updates).Error
+}
+
+func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL string) string {
+	var builder strings.Builder
+	unitName := "ipq-reporter-" + node.KomariNodeUUID
+	scriptPath := "/usr/local/bin/" + unitName + ".sh"
+	servicePath := "/etc/systemd/system/" + unitName + ".service"
+	timerPath := "/etc/systemd/system/" + unitName + ".timer"
+
+	builder.WriteString("#!/usr/bin/env bash\n")
+	builder.WriteString("set -euo pipefail\n\n")
+	builder.WriteString("if [ \"$(id -u)\" -ne 0 ]; then\n")
+	builder.WriteString("  echo \"This installer must be run as root.\" >&2\n")
+	builder.WriteString("  exit 1\n")
+	builder.WriteString("fi\n\n")
+
+	builder.WriteString("cat > " + shellQuote(scriptPath) + " <<'IPQ_REPORTER_SCRIPT'\n")
+	builder.WriteString("#!/usr/bin/env bash\n")
+	builder.WriteString("set -euo pipefail\n\n")
+	builder.WriteString("REPORT_ENDPOINT=" + shellQuote(reportEndpointURL) + "\n")
+	builder.WriteString("REPORTER_TOKEN=" + shellQuote(node.ReporterToken) + "\n")
+	builder.WriteString("TARGET_IPS=(")
+	for index, ip := range targetIPs {
+		if index > 0 {
+			builder.WriteString(" ")
+		}
+		builder.WriteString(shellQuote(ip))
+	}
+	builder.WriteString(")\n\n")
+	builder.WriteString("WORKDIR=$(mktemp -d)\n")
+	builder.WriteString("cleanup() {\n")
+	builder.WriteString("  rm -rf \"$WORKDIR\"\n")
+	builder.WriteString("}\n")
+	builder.WriteString("trap cleanup EXIT\n\n")
+	builder.WriteString("for TARGET_IP in \"${TARGET_IPS[@]}\"; do\n")
+	builder.WriteString("  SAFE_NAME=$(printf '%s' \"$TARGET_IP\" | tr ':/' '__')\n")
+	builder.WriteString("  RESULT_FILE=\"$WORKDIR/$SAFE_NAME.json\"\n")
+	builder.WriteString("  if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i \"$TARGET_IP\" -o \"$RESULT_FILE\"; then\n")
+	builder.WriteString("    echo \"IPQuality probe failed: $TARGET_IP\" >&2\n")
+	builder.WriteString("    continue\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if [ ! -s \"$RESULT_FILE\" ]; then\n")
+	builder.WriteString("    echo \"IPQuality probe returned empty result: $TARGET_IP\" >&2\n")
+	builder.WriteString("    continue\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  {\n")
+	builder.WriteString("    printf '{\"target_ip\":\"%s\",\"result\":' \"$TARGET_IP\"\n")
+	builder.WriteString("    cat \"$RESULT_FILE\"\n")
+	builder.WriteString("    printf '}'\n")
+	builder.WriteString("  } | curl -fsS -X POST \\\n")
+	builder.WriteString("      -H 'Content-Type: application/json' \\\n")
+	builder.WriteString("      -H \"X-IPQ-Reporter-Token: ${REPORTER_TOKEN}\" \\\n")
+	builder.WriteString("      --data-binary @- \\\n")
+	builder.WriteString("      \"$REPORT_ENDPOINT\" >/dev/null\n")
+	builder.WriteString("done\n")
+	builder.WriteString("IPQ_REPORTER_SCRIPT\n\n")
+
+	builder.WriteString("chmod +x " + shellQuote(scriptPath) + "\n\n")
+	builder.WriteString("cat > " + shellQuote(servicePath) + " <<'IPQ_REPORTER_SERVICE'\n")
+	builder.WriteString("[Unit]\n")
+	builder.WriteString("Description=Komari IP Quality reporter for " + escapeINIValue(node.Name) + "\n")
+	builder.WriteString("After=network-online.target\n")
+	builder.WriteString("Wants=network-online.target\n\n")
+	builder.WriteString("[Service]\n")
+	builder.WriteString("Type=oneshot\n")
+	builder.WriteString("ExecStart=" + scriptPath + "\n")
+	builder.WriteString("IPQ_REPORTER_SERVICE\n\n")
+	builder.WriteString("cat > " + shellQuote(timerPath) + " <<'IPQ_REPORTER_TIMER'\n")
+	builder.WriteString("[Unit]\n")
+	builder.WriteString("Description=Run " + unitName + " hourly\n\n")
+	builder.WriteString("[Timer]\n")
+	builder.WriteString("OnBootSec=5min\n")
+	builder.WriteString("OnUnitActiveSec=1h\n")
+	builder.WriteString("Unit=" + unitName + ".service\n\n")
+	builder.WriteString("[Install]\n")
+	builder.WriteString("WantedBy=timers.target\n")
+	builder.WriteString("IPQ_REPORTER_TIMER\n\n")
+	builder.WriteString("systemctl daemon-reload\n")
+	builder.WriteString("systemctl enable --now " + shellQuote(unitName+".timer") + "\n")
+	builder.WriteString("systemctl start " + shellQuote(unitName+".service") + "\n\n")
+	builder.WriteString("echo " + shellQuote("Installed "+unitName+" with "+strconv.Itoa(len(targetIPs))+" target IP(s).") + "\n")
+	builder.WriteString("echo " + shellQuote("Re-run this command after changing the target IP list to update the service.") + "\n")
+	return builder.String()
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func escapeINIValue(value string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(value)
 }

@@ -41,7 +41,9 @@ if (rowCount > 0) {
 
   const filteredCount = await rowLocator.count();
   if (filteredCount === 0) {
-    throw new Error('react node search returned no rows');
+    await page.getByPlaceholder('搜索节点名称').fill('');
+    await page.getByPlaceholder('搜索节点名称').press('Enter');
+    await page.waitForLoadState('networkidle');
   }
 
   await rowLocator.first().click();
@@ -59,6 +61,10 @@ if (rowCount > 0) {
   const reportConfigCount = await page.locator('[data-node-report-config="true"]').count();
   if (detailReportCount === 0 || reportConfigCount === 0) {
     throw new Error('react detail page missing current report or report config');
+  }
+  const installCommandCount = await page.getByText('接入命令', { exact: true }).count();
+  if (installCommandCount === 0) {
+    throw new Error('react detail page missing install command');
   }
 
   const detailHash = new URL(page.url()).hash.replace(/^#/, '');
