@@ -31,6 +31,20 @@ type Node struct {
 	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
+type NodeTarget struct {
+	ID                     uint       `gorm:"primaryKey" json:"id"`
+	NodeID                 uint       `gorm:"uniqueIndex:idx_node_target_ip;index;not null" json:"node_id"`
+	Node                   Node       `gorm:"constraint:OnDelete:CASCADE" json:"-"`
+	TargetIP               string     `gorm:"size:64;uniqueIndex:idx_node_target_ip;not null" json:"target_ip"`
+	SortOrder              int        `gorm:"index;not null;default:0" json:"sort_order"`
+	HasData                bool       `gorm:"not null;default:false" json:"has_data"`
+	CurrentSummary         string     `gorm:"size:512" json:"current_summary"`
+	CurrentResultJSON      string     `gorm:"type:longtext" json:"-"`
+	CurrentResultUpdatedAt *time.Time `json:"current_result_updated_at"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
 type NodeHistory struct {
 	ID         uint      `gorm:"primaryKey" json:"id"`
 	NodeID     uint      `gorm:"index;not null" json:"node_id"`
@@ -38,6 +52,16 @@ type NodeHistory struct {
 	Summary    string    `gorm:"size:512" json:"summary"`
 	RecordedAt time.Time `gorm:"index;not null" json:"recorded_at"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type NodeTargetHistory struct {
+	ID           uint       `gorm:"primaryKey" json:"id"`
+	NodeTargetID uint       `gorm:"index;not null" json:"node_target_id"`
+	NodeTarget   NodeTarget `gorm:"constraint:OnDelete:CASCADE" json:"-"`
+	ResultJSON   string     `gorm:"type:longtext" json:"result_json"`
+	Summary      string     `gorm:"size:512" json:"summary"`
+	RecordedAt   time.Time  `gorm:"index;not null" json:"recorded_at"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type AppSetting struct {

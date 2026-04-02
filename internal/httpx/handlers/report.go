@@ -28,7 +28,7 @@ func (h ReportHandler) Report(c *gin.Context) {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "result is required":
+		case "result is required", "invalid target ip", "target ip not configured":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {

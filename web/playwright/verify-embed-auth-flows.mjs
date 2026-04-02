@@ -87,6 +87,13 @@ async function registerIpqNode(page, uuid, name) {
   }), "register ipq node");
 }
 
+async function addIpqTarget(page, uuid, ip) {
+  return expectOK(await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${uuid}/targets`, {
+    method: "POST",
+    body: JSON.stringify({ ip })
+  }), "add ipq target");
+}
+
 async function removeKomariNode(page, uuid) {
   const response = await jsonFetch(page, `${komariBaseURL}/api/admin/client/${uuid}/remove`, { method: "POST" });
   return response.status;
@@ -115,6 +122,7 @@ try {
   const registeredNode = await addKomariNode(komariPage, registeredNodeName);
   createdNodeUUIDs.push(registeredNode.uuid);
   await registerIpqNode(appPage, registeredNode.uuid, registeredNodeName);
+  await addIpqTarget(appPage, registeredNode.uuid, "198.51.100.10");
 
   await configureLoader(appPage, komariPage, false);
 

@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,37 +21,88 @@ type RegisterNodeInput struct {
 	Name           string `json:"name"`
 }
 
+type AddNodeTargetInput struct {
+	IP string `json:"ip"`
+}
+
+type ReorderNodeTargetsInput struct {
+	TargetIDs []uint `json:"target_ids"`
+}
+
 type NodeListItem struct {
-	KomariNodeUUID string         `json:"komari_node_uuid"`
-	Name           string         `json:"name"`
-	HasData        bool           `json:"has_data"`
-	CurrentSummary string         `json:"current_summary"`
-	CurrentResult  map[string]any `json:"current_result"`
-	UpdatedAt      *time.Time     `json:"updated_at"`
-	CreatedAt      time.Time      `json:"created_at"`
+	KomariNodeUUID string     `json:"komari_node_uuid"`
+	Name           string     `json:"name"`
+	HasData        bool       `json:"has_data"`
+	UpdatedAt      *time.Time `json:"updated_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type NodeTargetListItem struct {
+	ID        uint       `json:"id"`
+	IP        string     `json:"ip"`
+	HasData   bool       `json:"has_data"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	SortOrder int        `json:"sort_order"`
+}
+
+type NodeTargetDetail struct {
+	ID        uint           `json:"id"`
+	IP        string         `json:"ip"`
+	HasData   bool           `json:"has_data"`
+	UpdatedAt *time.Time     `json:"updated_at"`
+	Result    map[string]any `json:"current_result"`
+}
+
+type PublicTargetListItem struct {
+	ID        uint       `json:"id"`
+	Label     string     `json:"label"`
+	HasData   bool       `json:"has_data"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	SortOrder int        `json:"sort_order"`
+}
+
+type PublicTargetDetail struct {
+	ID        uint           `json:"id"`
+	Label     string         `json:"label"`
+	HasData   bool           `json:"has_data"`
+	UpdatedAt *time.Time     `json:"updated_at"`
+	Result    map[string]any `json:"current_result"`
 }
 
 type NodeReportConfig struct {
-	EndpointPath  string `json:"endpoint_path"`
-	ReporterToken string `json:"reporter_token"`
+	EndpointPath  string   `json:"endpoint_path"`
+	ReporterToken string   `json:"reporter_token"`
+	TargetIPs     []string `json:"target_ips"`
 }
 
 type NodeDetail struct {
-	KomariNodeUUID string           `json:"komari_node_uuid"`
-	Name           string           `json:"name"`
-	HasData        bool             `json:"has_data"`
-	CurrentSummary string           `json:"current_summary"`
-	UpdatedAt      *time.Time       `json:"updated_at"`
-	CurrentResult  map[string]any   `json:"current_result"`
-	ReportConfig   NodeReportConfig `json:"report_config"`
+	KomariNodeUUID   string             `json:"komari_node_uuid"`
+	Name             string             `json:"name"`
+	HasData          bool               `json:"has_data"`
+	UpdatedAt        *time.Time         `json:"updated_at"`
+	Targets          []NodeTargetListItem `json:"targets"`
+	SelectedTargetID *uint              `json:"selected_target_id"`
+	CurrentTarget    *NodeTargetDetail  `json:"current_target"`
+	ReportConfig     NodeReportConfig   `json:"report_config"`
 }
 
 type PublicNodeDetail struct {
-	HasData       bool           `json:"has_data"`
-	CurrentResult map[string]any `json:"current_result"`
+	HasData          bool                `json:"has_data"`
+	Targets          []PublicTargetListItem `json:"targets"`
+	SelectedTargetID *uint               `json:"selected_target_id"`
+	CurrentTarget    *PublicTargetDetail `json:"current_target"`
+}
+
+type NodeHistoryEntry struct {
+	ID         uint           `json:"id"`
+	TargetID   uint           `json:"target_id"`
+	RecordedAt time.Time      `json:"recorded_at"`
+	Summary    string         `json:"summary"`
+	Result     map[string]any `json:"result"`
 }
 
 type ReportNodeInput struct {
+	TargetIP   string         `json:"target_ip"`
 	Summary    string         `json:"summary"`
 	Result     map[string]any `json:"result"`
 	RecordedAt *time.Time     `json:"recorded_at"`
@@ -59,8 +112,8 @@ func newReporterToken() (string, error) {
 	return auth.NewSessionToken()
 }
 
-func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*models.Node, bool, error) {
-	if input.KomariNodeUUID == "" || input.Name == "" {
+func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*models.Node, bool, error) {
+	if strings.TrimSpace(input.KomariNodeUUID) == "" || strings.TrimSpace(input.Name) == "" {
 		return nil, false, errors.New("uuid and name are required")
 	}
 
@@ -69,14 +122,14 @@ func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*mod
 	if err == nil {
 		node.Name = input.Name
 		if node.ReporterToken == "" {
-			token, err := newReporterToken()
-			if err != nil {
-				return nil, true, err
+			token, tokenErr := newReporterToken()
+			if tokenErr != nil {
+				return nil, true, tokenErr
 			}
 			node.ReporterToken = token
 		}
-		if err := db.Save(&node).Error; err != nil {
-			return nil, true, err
+		if saveErr := db.Save(&node).Error; saveErr != nil {
+			return nil, true, saveErr
 		}
 		return &node, true, nil
 	}
@@ -84,45 +137,17 @@ func RegisterNode(db *gorm.DB, cfg config.Config, input RegisterNodeInput) (*mod
 		return nil, false, err
 	}
 
-	node = models.Node{
-		KomariNodeUUID: input.KomariNodeUUID,
-		Name:           input.Name,
-	}
 	reporterToken, err := newReporterToken()
 	if err != nil {
 		return nil, false, err
 	}
-	node.ReporterToken = reporterToken
 
-	var history *models.NodeHistory
-	if cfg.IsDevelopment() {
-		raw, summary, updatedAt, err := sampledata.DefaultCurrentResult(input.KomariNodeUUID, input.Name)
-		if err != nil {
-			return nil, false, err
-		}
-		node.HasData = true
-		node.CurrentResultJSON = raw
-		node.CurrentSummary = summary
-		node.CurrentResultUpdatedAt = &updatedAt
-		history = &models.NodeHistory{
-			ResultJSON: raw,
-			Summary:    summary,
-			RecordedAt: updatedAt,
-		}
+	node = models.Node{
+		KomariNodeUUID: input.KomariNodeUUID,
+		Name:           input.Name,
+		ReporterToken:  reporterToken,
 	}
-
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&node).Error; err != nil {
-			return err
-		}
-		if history != nil {
-			history.NodeID = node.ID
-			if err := tx.Create(history).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	if err := db.Create(&node).Error; err != nil {
 		return nil, false, err
 	}
 	return &node, false, nil
@@ -141,16 +166,10 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 
 	items := make([]NodeListItem, 0, len(nodes))
 	for _, node := range nodes {
-		current := map[string]any{}
-		if node.CurrentResultJSON != "" {
-			_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
-		}
 		items = append(items, NodeListItem{
 			KomariNodeUUID: node.KomariNodeUUID,
 			Name:           node.Name,
 			HasData:        node.HasData,
-			CurrentSummary: node.CurrentSummary,
-			CurrentResult:  current,
 			UpdatedAt:      node.CurrentResultUpdatedAt,
 			CreatedAt:      node.CreatedAt,
 		})
@@ -158,62 +177,404 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 	return items, nil
 }
 
-func GetNodeDetail(db *gorm.DB, uuid string) (NodeDetail, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail, error) {
+	node, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
 		return NodeDetail{}, err
 	}
 
-	current := map[string]any{}
-	if node.CurrentResultJSON != "" {
-		_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
+	selected, err := selectNodeTarget(targets, selectedTargetID)
+	if err != nil {
+		return NodeDetail{}, err
 	}
 
-	return NodeDetail{
+	targetItems := make([]NodeTargetListItem, 0, len(targets))
+	reportIPs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetItems = append(targetItems, NodeTargetListItem{
+			ID:        target.ID,
+			IP:        target.TargetIP,
+			HasData:   target.HasData,
+			UpdatedAt: target.CurrentResultUpdatedAt,
+			SortOrder: target.SortOrder,
+		})
+		reportIPs = append(reportIPs, target.TargetIP)
+	}
+
+	detail := NodeDetail{
 		KomariNodeUUID: node.KomariNodeUUID,
 		Name:           node.Name,
 		HasData:        node.HasData,
-		CurrentSummary: node.CurrentSummary,
 		UpdatedAt:      node.CurrentResultUpdatedAt,
-		CurrentResult:  current,
+		Targets:        targetItems,
 		ReportConfig: NodeReportConfig{
 			EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
 			ReporterToken: node.ReporterToken,
+			TargetIPs:     reportIPs,
 		},
-	}, nil
+	}
+
+	if selected != nil {
+		detail.SelectedTargetID = &selected.ID
+		detail.CurrentTarget = &NodeTargetDetail{
+			ID:        selected.ID,
+			IP:        selected.TargetIP,
+			HasData:   selected.HasData,
+			UpdatedAt: selected.CurrentResultUpdatedAt,
+			Result:    decodeResultJSON(selected.CurrentResultJSON),
+		}
+	}
+
+	return detail, nil
 }
 
-func GetNodeHistory(db *gorm.DB, uuid string) ([]models.NodeHistory, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint) ([]NodeHistoryEntry, error) {
+	_, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
 		return nil, err
 	}
 
-	var history []models.NodeHistory
-	if err := db.Where("node_id = ?", node.ID).Order("recorded_at DESC").Find(&history).Error; err != nil {
+	selected, err := selectNodeTarget(targets, selectedTargetID)
+	if err != nil {
 		return nil, err
 	}
-	return history, nil
+	if selected == nil {
+		return []NodeHistoryEntry{}, nil
+	}
+
+	var history []models.NodeTargetHistory
+	if err := db.Where("node_target_id = ?", selected.ID).Order("recorded_at DESC").Find(&history).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]NodeHistoryEntry, 0, len(history))
+	for _, item := range history {
+		items = append(items, NodeHistoryEntry{
+			ID:         item.ID,
+			TargetID:   selected.ID,
+			RecordedAt: item.RecordedAt,
+			Summary:    item.Summary,
+			Result:     decodeResultJSON(item.ResultJSON),
+		})
+	}
+	return items, nil
 }
 
-func GetPublicNodeDetail(db *gorm.DB, uuid string, displayIP string) (PublicNodeDetail, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displayIP string) (PublicNodeDetail, error) {
+	node, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
 		return PublicNodeDetail{}, err
 	}
 
-	current := map[string]any{}
-	if node.CurrentResultJSON != "" {
-		_ = json.Unmarshal([]byte(node.CurrentResultJSON), &current)
+	selected, err := selectNodeTarget(targets, selectedTargetID)
+	if err != nil {
+		return PublicNodeDetail{}, err
 	}
 
-	current = sanitizePublicCurrentResult(current)
-	applyPublicDisplayIP(current, displayIP)
+	detail := PublicNodeDetail{HasData: node.HasData}
+	for index, target := range targets {
+		detail.Targets = append(detail.Targets, PublicTargetListItem{
+			ID:        target.ID,
+			Label:     publicTargetLabel(index),
+			HasData:   target.HasData,
+			UpdatedAt: target.CurrentResultUpdatedAt,
+			SortOrder: target.SortOrder,
+		})
+	}
 
-	return PublicNodeDetail{
-		HasData:       node.HasData,
-		CurrentResult: current,
+	if selected != nil {
+		result := sanitizePublicCurrentResult(decodeResultJSON(selected.CurrentResultJSON))
+		if len(targets) > 0 && targets[0].ID == selected.ID {
+			applyPublicDisplayIP(result, displayIP)
+		} else {
+			applyPublicDisplayIP(result, "")
+		}
+		detail.SelectedTargetID = &selected.ID
+		selectedIndex := 0
+		for i, target := range targets {
+			if target.ID == selected.ID {
+				selectedIndex = i
+				break
+			}
+		}
+		detail.CurrentTarget = &PublicTargetDetail{
+			ID:        selected.ID,
+			Label:     publicTargetLabel(selectedIndex),
+			HasData:   selected.HasData,
+			UpdatedAt: selected.CurrentResultUpdatedAt,
+			Result:    result,
+		}
+	}
+
+	return detail, nil
+}
+
+func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTargetInput) (NodeTargetListItem, error) {
+	ip := strings.TrimSpace(input.IP)
+	if net.ParseIP(ip) == nil {
+		return NodeTargetListItem{}, errors.New("invalid ip")
+	}
+
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return NodeTargetListItem{}, err
+	}
+
+	var duplicate int64
+	if err := db.Model(&models.NodeTarget{}).Where("node_id = ? AND target_ip = ?", node.ID, ip).Count(&duplicate).Error; err != nil {
+		return NodeTargetListItem{}, err
+	}
+	if duplicate > 0 {
+		return NodeTargetListItem{}, errors.New("ip already exists")
+	}
+
+	var created models.NodeTarget
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		sortOrder, err := nextNodeTargetSortOrder(tx, node.ID)
+		if err != nil {
+			return err
+		}
+
+		created = models.NodeTarget{
+			NodeID:    node.ID,
+			TargetIP:  ip,
+			SortOrder: sortOrder,
+		}
+
+		if cfg.IsDevelopment() {
+			raw, summary, updatedAt, err := sampledata.DefaultTargetResult(node.KomariNodeUUID, node.Name, ip)
+			if err != nil {
+				return err
+			}
+			created.HasData = true
+			created.CurrentSummary = summary
+			created.CurrentResultJSON = raw
+			created.CurrentResultUpdatedAt = &updatedAt
+		}
+
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+
+		if created.HasData && created.CurrentResultUpdatedAt != nil {
+			history := models.NodeTargetHistory{
+				NodeTargetID: created.ID,
+				ResultJSON:   created.CurrentResultJSON,
+				Summary:      created.CurrentSummary,
+				RecordedAt:   created.CurrentResultUpdatedAt.UTC(),
+			}
+			if err := tx.Create(&history).Error; err != nil {
+				return err
+			}
+		}
+
+		return recomputeNodeState(tx, node.ID)
+	}); err != nil {
+		return NodeTargetListItem{}, err
+	}
+
+	return NodeTargetListItem{
+		ID:        created.ID,
+		IP:        created.TargetIP,
+		HasData:   created.HasData,
+		UpdatedAt: created.CurrentResultUpdatedAt,
+		SortOrder: created.SortOrder,
 	}, nil
+}
+
+func DeleteNodeTarget(db *gorm.DB, uuid string, targetID uint) error {
+	if targetID == 0 {
+		return errors.New("target id is required")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var node models.Node
+		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+			return err
+		}
+
+		var target models.NodeTarget
+		if err := tx.First(&target, "id = ? AND node_id = ?", targetID, node.ID).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("node_target_id = ?", target.ID).Delete(&models.NodeTargetHistory{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&target).Error; err != nil {
+			return err
+		}
+		if err := normalizeNodeTargetSortOrder(tx, node.ID); err != nil {
+			return err
+		}
+		return recomputeNodeState(tx, node.ID)
+	})
+}
+
+func ReorderNodeTargets(db *gorm.DB, uuid string, input ReorderNodeTargetsInput) error {
+	if len(input.TargetIDs) == 0 {
+		return errors.New("target_ids is required")
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var node models.Node
+		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+			return err
+		}
+
+		var targets []models.NodeTarget
+		if err := tx.Where("node_id = ?", node.ID).Find(&targets).Error; err != nil {
+			return err
+		}
+		if len(targets) != len(input.TargetIDs) {
+			return errors.New("target_ids mismatch")
+		}
+
+		existing := make(map[uint]struct{}, len(targets))
+		for _, target := range targets {
+			existing[target.ID] = struct{}{}
+		}
+		for _, targetID := range input.TargetIDs {
+			if _, ok := existing[targetID]; !ok {
+				return errors.New("target_ids mismatch")
+			}
+		}
+
+		for index, targetID := range input.TargetIDs {
+			if err := tx.Model(&models.NodeTarget{}).
+				Where("id = ? AND node_id = ?", targetID, node.ID).
+				Update("sort_order", index).
+				Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func DeleteNode(db *gorm.DB, uuid string) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var node models.Node
+		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+			return err
+		}
+		var targets []models.NodeTarget
+		if err := tx.Where("node_id = ?", node.ID).Find(&targets).Error; err != nil {
+			return err
+		}
+		if len(targets) > 0 {
+			targetIDs := make([]uint, 0, len(targets))
+			for _, target := range targets {
+				targetIDs = append(targetIDs, target.ID)
+			}
+			if err := tx.Where("node_target_id IN ?", targetIDs).Delete(&models.NodeTargetHistory{}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("node_id = ?", node.ID).Delete(&models.NodeHistory{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("node_id = ?", node.ID).Delete(&models.NodeTarget{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&node).Error
+	})
+}
+
+func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error) {
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return NodeReportConfig{}, err
+	}
+
+	token, err := newReporterToken()
+	if err != nil {
+		return NodeReportConfig{}, err
+	}
+	if err := db.Model(&node).Update("reporter_token", token).Error; err != nil {
+		return NodeReportConfig{}, err
+	}
+
+	var targets []models.NodeTarget
+	if err := db.Where("node_id = ?", node.ID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+		return NodeReportConfig{}, err
+	}
+	targetIPs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIPs = append(targetIPs, target.TargetIP)
+	}
+
+	return NodeReportConfig{
+		EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
+		ReporterToken: token,
+		TargetIPs:     targetIPs,
+	}, nil
+}
+
+func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
+	if strings.TrimSpace(token) == "" {
+		return errors.New("missing reporter token")
+	}
+	targetIP := strings.TrimSpace(input.TargetIP)
+	if net.ParseIP(targetIP) == nil {
+		return errors.New("invalid target ip")
+	}
+	if len(input.Result) == 0 {
+		return errors.New("result is required")
+	}
+
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		return err
+	}
+	if node.ReporterToken == "" || token != node.ReporterToken {
+		return errors.New("invalid reporter token")
+	}
+
+	var target models.NodeTarget
+	if err := db.First(&target, "node_id = ? AND target_ip = ?", node.ID, targetIP).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return errors.New("target ip not configured")
+		}
+		return err
+	}
+
+	recordedAt := time.Now().UTC()
+	if input.RecordedAt != nil && !input.RecordedAt.IsZero() {
+		recordedAt = input.RecordedAt.UTC()
+	}
+
+	raw, err := json.MarshalIndent(input.Result, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	summary := strings.TrimSpace(input.Summary)
+	if summary == "" {
+		summary = "Reporter update"
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&target).Updates(map[string]any{
+			"has_data":                  true,
+			"current_summary":           summary,
+			"current_result_json":       string(raw),
+			"current_result_updated_at": recordedAt,
+		}).Error; err != nil {
+			return err
+		}
+
+		history := models.NodeTargetHistory{
+			NodeTargetID: target.ID,
+			ResultJSON:   string(raw),
+			Summary:      summary,
+			RecordedAt:   recordedAt,
+		}
+		if err := tx.Create(&history).Error; err != nil {
+			return err
+		}
+		return recomputeNodeState(tx, node.ID)
+	})
 }
 
 func sanitizePublicCurrentResult(result map[string]any) map[string]any {
@@ -251,86 +612,99 @@ func applyPublicDisplayIP(result map[string]any, displayIP string) {
 	head["IP"] = displayIP
 }
 
-func DeleteNode(db *gorm.DB, uuid string) error {
-	return db.Transaction(func(tx *gorm.DB) error {
-		var node models.Node
-		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("node_id = ?", node.ID).Delete(&models.NodeHistory{}).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&node).Error
-	})
-}
-
-func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error) {
+func loadNodeWithTargets(db *gorm.DB, uuid string) (models.Node, []models.NodeTarget, error) {
 	var node models.Node
 	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
-		return NodeReportConfig{}, err
+		return models.Node{}, nil, err
 	}
 
-	token, err := newReporterToken()
-	if err != nil {
-		return NodeReportConfig{}, err
-	}
-	if err := db.Model(&node).Update("reporter_token", token).Error; err != nil {
-		return NodeReportConfig{}, err
+	var targets []models.NodeTarget
+	if err := db.Where("node_id = ?", node.ID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+		return models.Node{}, nil, err
 	}
 
-	return NodeReportConfig{
-		EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
-		ReporterToken: token,
-	}, nil
+	return node, targets, nil
 }
 
-func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
-	if strings.TrimSpace(token) == "" {
-		return errors.New("missing reporter token")
+func selectNodeTarget(targets []models.NodeTarget, selectedTargetID *uint) (*models.NodeTarget, error) {
+	if len(targets) == 0 {
+		return nil, nil
 	}
-	if len(input.Result) == 0 {
-		return errors.New("result is required")
+	if selectedTargetID == nil || *selectedTargetID == 0 {
+		return &targets[0], nil
 	}
+	for index := range targets {
+		if targets[index].ID == *selectedTargetID {
+			return &targets[index], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
 
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+func decodeResultJSON(raw string) map[string]any {
+	result := map[string]any{}
+	if raw == "" {
+		return result
+	}
+	_ = json.Unmarshal([]byte(raw), &result)
+	return result
+}
+
+func publicTargetLabel(index int) string {
+	return "IP " + strconv.Itoa(index+1)
+}
+
+func nextNodeTargetSortOrder(db *gorm.DB, nodeID uint) (int, error) {
+	var targets []models.NodeTarget
+	if err := db.Where("node_id = ?", nodeID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+		return 0, err
+	}
+	if len(targets) == 0 {
+		return 0, nil
+	}
+	return targets[len(targets)-1].SortOrder + 1, nil
+}
+
+func normalizeNodeTargetSortOrder(tx *gorm.DB, nodeID uint) error {
+	var targets []models.NodeTarget
+	if err := tx.Where("node_id = ?", nodeID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
 		return err
 	}
-	if node.ReporterToken == "" || token != node.ReporterToken {
-		return errors.New("invalid reporter token")
-	}
-
-	recordedAt := time.Now().UTC()
-	if input.RecordedAt != nil && !input.RecordedAt.IsZero() {
-		recordedAt = input.RecordedAt.UTC()
-	}
-
-	raw, err := json.MarshalIndent(input.Result, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	summary := strings.TrimSpace(input.Summary)
-	if summary == "" {
-		summary = "Reporter update"
-	}
-
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&node).Updates(map[string]any{
-			"has_data":                  true,
-			"current_summary":           summary,
-			"current_result_json":       string(raw),
-			"current_result_updated_at": recordedAt,
-		}).Error; err != nil {
+	for index, target := range targets {
+		if target.SortOrder == index {
+			continue
+		}
+		if err := tx.Model(&models.NodeTarget{}).Where("id = ?", target.ID).Update("sort_order", index).Error; err != nil {
 			return err
 		}
+	}
+	return nil
+}
 
-		history := models.NodeHistory{
-			NodeID:     node.ID,
-			ResultJSON: string(raw),
-			Summary:    summary,
-			RecordedAt: recordedAt,
+func recomputeNodeState(tx *gorm.DB, nodeID uint) error {
+	var targets []models.NodeTarget
+	if err := tx.Where("node_id = ?", nodeID).Find(&targets).Error; err != nil {
+		return err
+	}
+
+	hasData := false
+	var updatedAt *time.Time
+	for _, target := range targets {
+		if !target.HasData || target.CurrentResultUpdatedAt == nil {
+			continue
 		}
-		return tx.Create(&history).Error
-	})
+		if updatedAt == nil || target.CurrentResultUpdatedAt.After(*updatedAt) {
+			value := target.CurrentResultUpdatedAt.UTC()
+			updatedAt = &value
+		}
+		hasData = true
+	}
+
+	updates := map[string]any{
+		"has_data":                  hasData,
+		"current_summary":           "",
+		"current_result_json":       "",
+		"current_result_updated_at": updatedAt,
+	}
+	return tx.Model(&models.Node{}).Where("id = ?", nodeID).Updates(updates).Error
 }

@@ -27,7 +27,7 @@ func Run() error {
 
 	authHandler := handlers.AuthHandler{DB: db, Cfg: cfg}
 	adminHandler := handlers.AdminHandler{DB: db, Cfg: cfg}
-	nodeHandler := handlers.NodeHandler{DB: db}
+	nodeHandler := handlers.NodeHandler{DB: db, Cfg: cfg}
 	embedHandler := handlers.EmbedHandler{DB: db, Cfg: cfg}
 	publicHandler := handlers.PublicHandler{DB: db, Cfg: cfg}
 	reportHandler := handlers.ReportHandler{DB: db}
@@ -59,6 +59,9 @@ func Run() error {
 			nodes.GET("", nodeHandler.List)
 			nodes.GET("/:uuid", nodeHandler.Detail)
 			nodes.GET("/:uuid/history", nodeHandler.History)
+			nodes.POST("/:uuid/targets", nodeHandler.AddTarget)
+			nodes.DELETE("/:uuid/targets/:targetID", nodeHandler.DeleteTarget)
+			nodes.POST("/:uuid/targets/reorder", nodeHandler.ReorderTargets)
 			nodes.POST("/:uuid/reporter-token/rotate", nodeHandler.RotateReporterToken)
 			nodes.DELETE("/:uuid", nodeHandler.Delete)
 		}

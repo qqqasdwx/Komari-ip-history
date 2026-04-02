@@ -25,26 +25,68 @@ export type NodeListItem = {
   komari_node_uuid: string;
   name: string;
   has_data: boolean;
-  current_summary: string;
-  current_result: Record<string, unknown>;
   updated_at?: string | null;
   created_at?: string;
+};
+
+export type NodeTargetListItem = {
+  id: number;
+  ip: string;
+  has_data: boolean;
+  updated_at?: string | null;
+  sort_order: number;
+};
+
+export type NodeTargetDetail = {
+  id: number;
+  ip: string;
+  has_data: boolean;
+  updated_at?: string | null;
+  current_result: Record<string, unknown>;
 };
 
 export type NodeDetail = {
   komari_node_uuid: string;
   name: string;
   has_data: boolean;
-  current_summary: string;
   updated_at?: string | null;
-  current_result: Record<string, unknown>;
+  targets: NodeTargetListItem[];
+  selected_target_id?: number | null;
+  current_target?: NodeTargetDetail | null;
   report_config: {
     endpoint_path: string;
     reporter_token: string;
+    target_ips: string[];
   };
+};
+
+export type PublicTargetListItem = {
+  id: number;
+  label: string;
+  has_data: boolean;
+  updated_at?: string | null;
+  sort_order: number;
+};
+
+export type PublicTargetDetail = {
+  id: number;
+  label: string;
+  has_data: boolean;
+  updated_at?: string | null;
+  current_result: Record<string, unknown>;
 };
 
 export type PublicNodeDetail = {
   has_data: boolean;
-  current_result: Record<string, unknown>;
+  targets: PublicTargetListItem[];
+  selected_target_id?: number | null;
+  current_target?: PublicTargetDetail | null;
+};
+
+export type NodeHistoryEntry = {
+  id: number;
+  target_id: number;
+  recorded_at: string;
+  summary: string;
+  result: Record<string, unknown>;
 };

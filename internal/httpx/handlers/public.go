@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"komari-ip-history/internal/config"
@@ -28,7 +29,16 @@ func (h PublicHandler) Current(c *gin.Context) {
 	}
 
 	displayIP := strings.TrimSpace(c.Query("display_ip"))
-	detail, err := service.GetPublicNodeDetail(h.DB, c.Param("uuid"), displayIP)
+	var targetID *uint
+	if raw := strings.TrimSpace(c.Query("target_id")); raw != "" {
+		value, parseErr := strconv.ParseUint(raw, 10, 64)
+		if parseErr == nil && value > 0 {
+			parsed := uint(value)
+			targetID = &parsed
+		}
+	}
+
+	detail, err := service.GetPublicNodeDetail(h.DB, c.Param("uuid"), targetID, displayIP)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return

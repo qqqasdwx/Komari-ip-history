@@ -2,10 +2,11 @@ import {
   ArrowLeftIcon,
   ExitIcon,
   GearIcon,
+  PlusIcon,
   ReloadIcon,
   RowsIcon
 } from "@radix-ui/react-icons";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type DragEvent, type FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
   Link,
   NavLink,
@@ -20,13 +21,15 @@ import {
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { formatDateTime } from "./lib/format";
 import { CurrentReportView } from "./lib/report";
-import { getNodeListSummaryEntries } from "./lib/result";
 import type {
   IntegrationSettings,
   MeResponse,
   NodeDetail,
+  NodeHistoryEntry,
   NodeListItem,
+  NodeTargetListItem,
   PublicNodeDetail,
+  PublicTargetListItem,
   RuntimeResponse
 } from "./lib/types";
 
@@ -65,11 +68,12 @@ async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
 }
 
-function useNodePageData(uuid: string, onUnauthorized: () => void) {
+function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [detail, setDetail] = useState<NodeDetail | null>(null);
+  const [history, setHistory] = useState<NodeHistoryEntry[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -87,13 +91,19 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
       setErrorStatus(null);
 
       try {
-        const detailResponse = await apiRequest<NodeDetail>(`/nodes/${uuid}`);
+        const detailPath = `/nodes/${uuid}${targetID ? `?target_id=${targetID}` : ""}`;
+        const historyPath = `/nodes/${uuid}/history${targetID ? `?target_id=${targetID}` : ""}`;
+        const [detailResponse, historyResponse] = await Promise.all([
+          apiRequest<NodeDetail>(detailPath),
+          apiRequest<{ items: NodeHistoryEntry[] }>(historyPath)
+        ]);
 
         if (cancelled) {
           return;
         }
 
         setDetail(detailResponse);
+        setHistory(historyResponse.items ?? []);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -118,18 +128,19 @@ function useNodePageData(uuid: string, onUnauthorized: () => void) {
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized, reloadToken, uuid]);
+  }, [onUnauthorized, reloadToken, targetID, uuid]);
 
   return {
     loading,
     error,
     errorStatus,
     detail,
+    history,
     reload: () => setReloadToken((value) => value + 1)
   };
 }
 
-function usePublicNodePageData(uuid: string, displayIP: string) {
+function usePublicNodePageData(uuid: string, targetID: number | null, displayIP: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
@@ -153,6 +164,9 @@ function usePublicNodePageData(uuid: string, displayIP: string) {
 
       try {
         const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
         if (displayIP.trim()) {
           query.set("display_ip", displayIP.trim());
         }
@@ -185,7 +199,7 @@ function usePublicNodePageData(uuid: string, displayIP: string) {
     return () => {
       cancelled = true;
     };
-  }, [displayIP, reloadToken, uuid]);
+  }, [displayIP, reloadToken, targetID, uuid]);
 
   return {
     loading,
@@ -522,28 +536,6 @@ function StatusPill(props: { hasData: boolean }) {
   );
 }
 
-function NodeSummary(props: { item: NodeListItem; hiddenPaths: string[] }) {
-  const entries = getNodeListSummaryEntries(props.item.current_result ?? {}, props.hiddenPaths);
-
-  if (!props.item.has_data || entries.length === 0) {
-    return <div className="flex flex-wrap gap-2 text-sm text-slate-400" data-node-summary="empty">当前还没有检测结果</div>;
-  }
-
-  return (
-    <div className="flex min-w-0 flex-wrap gap-2" data-node-summary="structured">
-      {entries.map((entry) => (
-        <span
-          key={`${entry.label}:${entry.value}`}
-          className="inline-flex min-h-6 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-xs text-slate-600"
-        >
-          <strong className="font-semibold text-slate-900">{entry.label}</strong>
-          <span>{entry.value}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function NodesPage(props: { onUnauthorized: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -656,7 +648,6 @@ function NodesPage(props: { onUnauthorized: () => void }) {
               <span>节点</span>
               <span>状态</span>
               <span>最近更新</span>
-              <span>摘要</span>
               <span></span>
             </div>
             <div className="react-node-list-body">
@@ -676,9 +667,6 @@ function NodesPage(props: { onUnauthorized: () => void }) {
                     <StatusPill hasData={item.has_data} />
                   </div>
                   <div className="min-w-0 text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
-                  <div className="min-w-0">
-                    <NodeSummary item={item} hiddenPaths={[]} />
-                  </div>
                   <div className="text-sm font-semibold text-indigo-600">查看</div>
                 </Link>
               ))}
@@ -737,6 +725,25 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
       <div className="section report-config">
         <div className="summary-section">
           <div className="summary-head">
+            <strong>目标 IP</strong>
+          </div>
+          {props.detail.report_config.target_ips.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {props.detail.report_config.target_ips.map((ip) => (
+                <span
+                  key={ip}
+                  className="inline-flex min-h-8 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700"
+                >
+                  {ip}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm leading-6 text-slate-500">请先添加目标 IP，接入命令和上报配置才会生效。</p>
+          )}
+        </div>
+        <div className="summary-section">
+          <div className="summary-head">
             <strong>上报地址</strong>
             <button className="button ghost" onClick={() => void handleCopy(reportEndpointURL, "上报地址已复制。")} type="button">
               复制
@@ -777,6 +784,91 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
   );
 }
 
+function HistorySection(props: { items: NodeHistoryEntry[]; compact: boolean }) {
+  return (
+    <div className="section space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-slate-900">历史记录</h2>
+        <span className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs text-slate-500">
+          {props.items.length} 条
+        </span>
+      </div>
+      {props.items.length === 0 ? (
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+          当前目标 IP 还没有历史记录。
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {props.items.map((item) => (
+            <section key={item.id} className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-900">{item.summary || "历史上报"}</p>
+                  <p className="text-xs text-slate-500">{formatDateTime(item.recorded_at)}</p>
+                </div>
+              </div>
+              <CurrentReportView result={item.result} hiddenPaths={[]} compact={props.compact} />
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TargetTabs(props: {
+  items: Array<{ id: number; label: string; has_data: boolean }>;
+  selectedId: number | null;
+  onSelect: (targetID: number) => void;
+  onReorder?: (sourceID: number, destinationID: number) => void;
+}) {
+  const [draggingTargetID, setDraggingTargetID] = useState<number | null>(null);
+
+  function handleDrop(destinationID: number) {
+    if (!props.onReorder || draggingTargetID === null || draggingTargetID === destinationID) {
+      setDraggingTargetID(null);
+      return;
+    }
+    props.onReorder(draggingTargetID, destinationID);
+    setDraggingTargetID(null);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {props.items.map((item) => (
+        <button
+          key={item.id}
+          className={[
+            "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+            props.selectedId === item.id
+              ? "border-indigo-200 bg-indigo-50 text-indigo-600"
+              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-indigo-600"
+          ].join(" ")}
+          draggable={Boolean(props.onReorder)}
+          onClick={() => props.onSelect(item.id)}
+          onDragOver={(event: DragEvent<HTMLButtonElement>) => {
+            if (props.onReorder) {
+              event.preventDefault();
+            }
+          }}
+          onDragStart={() => setDraggingTargetID(item.id)}
+          onDrop={() => handleDrop(item.id)}
+          onDragEnd={() => setDraggingTargetID(null)}
+          type="button"
+        >
+          <span
+            className={[
+              "inline-block h-2.5 w-2.5 rounded-full",
+              item.has_data ? "bg-emerald-500" : "bg-slate-300"
+            ].join(" ")}
+          />
+          <span>{item.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function NodePageError(props: {
   title: string;
   subtitle: string;
@@ -809,11 +901,104 @@ function NodePageError(props: {
 
 function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const { uuid = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const isEmbed = searchParams.get("embed") === "1";
   const komariReturn = searchParams.get("komari_return")?.trim() || "";
   const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
-  const { loading, error, errorStatus, detail, reload } = useNodePageData(uuid, props.onUnauthorized);
+  const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
+  const [targetInput, setTargetInput] = useState("");
+  const [targetError, setTargetError] = useState("");
+  const [targetSaving, setTargetSaving] = useState(false);
+  const { loading, error, errorStatus, detail, history, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+
+  function replaceTargetSelection(targetID: number | null) {
+    const params = new URLSearchParams(searchParams);
+    if (targetID) {
+      params.set("target_id", String(targetID));
+    } else {
+      params.delete("target_id");
+    }
+    const query = params.toString();
+    navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
+  }
+
+  async function handleAddTarget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      const created = await apiRequest<NodeTargetListItem>(`/nodes/${uuid}/targets`, {
+        method: "POST",
+        body: JSON.stringify({ ip: targetInput.trim() })
+      });
+      setTargetInput("");
+      replaceTargetSelection(created.id);
+      reload();
+    } catch (targetCreateError) {
+      if (targetCreateError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(targetCreateError instanceof Error ? targetCreateError.message : "添加目标 IP 失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleDeleteTarget(targetID: number) {
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      await apiRequest(`/nodes/${uuid}/targets/${targetID}`, { method: "DELETE" });
+      replaceTargetSelection(null);
+      reload();
+    } catch (targetDeleteError) {
+      if (targetDeleteError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(targetDeleteError instanceof Error ? targetDeleteError.message : "删除目标 IP 失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleReorderTargets(sourceID: number, destinationID: number) {
+    if (!detail) {
+      return;
+    }
+
+    const orderedIDs = detail.targets.map((item) => item.id);
+    const sourceIndex = orderedIDs.indexOf(sourceID);
+    const destinationIndex = orderedIDs.indexOf(destinationID);
+    if (sourceIndex === -1 || destinationIndex === -1 || sourceIndex === destinationIndex) {
+      return;
+    }
+
+    const next = [...orderedIDs];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(destinationIndex, 0, moved);
+
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      await apiRequest(`/nodes/${uuid}/targets/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ target_ids: next })
+      });
+      reload();
+    } catch (reorderError) {
+      if (reorderError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(reorderError instanceof Error ? reorderError.message : "调整目标 IP 顺序失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
 
   if (loading) {
     return <NodeDetailLoading />;
@@ -845,21 +1030,80 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     <section className="space-y-6">
       <PageHeader
         title={detail.name}
-        subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有检测结果"}
+        subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
         backTo={isEmbed ? undefined : "/nodes"}
       />
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="section">
-          <h2 className="text-base font-semibold text-slate-900">当前 IP 质量</h2>
-          <div data-detail-report="true">
-          <CurrentReportView
-            result={detail.current_result}
-            hiddenPaths={[]}
-            compact={isEmbed}
-          />
+        <div className="section space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
+              <p className="text-sm text-slate-500">拖拽可调整顺序，默认展示第一个目标 IP。</p>
+            </div>
+            {detail.current_target ? (
+              <button
+                className="inline-flex h-10 items-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void handleDeleteTarget(detail.current_target!.id)}
+                type="button"
+                disabled={targetSaving}
+              >
+                删除当前 IP
+              </button>
+            ) : null}
           </div>
+
+          {detail.targets.length > 0 ? (
+            <TargetTabs
+              items={detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
+              selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
+              onSelect={(targetID) => replaceTargetSelection(targetID)}
+              onReorder={(sourceID, destinationID) => void handleReorderTargets(sourceID, destinationID)}
+            />
+          ) : (
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              当前节点还没有目标 IP，请先添加。
+            </div>
+          )}
+
+          <form className="flex flex-wrap items-start gap-3" onSubmit={handleAddTarget}>
+            <label className="grid min-w-[240px] flex-1 gap-2 text-sm text-slate-700">
+              <span>添加目标 IP</span>
+              <input
+                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                placeholder="例如 1.1.1.1 或 2606:4700:4700::1111"
+                value={targetInput}
+                onChange={(event) => setTargetInput(event.target.value)}
+              />
+            </label>
+            <button
+              className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-500 px-4 text-sm font-medium text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
+              type="submit"
+              disabled={targetSaving || !targetInput.trim()}
+            >
+              <PlusIcon />
+              <span>{targetSaving ? "处理中..." : "添加 IP"}</span>
+            </button>
+          </form>
+          {targetError ? <p className="text-sm text-rose-600">{targetError}</p> : null}
         </div>
+
+        {detail.current_target ? (
+          <>
+            <div className="section">
+              <h2 className="mb-4 text-base font-semibold text-slate-900">当前 IP 质量</h2>
+              <div data-detail-report="true">
+                <CurrentReportView
+                  result={detail.current_target.current_result}
+                  hiddenPaths={[]}
+                  compact={isEmbed}
+                />
+              </div>
+            </div>
+
+            <HistorySection items={history} compact={isEmbed} />
+          </>
+        ) : null}
 
         {!isEmbed ? (
           <ReportConfigSection me={props.me} detail={detail} />
@@ -871,10 +1115,24 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
 
 function PublicNodeDetailPage() {
   const { uuid = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const isEmbed = searchParams.get("embed") === "1";
   const displayIP = searchParams.get("display_ip")?.trim() || "";
-  const { loading, error, detail, reload } = usePublicNodePageData(uuid, displayIP);
+  const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
+  const { loading, error, detail, reload } = usePublicNodePageData(uuid, selectedTargetID, displayIP);
+
+  function replaceTargetSelection(targetID: number | null) {
+    const params = new URLSearchParams(searchParams);
+    if (targetID) {
+      params.set("target_id", String(targetID));
+    } else {
+      params.delete("target_id");
+    }
+    const query = params.toString();
+    navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
+  }
 
   if (loading) {
     return <NodeDetailLoading />;
@@ -896,12 +1154,28 @@ function PublicNodeDetailPage() {
     <section className="space-y-6">
       {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="当前公开结果" backTo="/" /> : null}
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="section">
-          <h2 className="text-base font-semibold text-slate-900">当前 IP 质量</h2>
-          <div data-detail-report="true">
-            <CurrentReportView result={detail.current_result} hiddenPaths={[]} compact={isEmbed} />
-          </div>
+        <div className="section space-y-4">
+          <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
+          {detail.targets.length > 0 ? (
+            <TargetTabs
+              items={detail.targets.map((item) => ({ id: item.id, label: item.label, has_data: item.has_data }))}
+              selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
+              onSelect={(targetID) => replaceTargetSelection(targetID)}
+            />
+          ) : (
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              管理员还没有配置可查看的目标 IP。
+            </div>
+          )}
         </div>
+        {detail.current_target ? (
+          <div className="section">
+            <h2 className="mb-4 text-base font-semibold text-slate-900">当前 IP 质量</h2>
+            <div data-detail-report="true">
+              <CurrentReportView result={detail.current_target.current_result} hiddenPaths={[]} compact={isEmbed} />
+            </div>
+          </div>
+        ) : null}
       </section>
     </section>
   );

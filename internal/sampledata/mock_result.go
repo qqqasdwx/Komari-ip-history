@@ -5,15 +5,19 @@ import (
 	"time"
 )
 
-func DefaultCurrentResult(nodeUUID, nodeName string) (string, string, time.Time, error) {
+func DefaultTargetResult(nodeUUID, nodeName, targetIP string) (string, string, time.Time, error) {
 	now := time.Now().UTC()
 	payload := map[string]any{
+		"Head": map[string]any{
+			"IP":        targetIP,
+			"Version":   "dev-mock",
+			"ReportTime": now.Format(time.RFC3339),
+		},
 		"Meta": map[string]any{
-			"node_uuid":   nodeUUID,
-			"node_name":   nodeName,
-			"source":      "mock",
-			"updated_at":  now.Format(time.RFC3339),
-			"environment": "development",
+			"node_uuid":  nodeUUID,
+			"node_name":  nodeName,
+			"source":     "mock",
+			"updated_at": now.Format(time.RFC3339),
 		},
 		"Score": map[string]any{
 			"Scamalytics": 18,
@@ -43,5 +47,5 @@ func DefaultCurrentResult(nodeUUID, nodeName string) (string, string, time.Time,
 		return "", "", time.Time{}, err
 	}
 
-	return string(raw), "Development mock data", now, nil
+	return string(raw), "Development mock data for " + targetIP, now, nil
 }

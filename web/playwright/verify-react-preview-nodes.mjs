@@ -45,9 +45,17 @@ if (rowCount > 0) {
   }
 
   await rowLocator.first().click();
-  await page.locator('[data-detail-report="true"]').waitFor();
+  await page.waitForURL('**/#/nodes/**');
+  await page.waitForLoadState('networkidle');
+  const detailReport = page.locator('[data-detail-report="true"]');
+  if ((await detailReport.count()) === 0) {
+    await page.getByPlaceholder('例如 1.1.1.1 或 2606:4700:4700::1111').fill('203.0.113.10');
+    await page.getByRole('button', { name: '添加 IP' }).click();
+  }
 
-  const detailReportCount = await page.locator('[data-detail-report="true"]').count();
+  await detailReport.waitFor();
+
+  const detailReportCount = await detailReport.count();
   const reportConfigCount = await page.locator('[data-node-report-config="true"]').count();
   if (detailReportCount === 0 || reportConfigCount === 0) {
     throw new Error('react detail page missing current report or report config');
