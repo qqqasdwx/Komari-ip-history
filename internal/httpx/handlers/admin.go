@@ -14,6 +14,28 @@ import (
 	"gorm.io/gorm"
 )
 
+func inferredPublicBaseURL(c *gin.Context, basePath string) string {
+	scheme := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+
+	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(c.Request.Host)
+	}
+	host = strings.TrimRight(host, "/")
+	if host == "" {
+		return ""
+	}
+
+	return scheme + "://" + host + strings.TrimRight(basePath, "/")
+}
+
 type AdminHandler struct {
 	DB  *gorm.DB
 	Cfg config.Config
@@ -24,6 +46,9 @@ func (h AdminHandler) Runtime(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
 		return
+	}
+	if integration.EffectivePublicBaseURL == "" {
+		integration.EffectivePublicBaseURL = inferredPublicBaseURL(c, h.Cfg.BasePath)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -40,6 +65,9 @@ func (h AdminHandler) GetIntegrationSettings(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
 		return
+	}
+	if settings.EffectivePublicBaseURL == "" {
+		settings.EffectivePublicBaseURL = inferredPublicBaseURL(c, h.Cfg.BasePath)
 	}
 	c.JSON(http.StatusOK, settings)
 }
@@ -145,6 +173,9 @@ func (h AdminHandler) HeaderPreview(c *gin.Context) {
 			return
 		}
 		integration.EffectivePublicBaseURL = normalized
+	}
+	if integration.EffectivePublicBaseURL == "" {
+		integration.EffectivePublicBaseURL = inferredPublicBaseURL(c, h.Cfg.BasePath)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"variant": variant,

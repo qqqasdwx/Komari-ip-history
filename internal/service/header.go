@@ -32,7 +32,7 @@ func HeaderPreview(cfg config.Config, publicBaseURL string, variant string) stri
 	return strings.TrimSpace(fmt.Sprintf(`<script>
 (function () {
   var script = document.createElement("script");
-  script.src = %s;
+  script.src = %s + "?v=" + Date.now();
   script.defer = true;
   document.head.appendChild(script);
 }());
@@ -92,6 +92,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
 
   const APP_BASE = getAppBase().replace(/\/+$/, "");
   const API_BASE = APP_BASE + "/api/v1/embed";
+  const CACHE_BUST = Date.now().toString(36);
 
   function scheduleSync(delay) {
     window.clearTimeout(state.syncTimer);
@@ -329,8 +330,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string) string {
   function buildURLs(context, forceConnect) {
     const safeUUID = encodeURIComponent(context.uuid);
     const safeName = encodeURIComponent(context.name || "未命名节点");
-    const detailURL = APP_BASE + "/#/nodes/" + safeUUID;
-    const connectURL = APP_BASE + "/#/connect?uuid=" + safeUUID + "&name=" + safeName;
+    const detailURL = APP_BASE + "/?v=" + CACHE_BUST + "#/nodes/" + safeUUID;
+    const connectURL = APP_BASE + "/?v=" + CACHE_BUST + "#/connect?uuid=" + safeUUID + "&name=" + safeName;
 
     if (forceConnect) {
       return {

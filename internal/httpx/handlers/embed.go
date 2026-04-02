@@ -77,6 +77,9 @@ func (h EmbedHandler) Current(c *gin.Context) {
 
 func (h EmbedHandler) Loader(c *gin.Context) {
 	c.Header("Content-Type", "application/javascript; charset=utf-8")
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
 	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "console.error(%q);", "failed to load integration settings")

@@ -220,7 +220,7 @@ function ReportBadge(props: { text: string; tone?: string; path?: string; hidden
   );
 }
 
-function ReportMailChip(props: { text: string; tone: "good" | "bad"; path?: string; hidden?: boolean; onFieldClick?: (path: string) => void }) {
+function ReportMailChip(props: { text: string; tone: "good" | "bad" | "muted"; path?: string; hidden?: boolean; onFieldClick?: (path: string) => void }) {
   return (
     <FieldTarget path={props.path} hidden={props.hidden} onFieldClick={props.onFieldClick}>
       <span className={`report-mail-chip ${props.tone}`}>{props.text}</span>
@@ -361,7 +361,7 @@ function Matrix(props: {
   onFieldClick?: (path: string) => void;
 }) {
   if (props.columns.length === 0 || props.rows.length === 0) return null;
-  const style = { gridTemplateColumns: `minmax(112px, 132px) repeat(${props.columns.length}, minmax(72px, 1fr))` };
+  const style = { gridTemplateColumns: `minmax(var(--report-row-label-min, 112px), var(--report-row-label-max, 132px)) repeat(${props.columns.length}, minmax(var(--report-column-min, 92px), 1fr))` };
 
   return (
     <div className="report-matrix">
@@ -428,22 +428,20 @@ function BaseInfoSection(props: { structured: StructuredCurrentResult; hiddenPat
       .join(", ")
     : "";
 
-  const usagePlace = regionText(info.Region);
-  const continent = regionText(info.Continent);
+  const usagePlace = [regionText(info.Region), regionText(info.Continent)].filter(Boolean).join(", ");
   const registered = regionText(info.RegisteredRegion) || "N/A";
   const coordinate = [reportMissingText(info.Latitude) ? "" : String(info.Latitude), reportMissingText(info.Longitude) ? "" : String(info.Longitude)]
     .filter(Boolean)
     .join(", ");
 
   return (
-    <ReportSection title="一、基础信息" path="Info" hidden={isPathHidden(props.hiddenPaths, "Info")} onFieldClick={props.onFieldClick}>
+    <ReportSection title="一、基础信息（Maxmind 数据库）" path="Info" hidden={isPathHidden(props.hiddenPaths, "Info")} onFieldClick={props.onFieldClick}>
       <ReportKVRow label="自治系统号" text={info.ASN ? `AS${String(info.ASN)}` : "N/A"} tone="good" path="Info.ASN" hidden={isPathHidden(props.hiddenPaths, "Info.ASN")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="组织" text={reportMissingText(info.Organization) ? "N/A" : String(info.Organization)} tone="good" path="Info.Organization" hidden={isPathHidden(props.hiddenPaths, "Info.Organization")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="坐标" text={coordinate || "N/A"} tone="good" path="Info.Latitude" hidden={isPathHidden(props.hiddenPaths, "Info.Latitude") || isPathHidden(props.hiddenPaths, "Info.Longitude")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="地图" text={reportMissingText(info.Map) ? "N/A" : String(info.Map)} tone="neutral" path="Info.Map" hidden={isPathHidden(props.hiddenPaths, "Info.Map")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="城市" text={city || "N/A"} tone="good" path="Info.City" hidden={isPathHidden(props.hiddenPaths, "Info.City")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="使用地" text={usagePlace || "N/A"} tone="good" path="Info.Region" hidden={isPathHidden(props.hiddenPaths, "Info.Region")} onFieldClick={props.onFieldClick} />
-      <ReportKVRow label="洲别" text={continent || "N/A"} tone="good" path="Info.Continent" hidden={isPathHidden(props.hiddenPaths, "Info.Continent")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="注册地" text={registered} tone="good" path="Info.RegisteredRegion" hidden={isPathHidden(props.hiddenPaths, "Info.RegisteredRegion")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="时区" text={reportMissingText(info.TimeZone) ? "N/A" : String(info.TimeZone)} tone="good" path="Info.TimeZone" hidden={isPathHidden(props.hiddenPaths, "Info.TimeZone")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="IP类型" text={reportIPTypeText(info.Type)} tone="good" path="Info.Type" hidden={isPathHidden(props.hiddenPaths, "Info.Type")} onFieldClick={props.onFieldClick} />
@@ -662,24 +660,23 @@ function MailSection(props: { structured: StructuredCurrentResult; hiddenPaths: 
 
   return (
     <ReportSection title="六、邮局连通性及黑名单检测" path="Mail" hidden={isPathHidden(props.hiddenPaths, "Mail")} onFieldClick={props.onFieldClick}>
-      <ReportKVRow
-        label="本地25端口出站"
-        text={reportMissingText(mail.Port25) ? "N/A" : mail.Port25 ? "可用" : "不可用"}
-        path="Mail.Port25"
-        hidden={isPathHidden(props.hiddenPaths, "Mail.Port25")}
-        onFieldClick={props.onFieldClick}
-      />
+      <FieldTarget path="Mail.Port25" hidden={isPathHidden(props.hiddenPaths, "Mail.Port25")} onFieldClick={props.onFieldClick} className="report-mail-summary report-mail-summary-inline">
+        <span className="report-kv-label">本地25端口出站</span>
+        <div className="report-mail-inline-text">
+          <span className={`report-inline-text ${reportMissingText(mail.Port25) ? "report-inline-text-muted" : mail.Port25 ? "report-inline-text-good" : "report-inline-text-bad"}`}>{reportMissingText(mail.Port25) ? "N/A" : mail.Port25 ? "可用" : "不可用"}</span>
+        </div>
+      </FieldTarget>
 
       {providers.length > 0 ? (
-        <div className="report-mail-summary">
+        <div className="report-mail-summary report-mail-summary-inline">
           <span className="report-kv-label">通信</span>
-          <div className="report-mail-metrics">
+          <div className="report-mail-metrics report-mail-mailboxes">
             {providers.map((provider) => {
               const value = mail[provider];
-              const text = reportMissingText(value) ? `${reportFieldLabel(provider)} N/A` : value ? `${reportFieldLabel(provider)} 可用` : `${reportFieldLabel(provider)} 不可用`;
+              const text = reportFieldLabel(provider);
               const tone = reportMissingText(value) ? "muted" : value ? "good" : "bad";
               return (
-                <ReportBadge
+                <ReportMailChip
                   key={provider}
                   text={text}
                   tone={tone}
@@ -694,21 +691,18 @@ function MailSection(props: { structured: StructuredCurrentResult; hiddenPaths: 
       ) : null}
 
       {dnsbl ? (
-        <div className="report-mail-summary">
+        <FieldTarget path="Mail.DNSBlacklist" hidden={isPathHidden(props.hiddenPaths, "Mail.DNSBlacklist")} onFieldClick={props.onFieldClick} className="report-mail-summary report-mail-summary-inline">
           <span className="report-kv-label">IP地址黑名单数据库</span>
-          <div className="report-mail-metrics">
-            <ReportBadge text={`有效 ${reportMissingText(dnsbl.Total) ? "N/A" : String(dnsbl.Total)}`} tone="neutral" path="Mail.DNSBlacklist.Total" hidden={isPathHidden(props.hiddenPaths, "Mail.DNSBlacklist.Total")} onFieldClick={props.onFieldClick} />
-            <ReportBadge text={`正常 ${reportMissingText(dnsbl.Clean) ? "N/A" : String(dnsbl.Clean)}`} tone="good" path="Mail.DNSBlacklist.Clean" hidden={isPathHidden(props.hiddenPaths, "Mail.DNSBlacklist.Clean")} onFieldClick={props.onFieldClick} />
-            <ReportBadge text={`已标记 ${reportMissingText(dnsbl.Marked) ? "N/A" : String(dnsbl.Marked)}`} tone="warn" path="Mail.DNSBlacklist.Marked" hidden={isPathHidden(props.hiddenPaths, "Mail.DNSBlacklist.Marked")} onFieldClick={props.onFieldClick} />
-            <ReportBadge
-              text={`黑名单 ${reportMissingText(dnsbl.Blacklisted) ? "N/A" : String(dnsbl.Blacklisted)}`}
-              tone={Number(dnsbl.Blacklisted) > 0 ? "bad" : "good"}
-              path="Mail.DNSBlacklist.Blacklisted"
-              hidden={isPathHidden(props.hiddenPaths, "Mail.DNSBlacklist.Blacklisted")}
-              onFieldClick={props.onFieldClick}
-            />
+          <div className="report-mail-inline-text">
+            <span className="report-inline-text report-inline-text-neutral">有效 {reportMissingText(dnsbl.Total) ? "N/A" : String(dnsbl.Total)}</span>
+            <span className="report-inline-sep">/</span>
+            <span className="report-inline-text report-inline-text-good">正常 {reportMissingText(dnsbl.Clean) ? "N/A" : String(dnsbl.Clean)}</span>
+            <span className="report-inline-sep">/</span>
+            <span className="report-inline-text report-inline-text-warn">已标记 {reportMissingText(dnsbl.Marked) ? "N/A" : String(dnsbl.Marked)}</span>
+            <span className="report-inline-sep">/</span>
+            <span className={`report-inline-text ${Number(dnsbl.Blacklisted) > 0 ? "report-inline-text-bad" : "report-inline-text-good"}`}>黑名单 {reportMissingText(dnsbl.Blacklisted) ? "N/A" : String(dnsbl.Blacklisted)}</span>
           </div>
-        </div>
+        </FieldTarget>
       ) : null}
       {dnsbl
         ? renderExtraRows({
@@ -748,6 +742,7 @@ export function CurrentReportView(props: {
   hiddenPaths: string[];
   previewMode?: boolean;
   showHiddenOutlines?: boolean;
+  compact?: boolean;
   onFieldClick?: (path: string) => void;
 }) {
   const structured = getFilteredCurrentResult(props.result, props.previewMode && props.showHiddenOutlines ? [] : props.hiddenPaths);
@@ -761,7 +756,7 @@ export function CurrentReportView(props: {
   }
 
   return (
-    <div className="result-layout report-layout">
+    <div className={joinClassNames("result-layout", "report-layout", props.compact && "report-layout-compact")}>
       <div className="report-shell">
         <ReportHeader structured={structured} hiddenPaths={props.hiddenPaths} onFieldClick={props.onFieldClick} />
         <BaseInfoSection structured={structured} hiddenPaths={props.hiddenPaths} onFieldClick={props.onFieldClick} />

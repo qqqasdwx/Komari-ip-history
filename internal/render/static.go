@@ -57,11 +57,17 @@ func serveIndex(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		indexPath := filepath.Join("public", "index.html")
 		if _, err := os.Stat(indexPath); err == nil {
+			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
 			c.File(indexPath)
 			return
 		}
 
 		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
 		c.String(http.StatusOK, `<!doctype html>
 <html>
   <head>

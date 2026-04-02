@@ -705,6 +705,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
           <CurrentReportView
             result={detail.current_result}
             hiddenPaths={[]}
+            compact={isEmbed}
           />
           </div>
         </div>
