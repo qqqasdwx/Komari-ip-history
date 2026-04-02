@@ -447,7 +447,7 @@ function EmbedBridgePage(props: { title: string; description: string; actionURL:
     <section className="space-y-6">
       <PageHeader title={props.title} subtitle={props.description} />
       <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm leading-6 text-slate-500">当前操作需要跳到独立页面完成，正在继续处理。</p>
+        <p className="text-sm leading-6 text-slate-500">正在打开独立页面继续处理。</p>
       </section>
     </section>
   );
@@ -823,7 +823,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     return (
       <EmbedBridgePage
         title="接入节点"
-        description="当前节点还没有接入 IP 质量，正在跳到独立页面继续。"
+        description="当前节点尚未接入，正在打开独立页面继续。"
         actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
       />
     );
@@ -894,7 +894,7 @@ function PublicNodeDetailPage() {
 
   return (
     <section className="space-y-6">
-      {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="游客只读视图" backTo="/" /> : null}
+      {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="当前公开结果" backTo="/" /> : null}
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section">
           <h2 className="text-base font-semibold text-slate-900">当前 IP 质量</h2>
@@ -1219,9 +1219,9 @@ function EmbedAdminAccessBridge() {
   if (!uuid || !komariReturn) {
     return (
       <section className="space-y-6">
-        <PageHeader title="需要登录" subtitle="当前嵌入视图无法直接继续。" />
+        <PageHeader title="需要登录" subtitle="请在独立页面继续。" />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm leading-6 text-slate-500">请在独立页面登录后重试。</p>
+          <p className="text-sm leading-6 text-slate-500">当前页面无法直接完成管理员登录。</p>
         </section>
       </section>
     );
@@ -1230,7 +1230,7 @@ function EmbedAdminAccessBridge() {
   return (
     <EmbedBridgePage
       title="需要登录"
-      description="当前管理员链路需要先在独立页面完成登录。"
+      description="当前管理员链路需要先在独立页面登录。"
       actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
     />
   );
