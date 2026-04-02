@@ -102,6 +102,14 @@ type NodeHistoryEntry struct {
 	Result     map[string]any `json:"result"`
 }
 
+type NodeHistoryPage struct {
+	Items      []NodeHistoryEntry `json:"items"`
+	Total      int64              `json:"total"`
+	Page       int                `json:"page"`
+	PageSize   int                `json:"page_size"`
+	TotalPages int                `json:"total_pages"`
+}
+
 type ReportNodeInput struct {
 	TargetIP   string         `json:"target_ip"`
 	Summary    string         `json:"summary"`
@@ -230,27 +238,45 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	return detail, nil
 }
 
-func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit int) ([]NodeHistoryEntry, error) {
+func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, page, pageSize int) (NodeHistoryPage, error) {
 	_, targets, err := loadNodeWithTargets(db, uuid)
 	if err != nil {
-		return nil, err
+		return NodeHistoryPage{}, err
 	}
 
 	selected, err := selectNodeTarget(targets, selectedTargetID)
 	if err != nil {
-		return nil, err
+		return NodeHistoryPage{}, err
 	}
 	if selected == nil {
-		return []NodeHistoryEntry{}, nil
+		return NodeHistoryPage{
+			Items:      []NodeHistoryEntry{},
+			Total:      0,
+			Page:       1,
+			PageSize:   normalizeHistoryPageSize(limit, pageSize),
+			TotalPages: 0,
+		}, nil
+	}
+
+	baseQuery := db.Model(&models.NodeTargetHistory{}).Where("node_target_id = ?", selected.ID)
+	var total int64
+	if err := baseQuery.Count(&total).Error; err != nil {
+		return NodeHistoryPage{}, err
 	}
 
 	var history []models.NodeTargetHistory
 	query := db.Where("node_target_id = ?", selected.ID).Order("recorded_at DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
+		page = 1
+		pageSize = limit
+	} else {
+		page = normalizeHistoryPage(page)
+		pageSize = normalizeHistoryPageSize(limit, pageSize)
+		query = query.Offset((page - 1) * pageSize).Limit(pageSize)
 	}
 	if err := query.Find(&history).Error; err != nil {
-		return nil, err
+		return NodeHistoryPage{}, err
 	}
 
 	items := make([]NodeHistoryEntry, 0, len(history))
@@ -263,7 +289,19 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit int)
 			Result:     decodeResultJSON(item.ResultJSON),
 		})
 	}
-	return items, nil
+
+	totalPages := 0
+	if pageSize > 0 && total > 0 {
+		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	}
+
+	return NodeHistoryPage{
+		Items:      items,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+	}, nil
 }
 
 func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displayIP string) (PublicNodeDetail, error) {
@@ -738,6 +776,26 @@ func recomputeNodeState(tx *gorm.DB, nodeID uint) error {
 		"current_result_updated_at": updatedAt,
 	}
 	return tx.Model(&models.Node{}).Where("id = ?", nodeID).Updates(updates).Error
+}
+
+func normalizeHistoryPage(page int) int {
+	if page <= 0 {
+		return 1
+	}
+	return page
+}
+
+func normalizeHistoryPageSize(limit, pageSize int) int {
+	if limit > 0 {
+		return limit
+	}
+	if pageSize <= 0 {
+		return 20
+	}
+	if pageSize > 100 {
+		return 100
+	}
+	return pageSize
 }
 
 func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL string) string {

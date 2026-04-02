@@ -20,13 +20,14 @@ import {
 } from "react-router-dom";
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { formatDateTime } from "./lib/format";
-import { compareHistoryResults } from "./lib/history";
+import { compareHistoryResults, filterHistoryDiffItems } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
   IntegrationSettings,
   MeResponse,
   NodeDetail,
   NodeHistoryEntry,
+  NodeHistoryListResponse,
   NodeListItem,
   NodeTargetListItem,
   PublicNodeDetail,
@@ -141,12 +142,16 @@ function useNodeHistoryData(
   uuid: string,
   targetID: number | null,
   onUnauthorized: () => void,
-  options?: { limit?: number }
+  options?: { limit?: number; page?: number; pageSize?: number }
 ) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [items, setItems] = useState<NodeHistoryEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(options?.pageSize ?? 20);
+  const [totalPages, setTotalPages] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -171,8 +176,11 @@ function useNodeHistoryData(
         }
         if (options?.limit && options.limit > 0) {
           query.set("limit", String(options.limit));
+        } else {
+          query.set("page", String(options?.page && options.page > 0 ? options.page : 1));
+          query.set("page_size", String(options?.pageSize && options.pageSize > 0 ? options.pageSize : 20));
         }
-        const response = await apiRequest<{ items: NodeHistoryEntry[] }>(
+        const response = await apiRequest<NodeHistoryListResponse>(
           `/nodes/${uuid}/history${query.size > 0 ? `?${query.toString()}` : ""}`
         );
 
@@ -181,6 +189,10 @@ function useNodeHistoryData(
         }
 
         setItems(response.items ?? []);
+        setTotal(response.total ?? 0);
+        setPage(response.page ?? 1);
+        setPageSize(response.page_size ?? (options?.pageSize ?? 20));
+        setTotalPages(response.total_pages ?? 0);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -205,13 +217,17 @@ function useNodeHistoryData(
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized, options?.limit, reloadToken, targetID, uuid]);
+  }, [onUnauthorized, options?.limit, options?.page, options?.pageSize, reloadToken, targetID, uuid]);
 
   return {
     loading,
     error,
     errorStatus,
     items,
+    total,
+    page,
+    pageSize,
+    totalPages,
     reload: () => setReloadToken((value) => value + 1)
   };
 }
@@ -978,6 +994,13 @@ function HistoryTimeline(props: {
 
 function HistoryCompareSummary(props: { current: NodeHistoryEntry; previous?: NodeHistoryEntry | null }) {
   const diff = compareHistoryResults(props.current.result, props.previous?.result);
+  const [selectedGroup, setSelectedGroup] = useState("全部");
+  const [meaningfulOnly, setMeaningfulOnly] = useState(true);
+  const availableGroups = ["全部", ...Array.from(new Set(diff.items.map((item) => item.group))).sort((left, right) => left.localeCompare(right))];
+  const filteredItems = filterHistoryDiffItems(diff.items, {
+    group: selectedGroup,
+    meaningfulOnly
+  });
 
   return (
     <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -1001,16 +1024,53 @@ function HistoryCompareSummary(props: { current: NodeHistoryEntry; previous?: No
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {availableGroups.map((group) => (
+          <button
+            key={group}
+            className={[
+              "inline-flex h-8 items-center rounded-full border px-3 text-xs font-medium transition",
+              selectedGroup === group
+                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+            ].join(" ")}
+            onClick={() => setSelectedGroup(group)}
+            type="button"
+          >
+            {group}
+          </button>
+        ))}
+        <button
+          className={[
+            "inline-flex h-8 items-center rounded-full border px-3 text-xs font-medium transition",
+            meaningfulOnly
+              ? "border-slate-900 bg-slate-900 text-white"
+              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+          ].join(" ")}
+          onClick={() => setMeaningfulOnly((value) => !value)}
+          type="button"
+        >
+          {meaningfulOnly ? "仅关键字段" : "显示全部字段"}
+        </button>
+      </div>
+
       {diff.items.length === 0 ? (
         <div className="mt-4 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
           与上一条相比，没有发现字段变化。
         </div>
+      ) : filteredItems.length === 0 ? (
+        <div className="mt-4 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+          当前筛选条件下没有可显示的变化项。
+        </div>
       ) : (
         <div className="mt-4 grid gap-3">
-          {diff.items.slice(0, 24).map((item) => (
+          {filteredItems.slice(0, 24).map((item) => (
             <div key={`${item.kind}:${item.path}`} className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm font-medium text-slate-900">{item.path}</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-900">{item.path}</p>
+                  <p className="text-xs text-slate-400">{item.group}</p>
+                </div>
                 <span
                   className={[
                     "inline-flex h-7 items-center rounded-full px-3 text-xs font-medium",
@@ -1036,12 +1096,54 @@ function HistoryCompareSummary(props: { current: NodeHistoryEntry; previous?: No
               </div>
             </div>
           ))}
-          {diff.items.length > 24 ? (
-            <p className="text-sm text-slate-500">仅展示前 24 处变化，剩余 {diff.items.length - 24} 处变化未展开。</p>
+          {filteredItems.length > 24 ? (
+            <p className="text-sm text-slate-500">仅展示前 24 处变化，剩余 {filteredItems.length - 24} 处变化未展开。</p>
           ) : null}
         </div>
       )}
     </section>
+  );
+}
+
+function HistoryPagination(props: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (props.totalPages <= 1) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">共 {props.total} 条历史记录。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm text-slate-500">
+        第 {props.page} / {props.totalPages} 页，共 {props.total} 条，每页 {props.pageSize} 条。
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => props.onPageChange(props.page - 1)}
+          type="button"
+          disabled={props.page <= 1}
+        >
+          上一页
+        </button>
+        <button
+          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => props.onPageChange(props.page + 1)}
+          type="button"
+          disabled={props.page >= props.totalPages}
+        >
+          下一页
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1370,15 +1472,21 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
   const [searchParams] = useSearchParams();
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
   const selectedHistoryID = Number(searchParams.get("history_id") || "") || null;
+  const historyPage = Number(searchParams.get("page") || "") || 1;
+  const historyPageSize = 20;
   const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
   const {
     loading: historyLoading,
     error: historyError,
     items: historyItems,
+    total: historyTotal,
+    page: currentHistoryPage,
+    pageSize: currentHistoryPageSize,
+    totalPages: historyTotalPages,
     reload: reloadHistory
-  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized);
+  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, { page: historyPage, pageSize: historyPageSize });
 
-  function replaceSelection(nextTargetID: number | null, nextHistoryID?: number | null) {
+  function replaceSelection(nextTargetID: number | null, nextHistoryID?: number | null, nextPage?: number | null) {
     const params = new URLSearchParams(searchParams);
     if (nextTargetID) {
       params.set("target_id", String(nextTargetID));
@@ -1389,6 +1497,11 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
       params.set("history_id", String(nextHistoryID));
     } else {
       params.delete("history_id");
+    }
+    if (nextPage && nextPage > 1) {
+      params.set("page", String(nextPage));
+    } else {
+      params.delete("page");
     }
     const query = params.toString();
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
@@ -1436,7 +1549,7 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
             <TargetTabs
               items={detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
               selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
-              onSelect={(targetID) => replaceSelection(targetID, null)}
+              onSelect={(targetID) => replaceSelection(targetID, null, 1)}
             />
           ) : (
             <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
@@ -1479,10 +1592,17 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
                   刷新
                 </button>
               </div>
+              <HistoryPagination
+                page={currentHistoryPage}
+                totalPages={historyTotalPages}
+                total={historyTotal}
+                pageSize={currentHistoryPageSize}
+                onPageChange={(page) => replaceSelection(detail.current_target?.id ?? null, null, page)}
+              />
               <HistoryTimeline
                 items={historyItems}
                 selectedID={selectedEntry?.id ?? null}
-                onSelect={(historyID) => replaceSelection(detail.current_target?.id ?? null, historyID)}
+                onSelect={(historyID) => replaceSelection(detail.current_target?.id ?? null, historyID, currentHistoryPage)}
               />
             </div>
 

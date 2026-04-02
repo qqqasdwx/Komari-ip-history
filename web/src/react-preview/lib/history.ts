@@ -3,6 +3,7 @@ export type HistoryDiffItem = {
   kind: "added" | "removed" | "changed";
   previous: string;
   current: string;
+  group: string;
 };
 
 export type HistoryDiffSummary = {
@@ -12,7 +13,48 @@ export type HistoryDiffSummary = {
   items: HistoryDiffItem[];
 };
 
-const IGNORED_PATHS = new Set(["Head.ReportTime"]);
+const IGNORED_PATHS = new Set([
+  "Head.ReportTime",
+  "Head.Version",
+  "Head.Command",
+  "Head.GitHub",
+  "Meta.node_name",
+  "Meta.node_uuid",
+  "Meta.source",
+  "Meta.updated_at"
+]);
+
+const NOISE_PREFIXES = ["Meta."];
+
+export function historyDiffGroup(path: string): string {
+  if (!path) {
+    return "Other";
+  }
+  const [group] = path.split(/[.[\]]/, 1);
+  return group || "Other";
+}
+
+export function isMeaningfulHistoryPath(path: string): boolean {
+  if (IGNORED_PATHS.has(path)) {
+    return false;
+  }
+  return !NOISE_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+export function filterHistoryDiffItems(
+  items: HistoryDiffItem[],
+  options?: { group?: string; meaningfulOnly?: boolean }
+) {
+  return items.filter((item) => {
+    if (options?.group && options.group !== "全部" && item.group !== options.group) {
+      return false;
+    }
+    if (options?.meaningfulOnly && !isMeaningfulHistoryPath(item.path)) {
+      return false;
+    }
+    return true;
+  });
+}
 
 function formatLeafValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -78,7 +120,6 @@ export function compareHistoryResults(current: Record<string, unknown>, previous
   const currentFlat = flattenResult(current);
   const previousFlat = flattenResult(previous ?? {});
   const paths = Array.from(new Set([...Object.keys(currentFlat), ...Object.keys(previousFlat)]))
-    .filter((path) => !IGNORED_PATHS.has(path))
     .sort((left, right) => left.localeCompare(right));
 
   const items: HistoryDiffItem[] = [];
@@ -92,17 +133,17 @@ export function compareHistoryResults(current: Record<string, unknown>, previous
 
     if (previousValue === undefined) {
       added += 1;
-      items.push({ path, kind: "added", previous: "N/A", current: currentValue });
+      items.push({ path, group: historyDiffGroup(path), kind: "added", previous: "N/A", current: currentValue });
       continue;
     }
     if (currentValue === undefined) {
       removed += 1;
-      items.push({ path, kind: "removed", previous: previousValue, current: "N/A" });
+      items.push({ path, group: historyDiffGroup(path), kind: "removed", previous: previousValue, current: "N/A" });
       continue;
     }
     if (currentValue !== previousValue) {
       changed += 1;
-      items.push({ path, kind: "changed", previous: previousValue, current: currentValue });
+      items.push({ path, group: historyDiffGroup(path), kind: "changed", previous: previousValue, current: currentValue });
     }
   }
 

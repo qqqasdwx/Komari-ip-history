@@ -38,12 +38,14 @@ func (h NodeHandler) Detail(c *gin.Context) {
 func (h NodeHandler) History(c *gin.Context) {
 	targetID := parseTargetID(c.Query("target_id"))
 	limit := parsePositiveInt(c.Query("limit"))
-	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID, limit)
+	page := parsePositiveInt(c.Query("page"))
+	pageSize := parsePositiveInt(c.Query("page_size"))
+	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID, limit, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, items)
 }
 
 func (h NodeHandler) AddTarget(c *gin.Context) {

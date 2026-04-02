@@ -9,6 +9,24 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
 const page = await context.newPage();
 
+async function jsonFetch(page, url, options) {
+  return page.evaluate(
+    async ({ url, options }) => {
+      const response = await fetch(url, {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(options?.headers || {})
+        },
+        ...options
+      });
+      const text = await response.text();
+      return { status: response.status, text };
+    },
+    { url, options }
+  );
+}
+
 await page.goto(`${appBaseURL}/#/login`);
 await page.getByRole('textbox', { name: '用户名' }).fill('admin');
 await page.getByLabel('密码').fill('admin');
@@ -67,6 +85,51 @@ if (rowCount > 0) {
     throw new Error('react detail page missing install command');
   }
 
+  const detailData = JSON.parse(
+    (await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID.split('/').pop()}`)).text
+  );
+  const currentTarget = detailData.current_target;
+  const reporterToken = detailData.report_config.reporter_token;
+  if (currentTarget?.ip && reporterToken) {
+    const historyResponse = JSON.parse(
+      (
+        await jsonFetch(
+          page,
+          `${appBaseURL}/api/v1/nodes/${firstUUID.split('/').pop()}/history?target_id=${currentTarget.id}&limit=3`
+        )
+      ).text
+    );
+    const existingCount = Array.isArray(historyResponse.items) ? historyResponse.items.length : 0;
+    if (existingCount < 2) {
+      for (let index = 0; index < 2; index += 1) {
+        const nextResult = structuredClone(currentTarget.current_result ?? {});
+        if (!nextResult.Score || typeof nextResult.Score !== 'object') {
+          nextResult.Score = {};
+        }
+        nextResult.Score.IPQS = 30 + index;
+        nextResult.Head = {
+          ...(typeof nextResult.Head === 'object' && nextResult.Head ? nextResult.Head : {}),
+          ReportTime: `history-seed-${index}`
+        };
+        const reportResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID.split('/').pop()}`, {
+          method: 'POST',
+          headers: {
+            'X-IPQ-Reporter-Token': reporterToken
+          },
+          body: JSON.stringify({
+            target_ip: currentTarget.ip,
+            summary: `Playwright history seed ${index + 1}`,
+            result: nextResult
+          })
+        });
+        if (reportResponse.status < 200 || reportResponse.status >= 300) {
+          throw new Error(`failed to seed history: ${reportResponse.status} ${reportResponse.text}`);
+        }
+      }
+      await page.reload({ waitUntil: 'networkidle' });
+    }
+  }
+
   const detailURL = page.url();
   const historyLinkCount = await page.getByRole('link', { name: '查看完整历史' }).count();
   if (historyLinkCount > 0) {
@@ -74,6 +137,8 @@ if (rowCount > 0) {
     await page.waitForURL('**/#/nodes/**/history**');
     await page.getByText('历史时间线', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
     await page.getByText('当前选中快照', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByText('上一条快照', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByText('变化摘要', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
     await page.goto(detailURL);
     await page.waitForLoadState('networkidle');
   }

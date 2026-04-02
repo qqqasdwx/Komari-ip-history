@@ -91,3 +91,11 @@ export type NodeHistoryEntry = {
   summary: string;
   result: Record<string, unknown>;
 };
+
+export type NodeHistoryListResponse = {
+  items: NodeHistoryEntry[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};

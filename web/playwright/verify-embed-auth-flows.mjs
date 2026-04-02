@@ -37,6 +37,12 @@ function expectOK(result, label) {
   return result;
 }
 
+async function clickIpqAction(page) {
+  const button = page.locator("button").filter({ hasText: /IP 质量/ }).first();
+  await button.waitFor({ state: "visible", timeout: 15000 });
+  await button.click();
+}
+
 async function loginApp(page) {
   await page.goto(`${appBaseURL}/#/login`);
   expectOK(await jsonFetch(page, `${appBaseURL}/api/v1/auth/login`, {
@@ -132,7 +138,7 @@ try {
   await guestOffPage.goto(`${komariBaseURL}/instance/${registeredNode.uuid}`);
   await guestOffPage.waitForLoadState("networkidle");
   await guestOffPage.waitForTimeout(3000);
-  await guestOffPage.locator("button", { hasText: "打开 IP 质量" }).first().click();
+  await clickIpqAction(guestOffPage);
   await guestOffPage.waitForTimeout(1500);
   const guestOffOverlay = await guestOffPage.locator('#ipq-loader-overlay[data-open="true"]').count();
   const guestOffToastText =
@@ -152,7 +158,7 @@ try {
   await guestOnPage.goto(`${komariBaseURL}/instance/${registeredNode.uuid}`);
   await guestOnPage.waitForLoadState("networkidle");
   await guestOnPage.waitForTimeout(3000);
-  await guestOnPage.locator("button", { hasText: "打开 IP 质量" }).first().click();
+  await clickIpqAction(guestOnPage);
   await guestOnPage.waitForTimeout(1500);
   const guestOnOverlay = await guestOnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
   const guestOnIframeSrc = await guestOnPage.locator("#ipq-loader-overlay iframe").first().getAttribute("src");
@@ -170,14 +176,14 @@ try {
   await adminReturnPage.goto(`${komariBaseURL}/instance/${adminReturnNode.uuid}`);
   await adminReturnPage.waitForLoadState("networkidle");
   await adminReturnPage.waitForTimeout(3000);
-  await adminReturnPage.locator("button", { hasText: "打开 IP 质量" }).first().click();
+  await clickIpqAction(adminReturnPage);
   await adminReturnPage.waitForURL("**/#/login**", { timeout: 15000 });
   await adminReturnPage.getByRole("textbox", { name: "用户名" }).fill("admin");
   await adminReturnPage.getByLabel("密码").fill("admin");
   await adminReturnPage.getByRole("button", { name: "登录" }).click();
   await adminReturnPage.waitForURL(`${komariBaseURL}/instance/**`, { timeout: 25000 });
   await adminReturnPage.waitForLoadState("domcontentloaded");
-  await adminReturnPage.waitForTimeout(8000);
+  await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"] iframe').first().waitFor({ state: "visible", timeout: 15000 });
   const adminReturnOverlay = await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
   const adminReturnIframeSrc =
     (await adminReturnPage.locator("#ipq-loader-overlay iframe").count()) > 0
