@@ -37,7 +37,8 @@ func (h NodeHandler) Detail(c *gin.Context) {
 
 func (h NodeHandler) History(c *gin.Context) {
 	targetID := parseTargetID(c.Query("target_id"))
-	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID)
+	limit := parsePositiveInt(c.Query("limit"))
+	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID, limit)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
@@ -113,4 +114,15 @@ func parseTargetID(raw string) *uint {
 	}
 	targetID := uint(value)
 	return &targetID
+}
+
+func parsePositiveInt(raw string) int {
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }

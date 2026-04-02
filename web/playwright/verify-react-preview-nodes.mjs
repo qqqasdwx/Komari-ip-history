@@ -67,6 +67,17 @@ if (rowCount > 0) {
     throw new Error('react detail page missing install command');
   }
 
+  const detailURL = page.url();
+  const historyLinkCount = await page.getByRole('link', { name: '查看完整历史' }).count();
+  if (historyLinkCount > 0) {
+    await page.getByRole('link', { name: '查看完整历史' }).click();
+    await page.waitForURL('**/#/nodes/**/history**');
+    await page.getByText('历史时间线', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByText('当前选中快照', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.goto(detailURL);
+    await page.waitForLoadState('networkidle');
+  }
+
   const detailHash = new URL(page.url()).hash.replace(/^#/, '');
   await page.goto(`${appBaseURL}/#${detailHash}${detailHash.includes('?') ? '&' : '?'}embed=1`);
   await page.locator('[data-detail-report="true"]').waitFor({ state: 'visible', timeout: 10000 });

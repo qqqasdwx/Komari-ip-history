@@ -20,6 +20,7 @@ import {
 } from "react-router-dom";
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { formatDateTime } from "./lib/format";
+import { compareHistoryResults } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
   IntegrationSettings,
@@ -53,6 +54,9 @@ function routeLabel(pathname: string) {
     return "节点结果";
   }
   if (pathname.startsWith("/nodes/")) {
+    if (pathname.endsWith("/history")) {
+      return "历史记录";
+    }
     return "节点详情";
   }
   if (pathname === "/settings/integration") {
@@ -73,7 +77,6 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [detail, setDetail] = useState<NodeDetail | null>(null);
-  const [history, setHistory] = useState<NodeHistoryEntry[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -92,18 +95,13 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
 
       try {
         const detailPath = `/nodes/${uuid}${targetID ? `?target_id=${targetID}` : ""}`;
-        const historyPath = `/nodes/${uuid}/history${targetID ? `?target_id=${targetID}` : ""}`;
-        const [detailResponse, historyResponse] = await Promise.all([
-          apiRequest<NodeDetail>(detailPath),
-          apiRequest<{ items: NodeHistoryEntry[] }>(historyPath)
-        ]);
+        const detailResponse = await apiRequest<NodeDetail>(detailPath);
 
         if (cancelled) {
           return;
         }
 
         setDetail(detailResponse);
-        setHistory(historyResponse.items ?? []);
       } catch (loadError) {
         if (cancelled) {
           return;
@@ -135,7 +133,85 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
     error,
     errorStatus,
     detail,
-    history,
+    reload: () => setReloadToken((value) => value + 1)
+  };
+}
+
+function useNodeHistoryData(
+  uuid: string,
+  targetID: number | null,
+  onUnauthorized: () => void,
+  options?: { limit?: number }
+) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
+  const [items, setItems] = useState<NodeHistoryEntry[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid) {
+        setError("节点不存在");
+        setErrorStatus(404);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+      setErrorStatus(null);
+
+      try {
+        const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
+        if (options?.limit && options.limit > 0) {
+          query.set("limit", String(options.limit));
+        }
+        const response = await apiRequest<{ items: NodeHistoryEntry[] }>(
+          `/nodes/${uuid}/history${query.size > 0 ? `?${query.toString()}` : ""}`
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setItems(response.items ?? []);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          onUnauthorized();
+          return;
+        }
+        if (loadError instanceof RequestError) {
+          setErrorStatus(loadError.status);
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载历史记录失败");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onUnauthorized, options?.limit, reloadToken, targetID, uuid]);
+
+  return {
+    loading,
+    error,
+    errorStatus,
+    items,
     reload: () => setReloadToken((value) => value + 1)
   };
 }
@@ -819,16 +895,24 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
   );
 }
 
-function HistorySection(props: { items: NodeHistoryEntry[]; compact: boolean }) {
+function HistoryPreviewSection(props: { items: NodeHistoryEntry[]; historyPath: string; loading: boolean }) {
   return (
     <div className="section space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-900">历史记录</h2>
-        <span className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs text-slate-500">
-          {props.items.length} 条
-        </span>
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">历史记录</h2>
+          <p className="text-sm text-slate-500">这里仅展示最近几条，完整历史和字段变化请进入独立页面查看。</p>
+        </div>
+        <Link
+          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+          to={props.historyPath}
+        >
+          查看完整历史
+        </Link>
       </div>
-      {props.items.length === 0 ? (
+      {props.loading ? (
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
+      ) : props.items.length === 0 ? (
         <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
           当前目标 IP 还没有历史记录。
         </div>
@@ -836,18 +920,128 @@ function HistorySection(props: { items: NodeHistoryEntry[]; compact: boolean }) 
         <div className="grid gap-4">
           {props.items.map((item) => (
             <section key={item.id} className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-slate-900">{item.summary || "历史上报"}</p>
                   <p className="text-xs text-slate-500">{formatDateTime(item.recorded_at)}</p>
                 </div>
+                <Link
+                  className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600"
+                  to={`${props.historyPath}${props.historyPath.includes("?") ? "&" : "?"}history_id=${item.id}`}
+                >
+                  查看快照
+                </Link>
               </div>
-              <CurrentReportView result={item.result} hiddenPaths={[]} compact={props.compact} />
             </section>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function HistoryTimeline(props: {
+  items: NodeHistoryEntry[];
+  selectedID: number | null;
+  onSelect: (historyID: number) => void;
+}) {
+  return (
+    <div className="grid gap-3">
+      {props.items.map((item, index) => (
+        <button
+          key={item.id}
+          className={[
+            "w-full rounded-[18px] border px-4 py-4 text-left transition",
+            props.selectedID === item.id
+              ? "border-indigo-200 bg-indigo-50"
+              : "border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50"
+          ].join(" ")}
+          onClick={() => props.onSelect(item.id)}
+          type="button"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-slate-900">{item.summary || "历史上报"}</p>
+              <p className="text-xs text-slate-500">{formatDateTime(item.recorded_at)}</p>
+            </div>
+            {index === 0 ? (
+              <span className="inline-flex h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
+                最新
+              </span>
+            ) : null}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function HistoryCompareSummary(props: { current: NodeHistoryEntry; previous?: NodeHistoryEntry | null }) {
+  const diff = compareHistoryResults(props.current.result, props.previous?.result);
+
+  return (
+    <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">变化摘要</h2>
+          <p className="text-sm text-slate-500">
+            {props.previous ? `对比上一条记录：${formatDateTime(props.previous.recorded_at)}` : "当前条目没有更早的历史记录可对比。"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="inline-flex h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
+            新增 {diff.added}
+          </span>
+          <span className="inline-flex h-8 items-center rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-700">
+            变化 {diff.changed}
+          </span>
+          <span className="inline-flex h-8 items-center rounded-full border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700">
+            移除 {diff.removed}
+          </span>
+        </div>
+      </div>
+
+      {diff.items.length === 0 ? (
+        <div className="mt-4 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+          与上一条相比，没有发现字段变化。
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          {diff.items.slice(0, 24).map((item) => (
+            <div key={`${item.kind}:${item.path}`} className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm font-medium text-slate-900">{item.path}</p>
+                <span
+                  className={[
+                    "inline-flex h-7 items-center rounded-full px-3 text-xs font-medium",
+                    item.kind === "added"
+                      ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : item.kind === "removed"
+                        ? "border border-rose-200 bg-rose-50 text-rose-700"
+                        : "border border-amber-200 bg-amber-50 text-amber-700"
+                  ].join(" ")}
+                >
+                  {item.kind === "added" ? "新增" : item.kind === "removed" ? "移除" : "变化"}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">上一条</p>
+                  <div className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">{item.previous}</div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">当前条目</p>
+                  <div className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900">{item.current}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {diff.items.length > 24 ? (
+            <p className="text-sm text-slate-500">仅展示前 24 处变化，剩余 {diff.items.length - 24} 处变化未展开。</p>
+          ) : null}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -946,7 +1140,12 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const [targetInput, setTargetInput] = useState("");
   const [targetError, setTargetError] = useState("");
   const [targetSaving, setTargetSaving] = useState(false);
-  const { loading, error, errorStatus, detail, history, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const { loading, error, errorStatus, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const {
+    loading: historyPreviewLoading,
+    items: historyPreviewItems,
+    reload: reloadHistoryPreview
+  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, { limit: 5 });
 
   function replaceTargetSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -971,6 +1170,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       setTargetInput("");
       replaceTargetSelection(created.id);
       reload();
+      reloadHistoryPreview();
     } catch (targetCreateError) {
       if (targetCreateError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -989,6 +1189,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       await apiRequest(`/nodes/${uuid}/targets/${targetID}`, { method: "DELETE" });
       replaceTargetSelection(null);
       reload();
+      reloadHistoryPreview();
     } catch (targetDeleteError) {
       if (targetDeleteError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -1024,6 +1225,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         body: JSON.stringify({ target_ids: next })
       });
       reload();
+      reloadHistoryPreview();
     } catch (reorderError) {
       if (reorderError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -1034,6 +1236,17 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       setTargetSaving(false);
     }
   }
+
+  const historyPath = (() => {
+    const params = new URLSearchParams();
+    if (detail?.current_target?.id) {
+      params.set("target_id", String(detail.current_target.id));
+    } else if (selectedTargetID) {
+      params.set("target_id", String(selectedTargetID));
+    }
+    const query = params.toString();
+    return `/nodes/${uuid}/history${query ? `?${query}` : ""}`;
+  })();
 
   if (loading) {
     return <NodeDetailLoading />;
@@ -1136,13 +1349,172 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
               </div>
             </div>
 
-            <HistorySection items={history} compact={isEmbed} />
+            {!isEmbed ? (
+              <HistoryPreviewSection items={historyPreviewItems} historyPath={historyPath} loading={historyPreviewLoading} />
+            ) : null}
           </>
         ) : null}
 
         {!isEmbed ? (
           <ReportConfigSection me={props.me} detail={detail} />
         ) : null}
+      </section>
+    </section>
+  );
+}
+
+function NodeHistoryPage(props: { onUnauthorized: () => void }) {
+  const { uuid = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
+  const selectedHistoryID = Number(searchParams.get("history_id") || "") || null;
+  const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const {
+    loading: historyLoading,
+    error: historyError,
+    items: historyItems,
+    reload: reloadHistory
+  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized);
+
+  function replaceSelection(nextTargetID: number | null, nextHistoryID?: number | null) {
+    const params = new URLSearchParams(searchParams);
+    if (nextTargetID) {
+      params.set("target_id", String(nextTargetID));
+    } else {
+      params.delete("target_id");
+    }
+    if (nextHistoryID) {
+      params.set("history_id", String(nextHistoryID));
+    } else {
+      params.delete("history_id");
+    }
+    const query = params.toString();
+    navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
+  }
+
+  if (loading) {
+    return <NodeDetailLoading />;
+  }
+
+  if (error || !detail) {
+    return (
+      <NodePageError
+        title="历史记录"
+        subtitle={error || "节点不存在"}
+        backTo="/nodes"
+        error={error || "节点不存在。"}
+        onRetry={reload}
+      />
+    );
+  }
+
+  const selectedEntry =
+    historyItems.find((item) => item.id === selectedHistoryID) ??
+    historyItems[0] ??
+    null;
+  const selectedIndex = selectedEntry ? historyItems.findIndex((item) => item.id === selectedEntry.id) : -1;
+  const previousEntry = selectedIndex >= 0 ? historyItems[selectedIndex + 1] ?? null : null;
+  const detailBackTo = `/nodes/${uuid}${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
+
+  return (
+    <section className="space-y-6">
+      <PageHeader
+        title={`${detail.name} 历史记录`}
+        subtitle={detail.current_target ? `当前查看 ${detail.current_target.ip}` : "请选择一个目标 IP"}
+        backTo={detailBackTo}
+      />
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="section space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
+            <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的独立历史。</p>
+          </div>
+          {detail.targets.length > 0 ? (
+            <TargetTabs
+              items={detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
+              selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
+              onSelect={(targetID) => replaceSelection(targetID, null)}
+            />
+          ) : (
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              当前节点还没有目标 IP，请先回到详情页添加。
+            </div>
+          )}
+        </div>
+
+        {historyError ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
+              {historyError}
+            </div>
+          </div>
+        ) : null}
+
+        {!detail.current_target ? null : historyLoading ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
+          </div>
+        ) : historyItems.length === 0 ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              当前目标 IP 还没有历史记录。
+            </div>
+          </div>
+        ) : (
+          <div className="section grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-slate-900">历史时间线</h2>
+                <button
+                  className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                  onClick={() => {
+                    reload();
+                    reloadHistory();
+                  }}
+                  type="button"
+                >
+                  刷新
+                </button>
+              </div>
+              <HistoryTimeline
+                items={historyItems}
+                selectedID={selectedEntry?.id ?? null}
+                onSelect={(historyID) => replaceSelection(detail.current_target?.id ?? null, historyID)}
+              />
+            </div>
+
+            <div className="space-y-6">
+              {selectedEntry ? (
+                <>
+                  <HistoryCompareSummary current={selectedEntry} previous={previousEntry} />
+                  <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="mb-4 space-y-1">
+                      <h2 className="text-base font-semibold text-slate-900">当前选中快照</h2>
+                      <p className="text-sm text-slate-500">
+                        {selectedEntry.summary || "历史上报"} · {formatDateTime(selectedEntry.recorded_at)}
+                      </p>
+                    </div>
+                    <CurrentReportView result={selectedEntry.result} hiddenPaths={[]} compact={false} />
+                  </section>
+                  {previousEntry ? (
+                    <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="mb-4 space-y-1">
+                        <h2 className="text-base font-semibold text-slate-900">上一条快照</h2>
+                        <p className="text-sm text-slate-500">
+                          {previousEntry.summary || "历史上报"} · {formatDateTime(previousEntry.recorded_at)}
+                        </p>
+                      </div>
+                      <CurrentReportView result={previousEntry.result} hiddenPaths={[]} compact={false} />
+                    </section>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          </div>
+        )}
       </section>
     </section>
   );
@@ -1556,8 +1928,8 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
       <Route path="/connect" element={<ConnectPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes" element={<NodesPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid" element={<NodeDetailPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
-      <Route path="/nodes/:uuid/history" element={<Navigate to=".." relative="path" replace />} />
-      <Route path="/nodes/:uuid/changes" element={<Navigate to=".." relative="path" replace />} />
+      <Route path="/nodes/:uuid/history" element={<NodeHistoryPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes/:uuid/changes" element={<Navigate to="../history" relative="path" replace />} />
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />
       <Route

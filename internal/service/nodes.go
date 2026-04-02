@@ -230,7 +230,7 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	return detail, nil
 }
 
-func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint) ([]NodeHistoryEntry, error) {
+func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit int) ([]NodeHistoryEntry, error) {
 	_, targets, err := loadNodeWithTargets(db, uuid)
 	if err != nil {
 		return nil, err
@@ -245,7 +245,11 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint) ([]NodeHis
 	}
 
 	var history []models.NodeTargetHistory
-	if err := db.Where("node_target_id = ?", selected.ID).Order("recorded_at DESC").Find(&history).Error; err != nil {
+	query := db.Where("node_target_id = ?", selected.ID).Order("recorded_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&history).Error; err != nil {
 		return nil, err
 	}
 
