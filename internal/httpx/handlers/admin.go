@@ -90,29 +90,6 @@ func (h AdminHandler) PutIntegrationSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, settings)
 }
 
-func (h AdminHandler) GetChangePriority(c *gin.Context) {
-	cfg, err := service.GetChangePriorityConfig(h.DB)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
-		return
-	}
-	c.JSON(http.StatusOK, cfg)
-}
-
-func (h AdminHandler) PutChangePriority(c *gin.Context) {
-	var req service.ChangePriorityConfig
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
-		return
-	}
-	cfg, err := service.SetChangePriorityConfig(h.DB, req)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to save settings"})
-		return
-	}
-	c.JSON(http.StatusOK, cfg)
-}
-
 func (h AdminHandler) UpdateProfile(c *gin.Context) {
 	user, ok := middleware.GetCurrentUser(c)
 	if !ok {

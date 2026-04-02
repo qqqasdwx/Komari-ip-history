@@ -51,8 +51,6 @@ func Run() error {
 			admin.GET("/runtime", adminHandler.Runtime)
 			admin.GET("/integration", adminHandler.GetIntegrationSettings)
 			admin.PUT("/integration", adminHandler.PutIntegrationSettings)
-			admin.GET("/change-priority", adminHandler.GetChangePriority)
-			admin.PUT("/change-priority", adminHandler.PutChangePriority)
 			admin.PUT("/profile", adminHandler.UpdateProfile)
 			admin.GET("/header-preview", adminHandler.HeaderPreview)
 		}

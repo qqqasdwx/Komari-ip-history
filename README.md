@@ -45,6 +45,7 @@ docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
 其中：
 
 - `run-e2e.sh` 会顺序执行：
-- `web/playwright/verify-injection.mjs`
-- `web/playwright/verify-stage1-flows.mjs`
+- `web/playwright/verify-react-preview-nodes.mjs`
+- `web/playwright/verify-embed-auth-flows.mjs`
+- 新的鉴权脚本会自动清理自身创建的测试节点，并把游客只读开关恢复成默认关闭
 - Playwright 产物输出到 `web/playwright-output/`

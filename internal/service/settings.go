@@ -1,10 +1,8 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,77 +11,13 @@ import (
 	"gorm.io/gorm"
 )
 
-const changePrioritySettingKey = "change_priority"
 const integrationBaseURLSettingKey = "integration_public_base_url"
 const integrationGuestReadEnabledSettingKey = "integration_guest_read_enabled"
-
-type ChangePriorityConfig struct {
-	SecondaryPaths []string `json:"secondary_paths"`
-}
 
 type IntegrationSettings struct {
 	PublicBaseURL          string `json:"public_base_url"`
 	EffectivePublicBaseURL string `json:"effective_public_base_url"`
 	GuestReadEnabled       bool   `json:"guest_read_enabled"`
-}
-
-func defaultChangePriorityConfig() ChangePriorityConfig {
-	return ChangePriorityConfig{
-		SecondaryPaths: []string{"Meta"},
-	}
-}
-
-func normalizePaths(paths []string) []string {
-	seen := make(map[string]struct{})
-	items := make([]string, 0, len(paths))
-	for _, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		items = append(items, path)
-	}
-	sort.Strings(items)
-	return items
-}
-
-func GetChangePriorityConfig(db *gorm.DB) (ChangePriorityConfig, error) {
-	var setting models.AppSetting
-	if err := db.First(&setting, "key = ?", changePrioritySettingKey).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return defaultChangePriorityConfig(), nil
-		}
-		return ChangePriorityConfig{}, err
-	}
-
-	var cfg ChangePriorityConfig
-	if err := json.Unmarshal([]byte(setting.Value), &cfg); err != nil {
-		return ChangePriorityConfig{}, err
-	}
-	cfg.SecondaryPaths = normalizePaths(cfg.SecondaryPaths)
-	return cfg, nil
-}
-
-func SetChangePriorityConfig(db *gorm.DB, cfg ChangePriorityConfig) (ChangePriorityConfig, error) {
-	cfg.SecondaryPaths = normalizePaths(cfg.SecondaryPaths)
-
-	payload, err := json.Marshal(cfg)
-	if err != nil {
-		return ChangePriorityConfig{}, err
-	}
-
-	if err := db.Save(&models.AppSetting{
-		Key:       changePrioritySettingKey,
-		Value:     string(payload),
-		UpdatedAt: time.Now(),
-	}).Error; err != nil {
-		return ChangePriorityConfig{}, err
-	}
-	return cfg, nil
 }
 
 func NormalizePublicBaseURL(raw string) string {

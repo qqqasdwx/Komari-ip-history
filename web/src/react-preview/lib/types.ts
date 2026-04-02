@@ -21,10 +21,6 @@ export type IntegrationSettings = {
   guest_read_enabled: boolean;
 };
 
-export type ChangePriorityConfig = {
-  secondary_paths: string[];
-};
-
 export type NodeListItem = {
   komari_node_uuid: string;
   name: string;
@@ -32,15 +28,6 @@ export type NodeListItem = {
   current_summary: string;
   current_result: Record<string, unknown>;
   updated_at?: string | null;
-  created_at?: string;
-};
-
-export type NodeHistoryItem = {
-  id: number;
-  node_id?: number;
-  summary: string;
-  recorded_at: string;
-  result_json: string;
   created_at?: string;
 };
 
