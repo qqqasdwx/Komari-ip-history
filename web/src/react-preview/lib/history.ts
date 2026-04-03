@@ -1,3 +1,7 @@
+import type { DisplayFieldValue } from "./display-fields";
+import { buildDisplayFieldOptionLabel, extractDisplayFieldValues } from "./display-fields";
+import type { NodeHistoryEntry } from "./types";
+
 export type HistoryDiffItem = {
   path: string;
   kind: "added" | "removed" | "changed";
@@ -11,6 +15,30 @@ export type HistoryDiffSummary = {
   removed: number;
   changed: number;
   items: HistoryDiffItem[];
+};
+
+export type HistoryFieldChangeEvent = {
+  id: string;
+  targetId: number;
+  targetIP: string;
+  fieldId: string;
+  groupPath: string[];
+  fieldLabel: string;
+  fieldOptionLabel: string;
+  previous: DisplayFieldValue;
+  current: DisplayFieldValue;
+  previousRecordedAt: string;
+  recordedAt: string;
+};
+
+export type HistoryCompareRow = {
+  fieldId: string;
+  groupPath: string[];
+  fieldLabel: string;
+  fieldOptionLabel: string;
+  left: DisplayFieldValue;
+  right: DisplayFieldValue;
+  changed: boolean;
 };
 
 const IGNORED_PATHS = new Set([
@@ -148,4 +176,109 @@ export function compareHistoryResults(current: Record<string, unknown>, previous
   }
 
   return { added, removed, changed, items };
+}
+
+function compareDisplayFieldValues(left: DisplayFieldValue, right: DisplayFieldValue) {
+  return left.text === right.text && left.tone === right.tone && left.missingKind === right.missingKind;
+}
+
+function buildMissingDisplayFieldLike(source: DisplayFieldValue): DisplayFieldValue {
+  return {
+    ...source,
+    text: "N/A",
+    tone: "muted",
+    missingKind: "missing"
+  };
+}
+
+function buildDisplayFieldMap(result: Record<string, unknown>) {
+  const values = extractDisplayFieldValues(result);
+  const map = new Map<string, DisplayFieldValue>();
+  for (const value of values) {
+    map.set(value.id, value);
+  }
+  return map;
+}
+
+export function buildHistoryFieldChangeEvents(items: NodeHistoryEntry[]) {
+  const ordered = [...items].sort(
+    (left, right) => new Date(left.recorded_at).getTime() - new Date(right.recorded_at).getTime()
+  );
+  const events: HistoryFieldChangeEvent[] = [];
+  let previousMap = new Map<string, DisplayFieldValue>();
+  let previousEntry: NodeHistoryEntry | null = null;
+
+  ordered.forEach((item) => {
+    const currentMap = buildDisplayFieldMap(item.result);
+    const ids = Array.from(new Set([...previousMap.keys(), ...currentMap.keys()])).sort((left, right) => left.localeCompare(right));
+
+    for (const id of ids) {
+      const current = currentMap.get(id);
+      const previous = previousMap.get(id);
+      if (!current && !previous) {
+        continue;
+      }
+      const previousValue = previous ?? buildMissingDisplayFieldLike(current!);
+      const currentValue = current ?? buildMissingDisplayFieldLike(previous!);
+      if (compareDisplayFieldValues(previousValue, currentValue)) {
+        continue;
+      }
+      events.push({
+        id: `${item.id}:${id}`,
+        targetId: item.target_id,
+        targetIP: item.target_ip,
+        fieldId: id,
+        groupPath: currentValue.groupPath,
+        fieldLabel: currentValue.label,
+        fieldOptionLabel: buildDisplayFieldOptionLabel(currentValue),
+        previous: previousValue,
+        current: currentValue,
+        previousRecordedAt: previousEntry?.recorded_at ?? "",
+        recordedAt: item.recorded_at
+      });
+    }
+
+    previousMap = currentMap;
+    previousEntry = item;
+  });
+
+  return events.sort((left, right) => new Date(right.recordedAt).getTime() - new Date(left.recordedAt).getTime());
+}
+
+export function buildHistoryFieldOptions(events: HistoryFieldChangeEvent[]) {
+  const map = new Map<string, { id: string; label: string }>();
+  for (const event of events) {
+    if (!map.has(event.fieldId)) {
+      map.set(event.fieldId, { id: event.fieldId, label: event.fieldOptionLabel });
+    }
+  }
+  return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label, "zh-CN"));
+}
+
+export function buildHistoryCompareRows(leftResult: Record<string, unknown>, rightResult: Record<string, unknown>) {
+  const leftMap = buildDisplayFieldMap(leftResult);
+  const rightMap = buildDisplayFieldMap(rightResult);
+  const ids = Array.from(new Set([...leftMap.keys(), ...rightMap.keys()])).sort((left, right) => left.localeCompare(right));
+
+  return ids
+    .map((id) => {
+      const left = leftMap.get(id);
+      const right = rightMap.get(id);
+      if (!left && !right) {
+        return null;
+      }
+      const leftValue = left ?? buildMissingDisplayFieldLike(right!);
+      const rightValue = right ?? buildMissingDisplayFieldLike(left!);
+      return {
+        fieldId: id,
+        groupPath: rightValue.groupPath,
+        fieldLabel: rightValue.label,
+        fieldOptionLabel: buildDisplayFieldOptionLabel(rightValue),
+        left: leftValue,
+        right: rightValue,
+        changed: !compareDisplayFieldValues(leftValue, rightValue)
+      } satisfies HistoryCompareRow;
+    })
+    .filter((item): item is HistoryCompareRow => Boolean(item))
+    .sort((left, right) => left.fieldOptionLabel.localeCompare(right.fieldOptionLabel, "zh-CN"));
 }

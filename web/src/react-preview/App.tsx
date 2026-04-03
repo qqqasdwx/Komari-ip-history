@@ -6,7 +6,7 @@ import {
   ReloadIcon,
   RowsIcon
 } from "@radix-ui/react-icons";
-import { type DragEvent, type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { Fragment, type DragEvent, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Link,
   NavLink,
@@ -19,13 +19,15 @@ import {
   useSearchParams
 } from "react-router-dom";
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
+import { renderDisplayValueBadge } from "./lib/display-fields";
 import { formatDateTime } from "./lib/format";
-import { compareHistoryResults, filterHistoryDiffItems } from "./lib/history";
+import { buildHistoryCompareRows, buildHistoryFieldChangeEvents, buildHistoryFieldOptions } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
   IntegrationSettings,
   MeResponse,
   NodeDetail,
+  NodeHistoryDetailResponse,
   NodeHistoryEntry,
   NodeHistoryListResponse,
   NodeListItem,
@@ -50,11 +52,124 @@ const settingsNavItems: NavItem[] = [
   { to: "/settings/admin", label: "管理员设置", icon: <GearIcon /> }
 ];
 
+const historyDateRangePresets = [
+  {
+    label: "今天",
+    resolve() {
+      const now = new Date();
+      return {
+        startDate: formatDateTimeInputValue(startOfDay(now)),
+        endDate: formatDateTimeInputValue(endOfDay(now))
+      };
+    }
+  },
+  {
+    label: "近 7 天",
+    resolve() {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 6);
+      return {
+        startDate: formatDateTimeInputValue(startOfDay(start)),
+        endDate: formatDateTimeInputValue(endOfDay(end))
+      };
+    }
+  },
+  {
+    label: "本周",
+    resolve() {
+      const start = new Date();
+      const day = start.getDay();
+      start.setDate(start.getDate() - day);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      return {
+        startDate: formatDateTimeInputValue(startOfDay(start)),
+        endDate: formatDateTimeInputValue(endOfDay(end))
+      };
+    }
+  },
+  {
+    label: "近 30 天",
+    resolve() {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 29);
+      return {
+        startDate: formatDateTimeInputValue(startOfDay(start)),
+        endDate: formatDateTimeInputValue(endOfDay(end))
+      };
+    }
+  },
+  {
+    label: "本月",
+    resolve() {
+      const end = new Date();
+      const start = new Date(end.getFullYear(), end.getMonth(), 1);
+      const monthEnd = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+      return {
+        startDate: formatDateTimeInputValue(startOfDay(start)),
+        endDate: formatDateTimeInputValue(endOfDay(monthEnd))
+      };
+    }
+  }
+];
+
+function startOfDay(value: Date) {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfDay(value: Date) {
+  const next = new Date(value);
+  next.setHours(23, 59, 59, 0);
+  return next;
+}
+
+function padDateTimePart(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function formatDateTimeInputValue(value: Date) {
+  const year = value.getFullYear();
+  const month = padDateTimePart(value.getMonth() + 1);
+  const day = padDateTimePart(value.getDate());
+  const hours = padDateTimePart(value.getHours());
+  const minutes = padDateTimePart(value.getMinutes());
+  const seconds = padDateTimePart(value.getSeconds());
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+function formatDateTimeDisplayValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace("T", " ");
+}
+
+function describeHistoryDateRange(startDate: string, endDate: string) {
+  if (!startDate && !endDate) {
+    return "全部时间";
+  }
+  if (startDate && endDate) {
+    return `${formatDateTimeDisplayValue(startDate)} ~ ${formatDateTimeDisplayValue(endDate)}`;
+  }
+  if (startDate) {
+    return `${formatDateTimeDisplayValue(startDate)} 起`;
+  }
+  return `${formatDateTimeDisplayValue(endDate)} 止`;
+}
+
 function routeLabel(pathname: string) {
   if (pathname === "/nodes") {
     return "节点结果";
   }
   if (pathname.startsWith("/nodes/")) {
+    if (pathname.endsWith("/compare")) {
+      return "快照对比";
+    }
     if (pathname.endsWith("/history")) {
       return "历史记录";
     }
@@ -142,7 +257,7 @@ function useNodeHistoryData(
   uuid: string,
   targetID: number | null,
   onUnauthorized: () => void,
-  options?: { limit?: number; page?: number; pageSize?: number }
+  options?: { limit?: number; page?: number; pageSize?: number; startDate?: string; endDate?: string }
 ) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -179,6 +294,12 @@ function useNodeHistoryData(
         } else {
           query.set("page", String(options?.page && options.page > 0 ? options.page : 1));
           query.set("page_size", String(options?.pageSize && options.pageSize > 0 ? options.pageSize : 20));
+        }
+        if (options?.startDate?.trim()) {
+          query.set("start_date", options.startDate.trim());
+        }
+        if (options?.endDate?.trim()) {
+          query.set("end_date", options.endDate.trim());
         }
         const response = await apiRequest<NodeHistoryListResponse>(
           `/nodes/${uuid}/history${query.size > 0 ? `?${query.toString()}` : ""}`
@@ -217,7 +338,7 @@ function useNodeHistoryData(
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized, options?.limit, options?.page, options?.pageSize, reloadToken, targetID, uuid]);
+  }, [onUnauthorized, options?.endDate, options?.limit, options?.page, options?.pageSize, options?.startDate, reloadToken, targetID, uuid]);
 
   return {
     loading,
@@ -228,6 +349,170 @@ function useNodeHistoryData(
     page,
     pageSize,
     totalPages,
+    reload: () => setReloadToken((value) => value + 1)
+  };
+}
+
+function useNodeHistoryDetailData(
+  uuid: string,
+  targetID: number | null,
+  historyID: number | null,
+  onUnauthorized: () => void,
+  options?: { startDate?: string; endDate?: string }
+) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [detail, setDetail] = useState<NodeHistoryDetailResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid || !historyID) {
+        setDetail(null);
+        setError("");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
+        if (options?.startDate?.trim()) {
+          query.set("start_date", options.startDate.trim());
+        }
+        if (options?.endDate?.trim()) {
+          query.set("end_date", options.endDate.trim());
+        }
+        const response = await apiRequest<NodeHistoryDetailResponse>(
+          `/nodes/${uuid}/history/${historyID}${query.size > 0 ? `?${query.toString()}` : ""}`
+        );
+        if (cancelled) {
+          return;
+        }
+        setDetail(response);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          onUnauthorized();
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载历史快照失败");
+        setDetail(null);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [historyID, onUnauthorized, options?.endDate, options?.startDate, targetID, uuid]);
+
+  return { loading, error, detail };
+}
+
+function useAllNodeHistoryData(
+  uuid: string,
+  targetID: number | null,
+  onUnauthorized: () => void,
+  options?: { startDate?: string; endDate?: string }
+) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<NodeHistoryEntry[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid) {
+        setError("节点不存在");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const pageSize = 100;
+        let page = 1;
+        let totalPages = 1;
+        const collected: NodeHistoryEntry[] = [];
+
+        while (page <= totalPages) {
+          const query = new URLSearchParams();
+          if (targetID) {
+            query.set("target_id", String(targetID));
+          }
+          query.set("page", String(page));
+          query.set("page_size", String(pageSize));
+          if (options?.startDate?.trim()) {
+            query.set("start_date", options.startDate.trim());
+          }
+          if (options?.endDate?.trim()) {
+            query.set("end_date", options.endDate.trim());
+          }
+          const response = await apiRequest<NodeHistoryListResponse>(
+            `/nodes/${uuid}/history${query.size > 0 ? `?${query.toString()}` : ""}`
+          );
+          if (cancelled) {
+            return;
+          }
+          collected.push(...(response.items ?? []));
+          totalPages = response.total_pages ?? 0;
+          if (totalPages <= 0) {
+            break;
+          }
+          page += 1;
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setItems(collected);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          onUnauthorized();
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载历史记录失败");
+        setItems([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onUnauthorized, options?.endDate, options?.startDate, reloadToken, targetID, uuid]);
+
+  return {
+    loading,
+    error,
+    items,
     reload: () => setReloadToken((value) => value + 1)
   };
 }
@@ -790,26 +1075,13 @@ function resolveReportEndpointURL(me: MeResponse, path: string) {
   return `${base}${path}`;
 }
 
-function resolveComposeDevURL(me: MeResponse, path: string) {
-  const publicBaseURL = (me.public_base_url ?? "").replace(/\/$/, "");
-  if (me.app_env !== "development" || publicBaseURL) {
-    return "";
-  }
-  return `http://proxy:8080${path}`;
-}
-
 function buildInstallCommand(installerURL: string, reporterToken: string) {
   return `curl -fsSL -H 'X-IPQ-Reporter-Token: ${reporterToken}' '${installerURL}' | sudo bash`;
 }
 
 function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
-  const reportEndpointURL = resolveReportEndpointURL(props.me, props.detail.report_config.endpoint_path);
   const installerURL = resolveReportEndpointURL(props.me, props.detail.report_config.installer_path);
   const installCommand = buildInstallCommand(installerURL, props.detail.report_config.reporter_token);
-  const composeReportEndpointURL = resolveComposeDevURL(props.me, props.detail.report_config.endpoint_path);
-  const composeInstallerURL = resolveComposeDevURL(props.me, props.detail.report_config.installer_path);
-  const composeInstallCommand =
-    composeInstallerURL === "" ? "" : buildInstallCommand(composeInstallerURL, props.detail.report_config.reporter_token);
 
   async function handleCopy(value: string, successText: string) {
     try {
@@ -821,14 +1093,18 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
   }
 
   return (
-    <details className="panel details-panel" data-node-report-config="true">
-      <summary>节点上报设置</summary>
-      <div className="section report-config">
-        <div className="summary-section">
-          <div className="summary-head">
-            <strong>目标 IP</strong>
-          </div>
+    <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-node-report-config="true">
+      <div className="section space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
           {props.detail.report_config.target_ips.length > 0 ? (
+            <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
+          ) : (
+            <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
+          )}
+        </div>
+        {props.detail.report_config.target_ips.length > 0 ? (
+          <>
             <div className="flex flex-wrap gap-2">
               {props.detail.report_config.target_ips.map((ip) => (
                 <span
@@ -839,269 +1115,267 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
                 </span>
               ))}
             </div>
-          ) : (
-            <p className="text-sm leading-6 text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
-          )}
-        </div>
-        {props.detail.report_config.target_ips.length > 0 ? (
-          <div className="summary-section">
-            <div className="summary-head">
-              <strong>接入命令</strong>
-              <button className="button ghost" onClick={() => void handleCopy(installCommand, "接入命令已复制。")} type="button">
-                复制
-              </button>
-            </div>
-            <pre className="code-block code-block-compact">{installCommand}</pre>
-          </div>
-        ) : null}
-        {composeInstallCommand ? (
-          <div className="summary-section">
-            <div className="summary-head">
-              <strong>容器网络命令（仅联调）</strong>
-              <button
-                className="button ghost"
-                onClick={() => void handleCopy(composeInstallCommand, "容器网络接入命令已复制。")}
-                type="button"
-              >
-                复制
-              </button>
-            </div>
-            <pre className="code-block code-block-compact">{composeInstallCommand}</pre>
-          </div>
-        ) : null}
-        <div className="summary-section">
-          <div className="summary-head">
-            <strong>上报地址</strong>
-            <button className="button ghost" onClick={() => void handleCopy(reportEndpointURL, "上报地址已复制。")} type="button">
-              复制
-            </button>
-          </div>
-          <div className="code-block">{reportEndpointURL}</div>
-        </div>
-        {composeReportEndpointURL ? (
-          <div className="summary-section">
-            <div className="summary-head">
-              <strong>容器网络地址</strong>
-              <button
-                className="button ghost"
-                onClick={() => void handleCopy(composeReportEndpointURL, "容器网络上报地址已复制。")}
-                type="button"
-              >
-                复制
-              </button>
-            </div>
-            <div className="code-block">{composeReportEndpointURL}</div>
-          </div>
-        ) : null}
-        <div className="summary-section">
-          <div className="summary-head">
-            <strong>Reporter Token</strong>
-            <button
-              className="button ghost"
-              onClick={() => void handleCopy(props.detail.report_config.reporter_token, "Reporter Token 已复制。")}
-              type="button"
-            >
-              复制
-            </button>
-          </div>
-          <div className="code-block">{props.detail.report_config.reporter_token}</div>
-        </div>
-      </div>
-    </details>
-  );
-}
-
-function HistoryPreviewSection(props: { items: NodeHistoryEntry[]; historyPath: string; loading: boolean }) {
-  return (
-    <div className="section space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-slate-900">历史记录</h2>
-          <p className="text-sm text-slate-500">这里仅展示最近几条，完整历史和字段变化请进入独立页面查看。</p>
-        </div>
-        <Link
-          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-          to={props.historyPath}
-        >
-          查看完整历史
-        </Link>
-      </div>
-      {props.loading ? (
-        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
-      ) : props.items.length === 0 ? (
-        <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-          当前目标 IP 还没有历史记录。
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {props.items.map((item) => (
-            <section key={item.id} className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-900">{item.summary || "历史上报"}</p>
-                  <p className="text-xs text-slate-500">{formatDateTime(item.recorded_at)}</p>
-                </div>
-                <Link
-                  className="inline-flex h-8 items-center rounded-full border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-600"
-                  to={`${props.historyPath}${props.historyPath.includes("?") ? "&" : "?"}history_id=${item.id}`}
-                >
-                  查看快照
-                </Link>
+            <div className="summary-section">
+              <div className="summary-head">
+                <strong>接入命令</strong>
+                <button className="button ghost" onClick={() => void handleCopy(installCommand, "接入命令已复制。")} type="button">
+                  复制
+                </button>
               </div>
-            </section>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HistoryTimeline(props: {
-  items: NodeHistoryEntry[];
-  selectedID: number | null;
-  onSelect: (historyID: number) => void;
-}) {
-  return (
-    <div className="grid gap-3">
-      {props.items.map((item, index) => (
-        <button
-          key={item.id}
-          className={[
-            "w-full rounded-[18px] border px-4 py-4 text-left transition",
-            props.selectedID === item.id
-              ? "border-indigo-200 bg-indigo-50"
-              : "border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50"
-          ].join(" ")}
-          onClick={() => props.onSelect(item.id)}
-          type="button"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-slate-900">{item.summary || "历史上报"}</p>
-              <p className="text-xs text-slate-500">{formatDateTime(item.recorded_at)}</p>
+              <pre className="code-block code-block-compact">{installCommand}</pre>
             </div>
-            {index === 0 ? (
-              <span className="inline-flex h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
-                最新
-              </span>
-            ) : null}
-          </div>
-        </button>
-      ))}
-    </div>
+          </>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
-function HistoryCompareSummary(props: { current: NodeHistoryEntry; previous?: NodeHistoryEntry | null }) {
-  const diff = compareHistoryResults(props.current.result, props.previous?.result);
-  const [selectedGroup, setSelectedGroup] = useState("全部");
-  const [meaningfulOnly, setMeaningfulOnly] = useState(true);
-  const availableGroups = ["全部", ...Array.from(new Set(diff.items.map((item) => item.group))).sort((left, right) => left.localeCompare(right))];
-  const filteredItems = filterHistoryDiffItems(diff.items, {
-    group: selectedGroup,
-    meaningfulOnly
-  });
+function HistoryChangeFiltersBar(props: {
+  startDate: string;
+  endDate: string;
+  targetOptions: Array<{ id: number; label: string }>;
+  selectedTargetID: number | null;
+  fieldOptions: Array<{ id: string; label: string }>;
+  selectedFieldID: string;
+  onApply: (next: { startDate: string; endDate: string }) => void;
+  onTargetChange: (targetID: number | null) => void;
+  onFieldChange: (fieldID: string) => void;
+}) {
+  const [startDate, setStartDate] = useState(props.startDate);
+  const [endDate, setEndDate] = useState(props.endDate);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const rangePanelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setStartDate(props.startDate);
+  }, [props.startDate]);
+
+  useEffect(() => {
+    setEndDate(props.endDate);
+  }, [props.endDate]);
+
+  useEffect(() => {
+    if (!rangeOpen) {
+      return undefined;
+    }
+    function handlePointerDown(event: MouseEvent) {
+      if (rangePanelRef.current && !rangePanelRef.current.contains(event.target as Node)) {
+        setRangeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [rangeOpen]);
+
+  const selectedTargetLabel =
+    props.selectedTargetID === null
+      ? "所有 IP"
+      : props.targetOptions.find((option) => option.id === props.selectedTargetID)?.label ?? "所有 IP";
+
+  const selectedFieldLabel =
+    props.selectedFieldID === ""
+      ? "全部字段"
+      : props.fieldOptions.find((option) => option.id === props.selectedFieldID)?.label ?? "全部字段";
 
   return (
-    <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-slate-900">变化摘要</h2>
-          <p className="text-sm text-slate-500">
-            {props.previous ? `对比上一条记录：${formatDateTime(props.previous.recorded_at)}` : "当前条目没有更早的历史记录可对比。"}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="inline-flex h-8 items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
-            新增 {diff.added}
-          </span>
-          <span className="inline-flex h-8 items-center rounded-full border border-amber-200 bg-amber-50 px-3 text-xs font-medium text-amber-700">
-            变化 {diff.changed}
-          </span>
-          <span className="inline-flex h-8 items-center rounded-full border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700">
-            移除 {diff.removed}
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {availableGroups.map((group) => (
+    <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+      <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.8fr)_minmax(180px,220px)_minmax(220px,1fr)]">
+        <div className="relative" ref={rangePanelRef}>
           <button
-            key={group}
             className={[
-              "inline-flex h-8 items-center rounded-full border px-3 text-xs font-medium transition",
-              selectedGroup === group
-                ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+              "flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm outline-none transition focus:ring-2 focus:ring-indigo-100",
+              rangeOpen || props.startDate || props.endDate
+                ? "border-indigo-300 text-slate-900 focus:border-indigo-300"
+                : "border-slate-200 text-slate-700 hover:border-indigo-300 focus:border-indigo-300"
             ].join(" ")}
-            onClick={() => setSelectedGroup(group)}
+            onClick={() => setRangeOpen((value) => !value)}
             type="button"
           >
-            {group}
+            <span className="truncate">{describeHistoryDateRange(startDate, endDate)}</span>
+            <span className="ml-3 shrink-0 text-slate-400">{rangeOpen ? "收起" : "展开"}</span>
           </button>
-        ))}
-        <button
-          className={[
-            "inline-flex h-8 items-center rounded-full border px-3 text-xs font-medium transition",
-            meaningfulOnly
-              ? "border-slate-900 bg-slate-900 text-white"
-              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-          ].join(" ")}
-          onClick={() => setMeaningfulOnly((value) => !value)}
-          type="button"
-        >
-          {meaningfulOnly ? "仅关键字段" : "显示全部字段"}
-        </button>
-      </div>
-
-      {diff.items.length === 0 ? (
-        <div className="mt-4 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-          与上一条相比，没有发现字段变化。
-        </div>
-      ) : filteredItems.length === 0 ? (
-        <div className="mt-4 rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-          当前筛选条件下没有可显示的变化项。
-        </div>
-      ) : (
-        <div className="mt-4 grid gap-3">
-          {filteredItems.slice(0, 24).map((item) => (
-            <div key={`${item.kind}:${item.path}`} className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-900">{item.path}</p>
-                  <p className="text-xs text-slate-400">{item.group}</p>
+          {rangeOpen ? (
+            <div className="absolute left-0 top-full z-20 mt-2 w-[min(720px,calc(100vw-8rem))] rounded-[18px] border border-slate-200 bg-white p-4 shadow-xl">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-900">选择时间范围</p>
+                  <p className="text-xs text-slate-500">支持快捷范围，也可以手动指定开始和结束日期。</p>
                 </div>
-                <span
-                  className={[
-                    "inline-flex h-7 items-center rounded-full px-3 text-xs font-medium",
-                    item.kind === "added"
-                      ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : item.kind === "removed"
-                        ? "border border-rose-200 bg-rose-50 text-rose-700"
-                        : "border border-amber-200 bg-amber-50 text-amber-700"
-                  ].join(" ")}
-                >
-                  {item.kind === "added" ? "新增" : item.kind === "removed" ? "移除" : "变化"}
-                </span>
               </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                <div className="space-y-1">
-                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">上一条</p>
-                  <div className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">{item.previous}</div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">当前条目</p>
-                  <div className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900">{item.current}</div>
-                </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-2 text-sm text-slate-700">
+                  <span>开始日期</span>
+                  <input
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                    type="datetime-local"
+                    step={1}
+                    value={startDate}
+                    onChange={(event) => setStartDate(event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-2 text-sm text-slate-700">
+                  <span>结束日期</span>
+                  <input
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                    type="datetime-local"
+                    step={1}
+                    value={endDate}
+                    onChange={(event) => setEndDate(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {historyDateRangePresets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600"
+                    onClick={() => {
+                      const next = preset.resolve();
+                      setStartDate(next.startDate);
+                      setEndDate(next.endDate);
+                    }}
+                    type="button"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                  onClick={() => {
+                    props.onApply({ startDate, endDate });
+                    setRangeOpen(false);
+                  }}
+                  type="button"
+                >
+                  应用筛选
+                </button>
+                <button
+                  className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                  onClick={() => {
+                    setStartDate("");
+                    setEndDate("");
+                    props.onApply({ startDate: "", endDate: "" });
+                    setRangeOpen(false);
+                  }}
+                  type="button"
+                >
+                  清空
+                </button>
               </div>
             </div>
-          ))}
-          {filteredItems.length > 24 ? (
-            <p className="text-sm text-slate-500">仅展示前 24 处变化，剩余 {filteredItems.length - 24} 处变化未展开。</p>
           ) : null}
         </div>
-      )}
-    </section>
+        <label className="grid gap-2 text-sm text-slate-700">
+          <select
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            value={props.selectedTargetID ?? ""}
+            onChange={(event) => {
+              const value = event.target.value.trim();
+              props.onTargetChange(value ? Number(value) : null);
+            }}
+          >
+            <option value="">所有 IP</option>
+            {props.targetOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-2 text-sm text-slate-700">
+          <select
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            value={props.selectedFieldID}
+            onChange={(event) => props.onFieldChange(event.target.value)}
+          >
+            <option value="">全部字段</option>
+            {props.fieldOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+        <span>当前筛选：</span>
+        <span>时间 {describeHistoryDateRange(props.startDate, props.endDate)}</span>
+        <span>IP {selectedTargetLabel}</span>
+        <span>字段 {selectedFieldLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function HistoryChangeList(props: {
+  items: Array<{
+    id: string;
+    targetIP: string;
+    groupPath: string[];
+    fieldLabel: string;
+    previous: { text: string; tone: string; missingKind?: "missing" };
+    current: { text: string; tone: string; missingKind?: "missing" };
+    recordedAt: string;
+    previousRecordedAt: string;
+  }>;
+}) {
+  if (props.items.length === 0) {
+    return (
+      <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+        当前筛选条件下没有历史变化。
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-sm">
+      <div className="divide-y divide-slate-200">
+        {props.items.map((item) => (
+          <div
+            key={item.id}
+            className="grid grid-cols-[160px_minmax(0,1fr)] gap-4 px-4 py-4"
+            data-history-change-row="true"
+          >
+            <div className="pt-1 text-sm text-slate-500">{formatDateTime(item.recordedAt)}</div>
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-slate-700">
+                <span className="inline-flex min-h-7 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
+                  {item.targetIP}
+                </span>
+                <span className="font-medium text-slate-900">
+                  {[...item.groupPath, item.fieldLabel].filter(Boolean).join(" / ")}：
+                </span>
+                {renderDisplayValueBadge({
+                  id: "",
+                  path: "",
+                  groupPath: [],
+                  label: item.fieldLabel,
+                  text: item.previous.text,
+                  tone: item.previous.tone as "good" | "bad" | "warn" | "muted" | "neutral",
+                  missingKind: item.previous.missingKind
+                })}
+                <span className="font-medium text-slate-300">-&gt;</span>
+                {renderDisplayValueBadge({
+                  id: "",
+                  path: "",
+                  groupPath: [],
+                  label: item.fieldLabel,
+                  text: item.current.text,
+                  tone: item.current.tone as "good" | "bad" | "warn" | "muted" | "neutral",
+                  missingKind: item.current.missingKind
+                })}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+                <span>旧值时间 {formatDateTime(item.previousRecordedAt)}</span>
+                <span>新值时间 {formatDateTime(item.recordedAt)}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1111,11 +1385,32 @@ function HistoryPagination(props: {
   total: number;
   pageSize: number;
   onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }) {
+  const [jumpValue, setJumpValue] = useState(String(props.page));
+
+  useEffect(() => {
+    setJumpValue(String(props.page));
+  }, [props.page]);
+
   if (props.totalPages <= 1) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">共 {props.total} 条历史记录。</p>
+        <p className="text-sm text-slate-500">共 {props.total} 条变化记录。</p>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-500">每页</span>
+          <select
+            className="h-9 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            value={props.pageSize}
+            onChange={(event) => props.onPageSizeChange(Number(event.target.value))}
+          >
+            {[10, 20, 50, 100].map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
     );
   }
@@ -1123,9 +1418,21 @@ function HistoryPagination(props: {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-slate-500">
-        第 {props.page} / {props.totalPages} 页，共 {props.total} 条，每页 {props.pageSize} 条。
+        第 {props.page} / {props.totalPages} 页，共 {props.total} 条变化记录，每页 {props.pageSize} 条。
       </p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-500">每页</span>
+        <select
+          className="h-9 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+          value={props.pageSize}
+          onChange={(event) => props.onPageSizeChange(Number(event.target.value))}
+        >
+          {[10, 20, 50, 100].map((size) => (
+            <option key={size} value={size}>
+              {size}
+            </option>
+          ))}
+        </select>
         <button
           className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => props.onPageChange(props.page - 1)}
@@ -1142,6 +1449,139 @@ function HistoryPagination(props: {
         >
           下一页
         </button>
+        <input
+          className="h-9 w-20 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+          value={jumpValue}
+          onChange={(event) => setJumpValue(event.target.value.replace(/[^\d]/g, ""))}
+          inputMode="numeric"
+        />
+        <button
+          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+          onClick={() => {
+            const nextPage = Number.parseInt(jumpValue, 10);
+            if (!Number.isNaN(nextPage) && nextPage >= 1 && nextPage <= props.totalPages) {
+              props.onPageChange(nextPage);
+            }
+          }}
+          type="button"
+        >
+          跳转
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HistoryDateFilterBar(props: {
+  startDate: string;
+  endDate: string;
+  onApply: (startDate: string, endDate: string) => void;
+}) {
+  const [startDate, setStartDate] = useState(props.startDate);
+  const [endDate, setEndDate] = useState(props.endDate);
+
+  useEffect(() => {
+    setStartDate(props.startDate);
+  }, [props.startDate]);
+
+  useEffect(() => {
+    setEndDate(props.endDate);
+  }, [props.endDate]);
+
+  return (
+    <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="grid gap-2 text-sm text-slate-700">
+          <span>开始日期</span>
+          <input
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            type="date"
+            value={startDate}
+            onChange={(event) => setStartDate(event.target.value)}
+          />
+        </label>
+        <label className="grid gap-2 text-sm text-slate-700">
+          <span>结束日期</span>
+          <input
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            type="date"
+            value={endDate}
+            onChange={(event) => setEndDate(event.target.value)}
+          />
+        </label>
+        <button
+          className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+          onClick={() => props.onApply(startDate, endDate)}
+          type="button"
+        >
+          应用筛选
+        </button>
+        <button
+          className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+          onClick={() => props.onApply("", "")}
+          type="button"
+        >
+          清空
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CompareSlider(props: {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid gap-2 text-sm text-slate-700">
+      <span>{props.label}</span>
+      <input
+        type="range"
+        min={props.min}
+        max={props.max}
+        value={props.value}
+        onChange={(event) => props.onChange(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function HistoryCompareTable(props: {
+  rows: ReturnType<typeof buildHistoryCompareRows>;
+  leftRecordedAt: string;
+  rightRecordedAt: string;
+}) {
+  if (props.rows.length === 0) {
+    return (
+      <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+        当前没有可对比的字段。
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm">
+      <div className="grid grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(0,1fr)] gap-px rounded-[24px] bg-slate-200 p-px">
+        <div className="rounded-tl-[24px] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">字段</div>
+        <div className="bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">{formatDateTime(props.leftRecordedAt)}</div>
+        <div className="rounded-tr-[24px] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">{formatDateTime(props.rightRecordedAt)}</div>
+        {props.rows.map((row) => (
+          <Fragment key={row.fieldId}>
+            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
+              <p className="text-sm font-medium text-slate-900">{row.fieldLabel}</p>
+              <p className="text-xs text-slate-500">{row.groupPath.join(" / ")}</p>
+            </div>
+            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
+              {renderDisplayValueBadge(row.left)}
+            </div>
+            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
+              {renderDisplayValueBadge(row.right)}
+            </div>
+          </Fragment>
+        ))}
       </div>
     </div>
   );
@@ -1243,11 +1683,6 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const [targetError, setTargetError] = useState("");
   const [targetSaving, setTargetSaving] = useState(false);
   const { loading, error, errorStatus, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
-  const {
-    loading: historyPreviewLoading,
-    items: historyPreviewItems,
-    reload: reloadHistoryPreview
-  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, { limit: 5 });
 
   function replaceTargetSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -1272,7 +1707,6 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       setTargetInput("");
       replaceTargetSelection(created.id);
       reload();
-      reloadHistoryPreview();
     } catch (targetCreateError) {
       if (targetCreateError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -1291,7 +1725,6 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
       await apiRequest(`/nodes/${uuid}/targets/${targetID}`, { method: "DELETE" });
       replaceTargetSelection(null);
       reload();
-      reloadHistoryPreview();
     } catch (targetDeleteError) {
       if (targetDeleteError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -1327,7 +1760,6 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         body: JSON.stringify({ target_ids: next })
       });
       reload();
-      reloadHistoryPreview();
     } catch (reorderError) {
       if (reorderError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -1339,16 +1771,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     }
   }
 
-  const historyPath = (() => {
-    const params = new URLSearchParams();
-    if (detail?.current_target?.id) {
-      params.set("target_id", String(detail.current_target.id));
-    } else if (selectedTargetID) {
-      params.set("target_id", String(selectedTargetID));
-    }
-    const query = params.toString();
-    return `/nodes/${uuid}/history${query ? `?${query}` : ""}`;
-  })();
+  const historyPath = `/nodes/${uuid}/history`;
 
   if (loading) {
     return <NodeDetailLoading />;
@@ -1382,7 +1805,19 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         title={detail.name}
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
         backTo={isEmbed ? undefined : "/nodes"}
+        actions={
+          !isEmbed ? (
+            <Link
+              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
+              to={historyPath}
+            >
+              查看历史记录
+            </Link>
+          ) : undefined
+        }
       />
+
+      {!isEmbed ? <ReportConfigSection me={props.me} detail={detail} /> : null}
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section space-y-4">
@@ -1450,15 +1885,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
                 />
               </div>
             </div>
-
-            {!isEmbed ? (
-              <HistoryPreviewSection items={historyPreviewItems} historyPath={historyPath} loading={historyPreviewLoading} />
-            ) : null}
           </>
-        ) : null}
-
-        {!isEmbed ? (
-          <ReportConfigSection me={props.me} detail={detail} />
         ) : null}
       </section>
     </section>
@@ -1471,37 +1898,49 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
-  const selectedHistoryID = Number(searchParams.get("history_id") || "") || null;
   const historyPage = Number(searchParams.get("page") || "") || 1;
-  const historyPageSize = 20;
+  const startDate = searchParams.get("start_date")?.trim() || "";
+  const endDate = searchParams.get("end_date")?.trim() || "";
+  const [selectedFieldID, setSelectedFieldID] = useState("");
+  const [historyPageSize, setHistoryPageSize] = useState(10);
   const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
   const {
     loading: historyLoading,
     error: historyError,
     items: historyItems,
-    total: historyTotal,
-    page: currentHistoryPage,
-    pageSize: currentHistoryPageSize,
-    totalPages: historyTotalPages,
     reload: reloadHistory
-  } = useNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, { page: historyPage, pageSize: historyPageSize });
+  } = useAllNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, {
+    startDate,
+    endDate
+  });
 
-  function replaceSelection(nextTargetID: number | null, nextHistoryID?: number | null, nextPage?: number | null) {
+  useEffect(() => {
+    setSelectedFieldID("");
+  }, [uuid, selectedTargetID, startDate, endDate]);
+
+  function replaceSelection(nextTargetID: number | null, nextPage?: number | null, nextFilters?: { startDate?: string; endDate?: string }) {
     const params = new URLSearchParams(searchParams);
     if (nextTargetID) {
       params.set("target_id", String(nextTargetID));
     } else {
       params.delete("target_id");
     }
-    if (nextHistoryID) {
-      params.set("history_id", String(nextHistoryID));
-    } else {
-      params.delete("history_id");
-    }
     if (nextPage && nextPage > 1) {
       params.set("page", String(nextPage));
     } else {
       params.delete("page");
+    }
+    const resolvedStartDate = nextFilters?.startDate ?? startDate;
+    const resolvedEndDate = nextFilters?.endDate ?? endDate;
+    if (resolvedStartDate.trim()) {
+      params.set("start_date", resolvedStartDate.trim());
+    } else {
+      params.delete("start_date");
+    }
+    if (resolvedEndDate.trim()) {
+      params.set("end_date", resolvedEndDate.trim());
+    } else {
+      params.delete("end_date");
     }
     const query = params.toString();
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
@@ -1523,33 +1962,218 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
     );
   }
 
-  const selectedEntry =
-    historyItems.find((item) => item.id === selectedHistoryID) ??
-    historyItems[0] ??
-    null;
-  const selectedIndex = selectedEntry ? historyItems.findIndex((item) => item.id === selectedEntry.id) : -1;
-  const previousEntry = selectedIndex >= 0 ? historyItems[selectedIndex + 1] ?? null : null;
   const detailBackTo = `/nodes/${uuid}${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
+  const compareTargetID = selectedTargetID ?? detail.current_target?.id ?? null;
+  const historyPathForCompare = `/nodes/${uuid}/compare${compareTargetID ? `?target_id=${compareTargetID}` : ""}`;
+  const changeEvents = buildHistoryFieldChangeEvents(historyItems);
+  const fieldOptions = buildHistoryFieldOptions(changeEvents);
+  const filteredChangeEvents = selectedFieldID
+    ? changeEvents.filter((item) => item.fieldId === selectedFieldID)
+    : changeEvents;
+  const historyTotal = filteredChangeEvents.length;
+  const historyTotalPages = historyTotal > 0 ? Math.ceil(historyTotal / historyPageSize) : 0;
+  const currentHistoryPage = historyTotalPages > 0 ? Math.min(Math.max(historyPage, 1), historyTotalPages) : 1;
+  const pageStart = (currentHistoryPage - 1) * historyPageSize;
+  const currentPageItems = filteredChangeEvents.slice(pageStart, pageStart + historyPageSize);
 
   return (
     <section className="space-y-6">
       <PageHeader
         title={`${detail.name} 历史记录`}
+        subtitle={selectedTargetID ? `当前查看 ${detail.current_target?.ip ?? "目标 IP"}` : "当前查看所有目标 IP 的变化"}
+        backTo={detailBackTo}
+        actions={
+          compareTargetID ? (
+            <Link
+              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
+              to={historyPathForCompare}
+            >
+              快照对比
+            </Link>
+          ) : undefined
+        }
+      />
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+        {historyError ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
+              {historyError}
+            </div>
+          </div>
+        ) : null}
+
+        {detail.targets.length === 0 ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              当前节点还没有目标 IP，请先回到详情页添加。
+            </div>
+          </div>
+        ) : historyLoading ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
+          </div>
+        ) : historyItems.length === 0 ? (
+          <div className="section">
+            <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              当前目标 IP 还没有历史记录。
+            </div>
+          </div>
+        ) : (
+          <div className="section space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-slate-900">字段变化</h2>
+                <p className="text-sm text-slate-500">按字段独立记录变化，默认按时间倒序展示。</p>
+              </div>
+              <button
+                className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                onClick={() => {
+                  reload();
+                  reloadHistory();
+                }}
+                type="button"
+              >
+                刷新
+              </button>
+            </div>
+
+            <HistoryChangeFiltersBar
+              startDate={startDate}
+              endDate={endDate}
+              targetOptions={detail.targets.map((item) => ({ id: item.id, label: item.ip }))}
+              selectedTargetID={selectedTargetID}
+              fieldOptions={fieldOptions}
+              selectedFieldID={selectedFieldID}
+              onApply={({ startDate: nextStartDate, endDate: nextEndDate }) =>
+                replaceSelection(selectedTargetID, 1, {
+                  startDate: nextStartDate,
+                  endDate: nextEndDate
+                })
+              }
+              onTargetChange={(targetID) => replaceSelection(targetID, 1)}
+              onFieldChange={(fieldID) => {
+                setSelectedFieldID(fieldID);
+                replaceSelection(selectedTargetID, 1);
+              }}
+            />
+
+            <HistoryPagination
+              page={currentHistoryPage}
+              totalPages={historyTotalPages}
+              total={historyTotal}
+              pageSize={historyPageSize}
+              onPageChange={(page) => replaceSelection(selectedTargetID, page)}
+              onPageSizeChange={(pageSize) => {
+                setHistoryPageSize(pageSize);
+                replaceSelection(selectedTargetID, 1);
+              }}
+            />
+
+            <HistoryChangeList items={currentPageItems} />
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
+  const { uuid = "" } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
+  const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const { loading: historyLoading, error: historyError, items: historyItems, reload: reloadHistory } = useAllNodeHistoryData(
+    uuid,
+    selectedTargetID,
+    props.onUnauthorized
+  );
+  const [startIndex, setStartIndex] = useState(0);
+  const [endIndex, setEndIndex] = useState(0);
+
+  function replaceSelection(targetID: number | null) {
+    const params = new URLSearchParams(searchParams);
+    if (targetID) {
+      params.set("target_id", String(targetID));
+    } else {
+      params.delete("target_id");
+    }
+    const query = params.toString();
+    navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
+  }
+
+  const orderedHistory = [...historyItems].sort(
+    (left, right) => new Date(left.recorded_at).getTime() - new Date(right.recorded_at).getTime()
+  );
+
+  useEffect(() => {
+    if (orderedHistory.length === 0) {
+      setStartIndex(0);
+      setEndIndex(0);
+      return;
+    }
+    setStartIndex(0);
+    setEndIndex(orderedHistory.length - 1);
+  }, [detail?.current_target?.id, orderedHistory.length]);
+
+  if (loading) {
+    return <NodeDetailLoading />;
+  }
+
+  if (error || !detail) {
+    return (
+      <NodePageError
+        title="快照对比"
+        subtitle={error || "节点不存在"}
+        backTo="/nodes"
+        error={error || "节点不存在。"}
+        onRetry={reload}
+      />
+    );
+  }
+
+  const maxIndex = Math.max(orderedHistory.length - 1, 0);
+  const safeStartIndex = Math.min(Math.max(startIndex, 0), maxIndex);
+  const safeEndIndex = Math.max(safeStartIndex, Math.min(Math.max(endIndex, 0), maxIndex));
+  const leftEntry = orderedHistory[safeStartIndex] ?? null;
+  const rightEntry = orderedHistory[safeEndIndex] ?? null;
+  const compareRows =
+    leftEntry && rightEntry ? buildHistoryCompareRows(leftEntry.result, rightEntry.result) : [];
+  const detailBackTo = `/nodes/${uuid}/history${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
+
+  return (
+    <section className="space-y-6">
+      <PageHeader
+        title={`${detail.name} 快照对比`}
         subtitle={detail.current_target ? `当前查看 ${detail.current_target.ip}` : "请选择一个目标 IP"}
         backTo={detailBackTo}
       />
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section space-y-4">
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
-            <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的独立历史。</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
+              <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的独立快照对比。</p>
+            </div>
+            <button
+              className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+              onClick={() => {
+                reload();
+                reloadHistory();
+              }}
+              type="button"
+            >
+              刷新
+            </button>
           </div>
           {detail.targets.length > 0 ? (
             <TargetTabs
               items={detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
               selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
-              onSelect={(targetID) => replaceSelection(targetID, null, 1)}
+              onSelect={(targetID) => replaceSelection(targetID)}
             />
           ) : (
             <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
@@ -1570,69 +2194,57 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
           <div className="section">
             <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
           </div>
-        ) : historyItems.length === 0 ? (
+        ) : orderedHistory.length < 2 ? (
           <div className="section">
             <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              当前目标 IP 还没有历史记录。
+              当前目标 IP 至少需要两条历史记录，才能进行快照对比。
             </div>
           </div>
         ) : (
-          <div className="section grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base font-semibold text-slate-900">历史时间线</h2>
-                <button
-                  className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-                  onClick={() => {
-                    reload();
-                    reloadHistory();
-                  }}
-                  type="button"
-                >
-                  刷新
-                </button>
+          <div className="section space-y-6">
+            <section className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <h2 className="text-base font-semibold text-slate-900">时间进度条</h2>
+                  <p className="text-sm text-slate-500">
+                    起点：{formatDateTime(orderedHistory[0]?.recorded_at)} · 终点：{formatDateTime(orderedHistory[orderedHistory.length - 1]?.recorded_at)}
+                  </p>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="space-y-2 rounded-[16px] border border-slate-200 bg-white p-4">
+                    <p className="text-sm font-medium text-slate-900">起始时间</p>
+                    <p className="text-sm text-slate-500">{formatDateTime(leftEntry?.recorded_at)}</p>
+                    <CompareSlider
+                      label="起始快照"
+                      min={0}
+                      max={maxIndex}
+                      value={safeStartIndex}
+                      onChange={(value) => {
+                        setStartIndex(value);
+                        if (value > safeEndIndex) {
+                          setEndIndex(value);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2 rounded-[16px] border border-slate-200 bg-white p-4">
+                    <p className="text-sm font-medium text-slate-900">终止时间</p>
+                    <p className="text-sm text-slate-500">{formatDateTime(rightEntry?.recorded_at)}</p>
+                    <CompareSlider
+                      label="终止快照"
+                      min={0}
+                      max={maxIndex}
+                      value={safeEndIndex}
+                      onChange={(value) => setEndIndex(Math.max(value, safeStartIndex))}
+                    />
+                  </div>
+                </div>
               </div>
-              <HistoryPagination
-                page={currentHistoryPage}
-                totalPages={historyTotalPages}
-                total={historyTotal}
-                pageSize={currentHistoryPageSize}
-                onPageChange={(page) => replaceSelection(detail.current_target?.id ?? null, null, page)}
-              />
-              <HistoryTimeline
-                items={historyItems}
-                selectedID={selectedEntry?.id ?? null}
-                onSelect={(historyID) => replaceSelection(detail.current_target?.id ?? null, historyID, currentHistoryPage)}
-              />
-            </div>
+            </section>
 
-            <div className="space-y-6">
-              {selectedEntry ? (
-                <>
-                  <HistoryCompareSummary current={selectedEntry} previous={previousEntry} />
-                  <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="mb-4 space-y-1">
-                      <h2 className="text-base font-semibold text-slate-900">当前选中快照</h2>
-                      <p className="text-sm text-slate-500">
-                        {selectedEntry.summary || "历史上报"} · {formatDateTime(selectedEntry.recorded_at)}
-                      </p>
-                    </div>
-                    <CurrentReportView result={selectedEntry.result} hiddenPaths={[]} compact={false} />
-                  </section>
-                  {previousEntry ? (
-                    <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-                      <div className="mb-4 space-y-1">
-                        <h2 className="text-base font-semibold text-slate-900">上一条快照</h2>
-                        <p className="text-sm text-slate-500">
-                          {previousEntry.summary || "历史上报"} · {formatDateTime(previousEntry.recorded_at)}
-                        </p>
-                      </div>
-                      <CurrentReportView result={previousEntry.result} hiddenPaths={[]} compact={false} />
-                    </section>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+            {leftEntry && rightEntry ? (
+              <HistoryCompareTable rows={compareRows} leftRecordedAt={leftEntry.recorded_at} rightRecordedAt={rightEntry.recorded_at} />
+            ) : null}
           </div>
         )}
       </section>
@@ -2100,6 +2712,7 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
       <Route path="/nodes" element={<NodesPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid" element={<NodeDetailPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid/history" element={<NodeHistoryPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes/:uuid/compare" element={<NodeHistoryComparePage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid/changes" element={<Navigate to="../history" relative="path" replace />} />
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />

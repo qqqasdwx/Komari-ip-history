@@ -87,6 +87,7 @@ export type PublicNodeDetail = {
 export type NodeHistoryEntry = {
   id: number;
   target_id: number;
+  target_ip: string;
   recorded_at: string;
   summary: string;
   result: Record<string, unknown>;
@@ -98,4 +99,9 @@ export type NodeHistoryListResponse = {
   page: number;
   page_size: number;
   total_pages: number;
+};
+
+export type NodeHistoryDetailResponse = {
+  item: NodeHistoryEntry;
+  previous?: NodeHistoryEntry | null;
 };

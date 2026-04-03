@@ -97,6 +97,7 @@ type PublicNodeDetail struct {
 type NodeHistoryEntry struct {
 	ID         uint           `json:"id"`
 	TargetID   uint           `json:"target_id"`
+	TargetIP   string         `json:"target_ip"`
 	RecordedAt time.Time      `json:"recorded_at"`
 	Summary    string         `json:"summary"`
 	Result     map[string]any `json:"result"`
@@ -108,6 +109,11 @@ type NodeHistoryPage struct {
 	Page       int                `json:"page"`
 	PageSize   int                `json:"page_size"`
 	TotalPages int                `json:"total_pages"`
+}
+
+type NodeHistoryDetail struct {
+	Item     NodeHistoryEntry  `json:"item"`
+	Previous *NodeHistoryEntry `json:"previous,omitempty"`
 }
 
 type ReportNodeInput struct {
@@ -238,7 +244,7 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	return detail, nil
 }
 
-func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, page, pageSize int) (NodeHistoryPage, error) {
+func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, page, pageSize int, startAt, endAt *time.Time) (NodeHistoryPage, error) {
 	_, targets, err := loadNodeWithTargets(db, uuid)
 	if err != nil {
 		return NodeHistoryPage{}, err
@@ -248,7 +254,7 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 	if err != nil {
 		return NodeHistoryPage{}, err
 	}
-	if selected == nil {
+	if len(targets) == 0 {
 		return NodeHistoryPage{
 			Items:      []NodeHistoryEntry{},
 			Total:      0,
@@ -258,14 +264,30 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 		}, nil
 	}
 
-	baseQuery := db.Model(&models.NodeTargetHistory{}).Where("node_target_id = ?", selected.ID)
+	targetByID := make(map[uint]models.NodeTarget, len(targets))
+	targetIDs := make([]uint, 0, len(targets))
+	for _, target := range targets {
+		targetByID[target.ID] = target
+		targetIDs = append(targetIDs, target.ID)
+	}
+
+	var targetScope []uint
+	if selected != nil {
+		targetScope = []uint{selected.ID}
+	} else {
+		targetScope = targetIDs
+	}
+
+	baseQuery := db.Model(&models.NodeTargetHistory{}).Where("node_target_id IN ?", targetScope)
+	baseQuery = applyHistoryRange(baseQuery, startAt, endAt)
 	var total int64
 	if err := baseQuery.Count(&total).Error; err != nil {
 		return NodeHistoryPage{}, err
 	}
 
 	var history []models.NodeTargetHistory
-	query := db.Where("node_target_id = ?", selected.ID).Order("recorded_at DESC")
+	query := db.Where("node_target_id IN ?", targetScope).Order("recorded_at DESC")
+	query = applyHistoryRange(query, startAt, endAt)
 	if limit > 0 {
 		query = query.Limit(limit)
 		page = 1
@@ -281,9 +303,11 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 
 	items := make([]NodeHistoryEntry, 0, len(history))
 	for _, item := range history {
+		target := targetByID[item.NodeTargetID]
 		items = append(items, NodeHistoryEntry{
 			ID:         item.ID,
-			TargetID:   selected.ID,
+			TargetID:   item.NodeTargetID,
+			TargetIP:   target.TargetIP,
 			RecordedAt: item.RecordedAt,
 			Summary:    item.Summary,
 			Result:     decodeResultJSON(item.ResultJSON),
@@ -302,6 +326,64 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, historyID uint, startAt, endAt *time.Time) (NodeHistoryDetail, error) {
+	if historyID == 0 {
+		return NodeHistoryDetail{}, errors.New("history id is required")
+	}
+
+	_, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
+		return NodeHistoryDetail{}, err
+	}
+
+	selected, err := selectNodeTarget(targets, selectedTargetID)
+	if err != nil {
+		return NodeHistoryDetail{}, err
+	}
+	if selected == nil {
+		return NodeHistoryDetail{}, gorm.ErrRecordNotFound
+	}
+
+	query := db.Where("id = ? AND node_target_id = ?", historyID, selected.ID)
+	query = applyHistoryRange(query, startAt, endAt)
+
+	var history models.NodeTargetHistory
+	if err := query.First(&history).Error; err != nil {
+		return NodeHistoryDetail{}, err
+	}
+
+	detail := NodeHistoryDetail{
+		Item: NodeHistoryEntry{
+			ID:         history.ID,
+			TargetID:   selected.ID,
+			TargetIP:   selected.TargetIP,
+			RecordedAt: history.RecordedAt,
+			Summary:    history.Summary,
+			Result:     decodeResultJSON(history.ResultJSON),
+		},
+	}
+
+	var previous models.NodeTargetHistory
+	previousQuery := db.
+		Where("node_target_id = ? AND recorded_at < ?", selected.ID, history.RecordedAt).
+		Order("recorded_at DESC")
+	previousQuery = applyHistoryRange(previousQuery, startAt, endAt)
+	if err := previousQuery.First(&previous).Error; err == nil {
+		detail.Previous = &NodeHistoryEntry{
+			ID:         previous.ID,
+			TargetID:   selected.ID,
+			TargetIP:   selected.TargetIP,
+			RecordedAt: previous.RecordedAt,
+			Summary:    previous.Summary,
+			Result:     decodeResultJSON(previous.ResultJSON),
+		}
+	} else if err != nil && err != gorm.ErrRecordNotFound {
+		return NodeHistoryDetail{}, err
+	}
+
+	return detail, nil
 }
 
 func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displayIP string) (PublicNodeDetail, error) {
@@ -799,6 +881,16 @@ func normalizeHistoryPageSize(limit, pageSize int) int {
 		return 100
 	}
 	return pageSize
+}
+
+func applyHistoryRange(query *gorm.DB, startAt, endAt *time.Time) *gorm.DB {
+	if startAt != nil && !startAt.IsZero() {
+		query = query.Where("recorded_at >= ?", startAt.UTC())
+	}
+	if endAt != nil && !endAt.IsZero() {
+		query = query.Where("recorded_at < ?", endAt.UTC())
+	}
+	return query
 }
 
 func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL string) string {

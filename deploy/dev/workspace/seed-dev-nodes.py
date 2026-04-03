@@ -110,12 +110,15 @@ def get_ipq_node_detail(opener, base_url, uuid):
     return payload or {}
 
 
-def report_target_result(opener, base_url, uuid, reporter_token, target_ip, summary, result):
+def report_target_result(opener, base_url, uuid, reporter_token, target_ip, summary, result, recorded_at=None):
+    payload = {"target_ip": target_ip, "summary": summary, "result": result}
+    if recorded_at:
+        payload["recorded_at"] = recorded_at
     request_json(
         opener,
         "POST",
         f"{base_url}/api/v1/report/nodes/{uuid}",
-        {"target_ip": target_ip, "summary": summary, "result": result},
+        payload,
         headers={"X-IPQ-Reporter-Token": reporter_token},
     )
 
@@ -142,7 +145,7 @@ def seed_result(sample, ip, variant):
     media = ensure_mapping(result, "Media")
     mail = ensure_mapping(result, "Mail")
 
-    recorded_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=variant * 6)).replace(microsecond=0)
+    recorded_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=variant)).replace(microsecond=0)
     head["IP"] = ip
     head["Version"] = "dev-seed"
     head["ReportTime"] = recorded_at.isoformat().replace("+00:00", "Z")
@@ -170,7 +173,7 @@ def seed_result(sample, ip, variant):
     mail["Blacklisted"] = variant
     mail["Count"] = 400 + variant * 5
 
-    return result
+    return result, recorded_at.isoformat().replace("+00:00", "Z")
 
 
 def cleanup_prefixed_nodes(komari_opener, komari_base, ipq_opener, ipq_base):
@@ -216,7 +219,7 @@ def create_seed_node(komari_opener, komari_base, ipq_opener, ipq_base, sample, s
         if reporter_token:
             for history in spec.get("history", []):
                 for ip in history["ips"]:
-                    result = seed_result(sample, ip, history["variant"])
+                    result, recorded_at = seed_result(sample, ip, history["variant"])
                     report_target_result(
                         ipq_opener,
                         ipq_base,
@@ -225,6 +228,7 @@ def create_seed_node(komari_opener, komari_base, ipq_opener, ipq_base, sample, s
                         ip,
                         history["summary"],
                         result,
+                        recorded_at,
                     )
 
     return {

@@ -3,6 +3,8 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"komari-ip-history/internal/config"
 	"komari-ip-history/internal/service"
@@ -40,12 +42,29 @@ func (h NodeHandler) History(c *gin.Context) {
 	limit := parsePositiveInt(c.Query("limit"))
 	page := parsePositiveInt(c.Query("page"))
 	pageSize := parsePositiveInt(c.Query("page_size"))
-	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID, limit, page, pageSize)
+	startAt, endAt := parseHistoryDateRange(c.Query("start_date"), c.Query("end_date"))
+	items, err := service.GetNodeHistory(h.DB, c.Param("uuid"), targetID, limit, page, pageSize, startAt, endAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
 	c.JSON(http.StatusOK, items)
+}
+
+func (h NodeHandler) HistoryDetail(c *gin.Context) {
+	targetID := parseTargetID(c.Query("target_id"))
+	historyIDValue, err := strconv.ParseUint(c.Param("historyID"), 10, 64)
+	if err != nil || historyIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid history id"})
+		return
+	}
+	startAt, endAt := parseHistoryDateRange(c.Query("start_date"), c.Query("end_date"))
+	item, detailErr := service.GetNodeHistoryDetail(h.DB, c.Param("uuid"), targetID, uint(historyIDValue), startAt, endAt)
+	if detailErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "history not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
 }
 
 func (h NodeHandler) AddTarget(c *gin.Context) {
@@ -127,4 +146,41 @@ func parsePositiveInt(raw string) int {
 		return 0
 	}
 	return value
+}
+
+func parseHistoryDateRange(startRaw, endRaw string) (*time.Time, *time.Time) {
+	parseDateTime := func(raw string) (*time.Time, bool) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil, false
+		}
+		layouts := []struct {
+			layout   string
+			dateOnly bool
+		}{
+			{layout: "2006-01-02 15:04:05", dateOnly: false},
+			{layout: "2006-01-02T15:04:05", dateOnly: false},
+			{layout: "2006-01-02T15:04", dateOnly: false},
+			{layout: "2006-01-02", dateOnly: true},
+		}
+		for _, candidate := range layouts {
+			value, err := time.Parse(candidate.layout, raw)
+			if err == nil {
+				utc := value.UTC()
+				return &utc, candidate.dateOnly
+			}
+		}
+		return nil, false
+	}
+
+	startAt, _ := parseDateTime(startRaw)
+	endAt, endDateOnly := parseDateTime(endRaw)
+	if endAt == nil {
+		return startAt, nil
+	}
+	if endDateOnly {
+		next := endAt.Add(24 * time.Hour)
+		return startAt, &next
+	}
+	return startAt, endAt
 }

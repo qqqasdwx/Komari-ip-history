@@ -42,6 +42,20 @@ docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-front
 docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
 ```
 
+如果改了前端或前后端联动页面，不要先猜浏览器缓存。先执行：
+
+```bash
+docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/workspace/reload-ipq.sh
+```
+
+这条命令会：
+
+- 重新执行前端构建到 `public/`
+- 重启当前运行中的 Go 后端
+- 等待 `http://127.0.0.1:8090/api/v1/health` 恢复
+
+这个问题已经在联调里反复出现过。以后默认先跑这条命令，再判断是不是缓存。
+
 其中：
 
 - `run-e2e.sh` 会顺序执行：
@@ -66,3 +80,15 @@ docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/wor
   - 1 个目标 IP，带 3 条历史，用于当前结果和历史对比
 - `开发种子-多IP历史`
   - 2 个目标 IP，分别带历史，用于标签切换、排序和分 IP 历史
+
+## 页面没变时的排障顺序
+
+如果出现“源码已经改了，但浏览器里还是旧页面”，按这个顺序处理：
+
+1. 执行 `reload-ipq.sh`
+2. 确认健康检查恢复：
+   - `http://127.0.0.1:8090/api/v1/health`
+3. 再刷新浏览器
+4. 如果页面仍不对，再看具体页面 DOM、截图、接口返回
+
+不要第一反应就归因到浏览器缓存。

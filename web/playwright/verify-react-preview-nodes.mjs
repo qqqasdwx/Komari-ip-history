@@ -43,19 +43,26 @@ const rowLocator = page.locator('[data-node-row="true"]');
 const rowCount = await rowLocator.count();
 
 if (rowCount > 0) {
-  const firstUUID = await rowLocator.first().getAttribute('href');
-  const firstName = ((await rowLocator.first().locator('[data-node-name="true"]').textContent()) || '').trim();
+  const preferredNodeNames = ['开发种子-多IP历史', '开发种子-单IP历史', '通信样式测试'];
+  let chosenRow = rowLocator.first();
+  for (const name of preferredNodeNames) {
+    const candidate = rowLocator.filter({ hasText: name }).first();
+    if ((await candidate.count()) > 0) {
+      chosenRow = candidate;
+      break;
+    }
+  }
+
+  const firstUUID = await chosenRow.getAttribute('href');
+  const firstName = ((await chosenRow.locator('[data-node-name="true"]').textContent()) || '').trim();
   if (!firstName || !firstUUID) {
     throw new Error('react node row data is empty');
   }
 
   const searchTerm = firstName.slice(0, Math.min(firstName.length, 4));
-  const searchResponse = page.waitForResponse(
-    (response) => response.url().includes('/api/v1/nodes?q=') && response.status() === 200
-  );
   await page.getByPlaceholder('搜索节点名称').fill(searchTerm);
   await page.getByPlaceholder('搜索节点名称').press('Enter');
-  await searchResponse;
+  await page.waitForLoadState('networkidle');
 
   const filteredCount = await rowLocator.count();
   if (filteredCount === 0) {
@@ -64,7 +71,7 @@ if (rowCount > 0) {
     await page.waitForLoadState('networkidle');
   }
 
-  await rowLocator.first().click();
+  await chosenRow.click();
   await page.waitForURL('**/#/nodes/**');
   await page.waitForLoadState('networkidle');
   const detailReport = page.locator('[data-detail-report="true"]');
@@ -83,6 +90,13 @@ if (rowCount > 0) {
   const installCommandCount = await page.getByText('接入命令', { exact: true }).count();
   if (installCommandCount === 0) {
     throw new Error('react detail page missing install command');
+  }
+  const detailText = await page.locator('body').innerText();
+  if (!detailText.includes('当前命令会顺序探查以下 IP') && !detailText.includes('请先添加目标 IP，添加后才会生成接入命令。')) {
+    throw new Error('react detail page missing monitored IP hint');
+  }
+  if (detailText.includes('上报地址') || detailText.includes('Reporter Token')) {
+    throw new Error('react detail page still exposes report endpoint or token');
   }
 
   const detailData = JSON.parse(
@@ -131,14 +145,24 @@ if (rowCount > 0) {
   }
 
   const detailURL = page.url();
-  const historyLinkCount = await page.getByRole('link', { name: '查看完整历史' }).count();
+  const historyLinkCount = await page.getByRole('link', { name: '查看历史记录' }).count();
   if (historyLinkCount > 0) {
-    await page.getByRole('link', { name: '查看完整历史' }).click();
+    await page.getByRole('link', { name: '查看历史记录' }).click();
     await page.waitForURL('**/#/nodes/**/history**');
-    await page.getByText('历史时间线', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByText('当前选中快照', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByText('上一条快照', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByText('变化摘要', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByText('字段变化', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByRole('link', { name: '快照对比' }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByRole('button', { name: /全部时间|起|止|~/ }).click();
+    const dateInputs = page.locator('input[type="datetime-local"]');
+    await dateInputs.nth(0).fill('2026-04-02T00:00');
+    await dateInputs.nth(1).fill('2026-04-02T23:59');
+    await page.getByRole('button', { name: '应用筛选' }).click();
+    await page.getByText(/变化记录/).first().waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByRole('button', { name: /2026-04-02.*2026-04-02/ }).click();
+    await page.getByRole('button', { name: '清空' }).click();
+    await page.getByText(/变化记录/).first().waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByRole('link', { name: '快照对比' }).click();
+    await page.waitForURL('**/#/nodes/**/compare**');
+    await page.getByText('时间进度条', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
     await page.goto(detailURL);
     await page.waitForLoadState('networkidle');
   }
