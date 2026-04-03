@@ -315,7 +315,10 @@ func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displ
 		return PublicNodeDetail{}, err
 	}
 
-	detail := PublicNodeDetail{HasData: node.HasData}
+	detail := PublicNodeDetail{
+		HasData: node.HasData,
+		Targets: make([]PublicTargetListItem, 0, len(targets)),
+	}
 	for index, target := range targets {
 		detail.Targets = append(detail.Targets, PublicTargetListItem{
 			ID:        target.ID,

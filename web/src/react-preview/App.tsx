@@ -1677,15 +1677,17 @@ function PublicNodeDetailPage() {
     );
   }
 
+  const targets = detail.targets ?? [];
+
   return (
     <section className="space-y-6">
       {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="当前公开结果" backTo="/" /> : null}
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section space-y-4">
           <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
-          {detail.targets.length > 0 ? (
+          {targets.length > 0 ? (
             <TargetTabs
-              items={detail.targets.map((item) => ({ id: item.id, label: item.label, has_data: item.has_data }))}
+              items={targets.map((item) => ({ id: item.id, label: item.label, has_data: item.has_data }))}
               selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
               onSelect={(targetID) => replaceTargetSelection(targetID)}
             />
@@ -1718,10 +1720,15 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
   const [loaderCode, setLoaderCode] = useState("");
   const [inlineCode, setInlineCode] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
+  const [savingGuestRead, setSavingGuestRead] = useState(false);
   const publicBaseURL = (integration?.public_base_url ?? props.me.public_base_url ?? "").trim();
+  const savedPublicBaseURL = (integration?.public_base_url ?? "").trim();
+  const savedGuestReadEnabled = Boolean(integration?.guest_read_enabled);
   const basePath = runtime?.base_path || props.me.base_path || "";
   const suggestedPublicBaseURL = `${window.location.origin}${basePath || ""}`.replace(/\/$/, "");
   const previewPublicBaseURL = publicBaseURL || suggestedPublicBaseURL;
+  const publicBaseURLDirty = publicBaseURLInput.trim() !== savedPublicBaseURL;
+  const guestReadDirty = guestReadEnabledInput !== savedGuestReadEnabled;
 
   function buildPreviewPath(variant: "loader" | "inline", baseURL: string) {
     const query = new URLSearchParams({ variant });
@@ -1787,8 +1794,16 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
     }
   }
 
-  async function saveIntegrationSettings(nextValue: string, guestReadEnabled: boolean) {
-    setSavingAddress(true);
+  async function saveIntegrationSettings(
+    nextValue: string,
+    guestReadEnabled: boolean,
+    options: { saving: "address" | "guest"; successText: string; errorText: string }
+  ) {
+    if (options.saving === "address") {
+      setSavingAddress(true);
+    } else {
+      setSavingGuestRead(true);
+    }
     setError("");
     try {
       const saved = await apiRequest<IntegrationSettings>("/admin/integration", {
@@ -1808,15 +1823,19 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
       setRuntime(runtimeResponse);
       setLoaderCode(loaderPreview.code);
       setInlineCode(inlinePreview.code);
-      window.alert(saved.public_base_url ? "接入地址已保存。" : "已恢复为自动推导地址。");
+      window.alert(options.successText);
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
         props.onUnauthorized();
         return;
       }
-      setError(saveError instanceof Error ? saveError.message : "保存接入地址失败");
+      setError(saveError instanceof Error ? saveError.message : options.errorText);
     } finally {
-      setSavingAddress(false);
+      if (options.saving === "address") {
+        setSavingAddress(false);
+      } else {
+        setSavingGuestRead(false);
+      }
     }
   }
 
@@ -1863,16 +1882,28 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
               <div className="flex flex-wrap gap-3">
                 <button
                   className="button"
-                  disabled={savingAddress}
-                  onClick={() => void saveIntegrationSettings(publicBaseURLInput, guestReadEnabledInput)}
+                  disabled={savingAddress || !publicBaseURLDirty}
+                  onClick={() =>
+                    void saveIntegrationSettings(publicBaseURLInput, savedGuestReadEnabled, {
+                      saving: "address",
+                      successText: publicBaseURLInput.trim() ? "接入地址已保存。" : "已恢复为自动推导地址。",
+                      errorText: "保存接入地址失败"
+                    })
+                  }
                   type="button"
                 >
                   {savingAddress ? "保存中…" : "保存"}
                 </button>
                 <button
                   className="button ghost"
-                  disabled={savingAddress}
-                  onClick={() => void saveIntegrationSettings("", false)}
+                  disabled={savingAddress || savedPublicBaseURL === ""}
+                  onClick={() =>
+                    void saveIntegrationSettings("", savedGuestReadEnabled, {
+                      saving: "address",
+                      successText: "已恢复为自动推导地址。",
+                      errorText: "恢复默认地址失败"
+                    })
+                  }
                   type="button"
                 >
                   恢复默认
@@ -1902,6 +1933,26 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
                   <span className="block text-slate-500">默认关闭。管理员链路和后台页面不受影响。</span>
                 </span>
               </label>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  className="button"
+                  disabled={savingGuestRead || !guestReadDirty}
+                  onClick={() =>
+                    void saveIntegrationSettings(savedPublicBaseURL, guestReadEnabledInput, {
+                      saving: "guest",
+                      successText: guestReadEnabledInput ? "已开放游客只读。" : "已关闭游客只读。",
+                      errorText: "保存游客只读设置失败"
+                    })
+                  }
+                  type="button"
+                >
+                  {savingGuestRead ? "保存中…" : "保存游客只读设置"}
+                </button>
+                <span className="text-sm text-slate-500">
+                  {savedGuestReadEnabled ? "当前状态：已开放" : "当前状态：未开放"}
+                </span>
+              </div>
             </div>
           </section>
 

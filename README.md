@@ -49,3 +49,20 @@ docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
 - `web/playwright/verify-embed-auth-flows.mjs`
 - 新的鉴权脚本会自动清理自身创建的测试节点，并把游客只读开关恢复成默认关闭
 - Playwright 产物输出到 `web/playwright-output/`
+
+## 开发种子节点
+
+联调时如果需要一组固定场景节点，可以执行：
+
+```bash
+docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/workspace/seed-dev-nodes.sh
+```
+
+脚本会先清理旧的 `开发种子-*` 节点，再重建这 3 个固定场景：
+
+- `开发种子-空节点`
+  - 无目标 IP，用于验证空状态和游客弹窗空页
+- `开发种子-单IP历史`
+  - 1 个目标 IP，带 3 条历史，用于当前结果和历史对比
+- `开发种子-多IP历史`
+  - 2 个目标 IP，分别带历史，用于标签切换、排序和分 IP 历史
