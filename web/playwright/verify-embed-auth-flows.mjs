@@ -2,9 +2,9 @@ import { chromium } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-const komariBaseURL = (process.env.KOMARI_BASE_URL || "http://proxy:8080").replace(/\/$/, "");
+const komariBaseURL = (process.env.KOMARI_BASE_URL || "http://127.0.0.1:8080").replace(/\/$/, "");
 const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || "http://127.0.0.1:8090").replace(/\/$/, "");
-const integrationPublicBaseURL = (process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL || "http://workspace:8090").replace(/\/$/, "");
+const integrationPublicBaseURL = (process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL || "http://127.0.0.1:8090").replace(/\/$/, "");
 const restoreIntegrationPublicBaseURL = (
   process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL_RESTORE || "http://127.0.0.1:8090"
 ).replace(/\/$/, "");

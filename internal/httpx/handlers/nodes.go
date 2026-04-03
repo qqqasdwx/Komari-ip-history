@@ -51,6 +51,30 @@ func (h NodeHandler) History(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
+func (h NodeHandler) HistoryEvents(c *gin.Context) {
+	targetID := parseTargetID(c.Query("target_id"))
+	page := parsePositiveInt(c.Query("page"))
+	pageSize := parsePositiveInt(c.Query("page_size"))
+	startAt, endAt := parseHistoryDateRange(c.Query("start_date"), c.Query("end_date"))
+	items, err := service.GetNodeHistoryEvents(h.DB, c.Param("uuid"), targetID, c.Query("field"), page, pageSize, startAt, endAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+func (h NodeHandler) HistoryFields(c *gin.Context) {
+	targetID := parseTargetID(c.Query("target_id"))
+	startAt, endAt := parseHistoryDateRange(c.Query("start_date"), c.Query("end_date"))
+	items, err := service.GetNodeHistoryFieldOptions(h.DB, c.Param("uuid"), targetID, startAt, endAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, items)
+}
+
 func (h NodeHandler) HistoryDetail(c *gin.Context) {
 	targetID := parseTargetID(c.Query("target_id"))
 	historyIDValue, err := strconv.ParseUint(c.Param("historyID"), 10, 64)

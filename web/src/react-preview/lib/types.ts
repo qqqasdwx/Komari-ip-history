@@ -105,3 +105,44 @@ export type NodeHistoryDetailResponse = {
   item: NodeHistoryEntry;
   previous?: NodeHistoryEntry | null;
 };
+
+export type DisplayFieldValue = {
+  id: string;
+  path: string;
+  group_path: string[];
+  label: string;
+  text: string;
+  tone: "good" | "bad" | "warn" | "muted" | "neutral";
+  missing_kind?: "missing";
+};
+
+export type NodeHistoryChangeEvent = {
+  id: string;
+  target_id: number;
+  target_ip: string;
+  field_id: string;
+  group_path: string[];
+  field_label: string;
+  field_option_label: string;
+  previous: DisplayFieldValue;
+  current: DisplayFieldValue;
+  previous_recorded_at: string;
+  recorded_at: string;
+};
+
+export type NodeHistoryChangeEventPage = {
+  items: NodeHistoryChangeEvent[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
+export type NodeHistoryFieldOption = {
+  id: string;
+  label: string;
+};
+
+export type NodeHistoryFieldOptionList = {
+  items: NodeHistoryFieldOption[];
+};

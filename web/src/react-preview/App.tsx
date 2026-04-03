@@ -21,14 +21,17 @@ import {
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { renderDisplayValueBadge } from "./lib/display-fields";
 import { formatDateTime } from "./lib/format";
-import { buildHistoryCompareRows, buildHistoryFieldChangeEvents, buildHistoryFieldOptions, mapDisplayPathToReportPaths } from "./lib/history";
+import { buildHistoryCompareRows, mapDisplayPathToReportPaths } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
+  DisplayFieldValue,
   IntegrationSettings,
   MeResponse,
   NodeDetail,
+  NodeHistoryChangeEventPage,
   NodeHistoryDetailResponse,
   NodeHistoryEntry,
+  NodeHistoryFieldOptionList,
   NodeHistoryListResponse,
   NodeListItem,
   NodeTargetListItem,
@@ -494,6 +497,171 @@ function useAllNodeHistoryData(
           return;
         }
         setError(loadError instanceof Error ? loadError.message : "加载历史记录失败");
+        setItems([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onUnauthorized, options?.endDate, options?.startDate, reloadToken, targetID, uuid]);
+
+  return {
+    loading,
+    error,
+    items,
+    reload: () => setReloadToken((value) => value + 1)
+  };
+}
+
+function useNodeHistoryEvents(
+  uuid: string,
+  targetID: number | null,
+  fieldID: string,
+  onUnauthorized: () => void,
+  options?: { page?: number; pageSize?: number; startDate?: string; endDate?: string }
+) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<NodeHistoryChangeEventPage["items"]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(options?.pageSize ?? 10);
+  const [totalPages, setTotalPages] = useState(0);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid) {
+        setError("节点不存在");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
+        if (fieldID.trim()) {
+          query.set("field", fieldID.trim());
+        }
+        query.set("page", String(options?.page && options.page > 0 ? options.page : 1));
+        query.set("page_size", String(options?.pageSize && options.pageSize > 0 ? options.pageSize : 10));
+        if (options?.startDate?.trim()) {
+          query.set("start_date", options.startDate.trim());
+        }
+        if (options?.endDate?.trim()) {
+          query.set("end_date", options.endDate.trim());
+        }
+        const response = await apiRequest<NodeHistoryChangeEventPage>(`/nodes/${uuid}/history/events?${query.toString()}`);
+        if (cancelled) {
+          return;
+        }
+        setItems(response.items ?? []);
+        setTotal(response.total ?? 0);
+        setPage(response.page ?? 1);
+        setPageSize(response.page_size ?? (options?.pageSize ?? 10));
+        setTotalPages(response.total_pages ?? 0);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          onUnauthorized();
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载历史变化失败");
+        setItems([]);
+        setTotal(0);
+        setPage(1);
+        setTotalPages(0);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fieldID, onUnauthorized, options?.endDate, options?.page, options?.pageSize, options?.startDate, reloadToken, targetID, uuid]);
+
+  return {
+    loading,
+    error,
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages,
+    reload: () => setReloadToken((value) => value + 1)
+  };
+}
+
+function useNodeHistoryFieldOptions(
+  uuid: string,
+  targetID: number | null,
+  onUnauthorized: () => void,
+  options?: { startDate?: string; endDate?: string }
+) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<Array<{ id: string; label: string }>>([]);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      if (!uuid) {
+        setError("节点不存在");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError("");
+
+      try {
+        const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
+        if (options?.startDate?.trim()) {
+          query.set("start_date", options.startDate.trim());
+        }
+        if (options?.endDate?.trim()) {
+          query.set("end_date", options.endDate.trim());
+        }
+        const response = await apiRequest<NodeHistoryFieldOptionList>(`/nodes/${uuid}/history/fields?${query.toString()}`);
+        if (cancelled) {
+          return;
+        }
+        setItems(response.items ?? []);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          onUnauthorized();
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : "加载字段筛选失败");
         setItems([]);
       } finally {
         if (!cancelled) {
@@ -2009,9 +2177,22 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
   const {
     loading: historyLoading,
     error: historyError,
-    items: historyItems,
+    items: changeEvents,
+    total: historyTotal,
+    totalPages: historyTotalPages,
     reload: reloadHistory
-  } = useAllNodeHistoryData(uuid, selectedTargetID, props.onUnauthorized, {
+  } = useNodeHistoryEvents(uuid, selectedTargetID, selectedFieldID, props.onUnauthorized, {
+    page: historyPage,
+    pageSize: historyPageSize,
+    startDate,
+    endDate
+  });
+  const {
+    loading: fieldOptionsLoading,
+    error: fieldOptionsError,
+    items: fieldOptions,
+    reload: reloadFieldOptions
+  } = useNodeHistoryFieldOptions(uuid, selectedTargetID, props.onUnauthorized, {
     startDate,
     endDate
   });
@@ -2067,16 +2248,18 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
   const detailBackTo = `/nodes/${uuid}${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
   const compareTargetID = selectedTargetID ?? detail.current_target?.id ?? null;
   const historyPathForCompare = `/nodes/${uuid}/compare${compareTargetID ? `?target_id=${compareTargetID}` : ""}`;
-  const changeEvents = buildHistoryFieldChangeEvents(historyItems);
-  const fieldOptions = buildHistoryFieldOptions(changeEvents);
-  const filteredChangeEvents = selectedFieldID
-    ? changeEvents.filter((item) => item.fieldId === selectedFieldID)
-    : changeEvents;
-  const historyTotal = filteredChangeEvents.length;
-  const historyTotalPages = historyTotal > 0 ? Math.ceil(historyTotal / historyPageSize) : 0;
   const currentHistoryPage = historyTotalPages > 0 ? Math.min(Math.max(historyPage, 1), historyTotalPages) : 1;
-  const pageStart = (currentHistoryPage - 1) * historyPageSize;
-  const currentPageItems = filteredChangeEvents.slice(pageStart, pageStart + historyPageSize);
+  const currentPageItems = changeEvents.map((item) => ({
+    id: item.id,
+    targetIP: item.target_ip,
+    groupPath: item.group_path,
+    fieldLabel: item.field_label,
+    previous: item.previous,
+    current: item.current,
+    recordedAt: item.recorded_at,
+    previousRecordedAt: item.previous_recorded_at
+  }));
+  const historyLoadError = historyError || fieldOptionsError;
 
   return (
     <section className="space-y-6">
@@ -2097,10 +2280,10 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
       />
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-        {historyError ? (
+        {historyLoadError ? (
           <div className="section">
             <div className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
-              {historyError}
+              {historyLoadError}
             </div>
           </div>
         ) : null}
@@ -2111,14 +2294,16 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
               当前节点还没有目标 IP，请先回到详情页添加。
             </div>
           </div>
-        ) : historyLoading ? (
+        ) : historyLoading || fieldOptionsLoading ? (
           <div className="section">
             <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">正在加载历史记录...</div>
           </div>
-        ) : historyItems.length === 0 ? (
+        ) : historyTotal === 0 ? (
           <div className="section">
             <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              当前目标 IP 还没有历史记录。
+              {selectedFieldID || startDate || endDate
+                ? "当前筛选条件下没有历史变化。"
+                : "当前目标 IP 还没有历史变化。"}
             </div>
           </div>
         ) : (
@@ -2133,6 +2318,7 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
                 onClick={() => {
                   reload();
                   reloadHistory();
+                  reloadFieldOptions();
                 }}
                 type="button"
               >

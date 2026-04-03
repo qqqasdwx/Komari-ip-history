@@ -151,7 +151,7 @@ if (rowCount > 0) {
     await page.waitForURL('**/#/nodes/**/history**');
     await page.getByText('字段变化', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
     await page.getByRole('link', { name: '快照对比' }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('button', { name: /全部时间|起|止|~/ }).click();
+    await page.getByRole('button', { name: /全部时间|今天|近 7 天|本周|近 30 天|本月/ }).click();
     const dateInputs = page.locator('input[type="datetime-local"]');
     await dateInputs.nth(0).fill('2026-04-02T00:00');
     await dateInputs.nth(1).fill('2026-04-02T23:59');
@@ -162,7 +162,7 @@ if (rowCount > 0) {
     await page.getByText(/变化记录/).first().waitFor({ state: 'visible', timeout: 10000 });
     await page.getByRole('link', { name: '快照对比' }).click();
     await page.waitForURL('**/#/nodes/**/compare**');
-    await page.getByText('时间进度条', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
     await page.goto(detailURL);
     await page.waitForLoadState('networkidle');
   }
