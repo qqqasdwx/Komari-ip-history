@@ -1,55 +1,17 @@
 import type { ReactNode } from "react";
-import { formatDisplayValue, isRecord, titleize } from "./format";
+import { formatDisplayValue, isRecord } from "./format";
 import { getFilteredCurrentResult, isEmptyRecord, type StructuredCurrentResult } from "./result";
-
-function reportFieldLabel(key: string) {
-  const labels: Record<string, string> = {
-    IP: "IP",
-    GitHub: "GitHub",
-    Time: "报告时间",
-    Version: "脚本版本",
-    Type: "类型",
-    ASN: "自治系统",
-    Organization: "组织",
-    Latitude: "纬度",
-    Longitude: "经度",
-    DMS: "坐标",
-    Map: "地图",
-    TimeZone: "时区",
-    Continent: "洲别",
-    RegisteredRegion: "注册地区",
-    Usage: "使用类型",
-    Company: "公司类型",
-    CountryCode: "地区",
-    Proxy: "代理",
-    Tor: "Tor",
-    VPN: "VPN",
-    Server: "服务器",
-    Abuser: "滥用者",
-    Robot: "机器人",
-    IPinfo: "IPinfo",
-    ipregistry: "ipregistry",
-    ipapi: "ipapi",
-    IP2LOCATION: "IP2Location",
-    IPWHOIS: "IPWHOIS",
-    SCAMALYTICS: "Scamalytics",
-    AbuseIPDB: "AbuseIPDB",
-    DBIP: "DB-IP",
-    DisneyPlus: "Disney+",
-    AmazonPrimeVideo: "AmazonPV",
-    TikTok: "TikTok",
-    Youtube: "Youtube",
-    Netflix: "Netflix",
-    Spotify: "Spotify",
-    ChatGPT: "ChatGPT",
-    Port25: "25端口",
-    MailRU: "MailRU",
-    MailCOM: "MailCOM",
-    DNSBlacklist: "DNSBL"
-  };
-
-  return labels[key] ?? titleize(key);
-}
+import {
+  reportBoolText,
+  reportCountryText,
+  reportFieldLabel,
+  reportIPTypeText,
+  reportMediaStatusText,
+  reportMediaTypeText,
+  reportMissingText,
+  reportToneFromText,
+  reportUsageMeta
+} from "./report-meta";
 
 function orderedReportEntries(record: Record<string, unknown>, order: string[] = []) {
   const seen = new Set<string>();
@@ -71,72 +33,6 @@ function orderedReportEntries(record: Record<string, unknown>, order: string[] =
   return entries;
 }
 
-function reportMissingText(value: unknown) {
-  return value === undefined || value === null || value === "" || value === "null";
-}
-
-function reportBoolText(value: unknown) {
-  if (reportMissingText(value)) {
-    return "N/A";
-  }
-  return value ? "是" : "否";
-}
-
-function reportUsageMeta(value: unknown) {
-  if (reportMissingText(value)) {
-    return { text: "N/A", tone: "muted" };
-  }
-
-  const text = String(value).trim().toLowerCase();
-  if (["isp", "residential", "line isp", "broadband", "home", "consumer"].includes(text)) {
-    return { text: "家宽", tone: "good" };
-  }
-  if (["business", "commercial", "enterprise"].includes(text)) {
-    return { text: "商业", tone: "warn" };
-  }
-  if (["hosting", "datacenter", "data center", "server", "cloud", "vps"].includes(text)) {
-    return { text: "机房", tone: "bad" };
-  }
-  if (["mobile", "cellular", "wireless"].includes(text)) {
-    return { text: "移动", tone: "good" };
-  }
-  if (["education", "edu", "university"].includes(text)) {
-    return { text: "教育", tone: "neutral" };
-  }
-
-  return { text: String(value), tone: "neutral" };
-}
-
-function reportIPTypeText(value: unknown) {
-  if (reportMissingText(value)) return "N/A";
-  if (String(value).trim().toLowerCase() === "geo-consistent") return "原生IP";
-  return String(value);
-}
-
-function reportMediaStatusText(value: unknown) {
-  if (reportMissingText(value)) return "N/A";
-  const text = String(value).trim().toLowerCase();
-  if (text === "yes") return "解锁";
-  if (["block", "blocked", "no"].includes(text)) return "失败";
-  return String(value);
-}
-
-function reportMediaTypeText(value: unknown) {
-  if (reportMissingText(value)) return "N/A";
-  const text = String(value).trim().toLowerCase();
-  if (text === "native") return "原生";
-  if (text === "originals") return "原创";
-  if (text === "web") return "网页";
-  return String(value);
-}
-
-function reportCountryText(value: unknown) {
-  if (reportMissingText(value)) return "N/A";
-  const text = String(value).trim();
-  if (/^[A-Z]{2}$/.test(text)) return `[${text}]`;
-  return text;
-}
-
 function reportRiskMeta(value: unknown) {
   if (reportMissingText(value)) {
     return { score: "N/A", label: "N/A", tone: "muted", percent: null as number | null };
@@ -154,14 +50,6 @@ function reportRiskMeta(value: unknown) {
   if (numeric <= 60) return { score: text, label: "中等", tone: "warn", percent };
   if (numeric <= 85) return { score: text, label: "高", tone: "bad", percent };
   return { score: text, label: "极高", tone: "bad", percent };
-}
-
-function reportToneFromText(text: string) {
-  if (["解锁", "原生", "原创", "家宽", "移动", "可用", "否"].includes(text) || text.startsWith("[")) return "good";
-  if (text === "商业" || text === "网页") return "warn";
-  if (["失败", "机房", "是", "不可用"].includes(text)) return "bad";
-  if (text === "N/A") return "muted";
-  return "neutral";
 }
 
 function joinClassNames(...items: Array<string | false | null | undefined>) {
@@ -393,17 +281,21 @@ function ReportHeader(props: { structured: StructuredCurrentResult; hiddenPaths:
   const version = reportMissingText(props.structured.head?.Version) ? "N/A" : String(props.structured.head?.Version);
 
   return (
-    <FieldTarget path="Head" hidden={isPathHidden(props.hiddenPaths, "Head")} onFieldClick={props.onFieldClick} className="report-banner">
+    <div className="report-banner">
       <div className="report-banner-line">########################################################################</div>
-      <div className="report-banner-title">
+      <FieldTarget path="Head.IP" hidden={isPathHidden(props.hiddenPaths, "Head.IP")} onFieldClick={props.onFieldClick} className="report-banner-title">
         IP质量体检报告：<span>{ip}</span>
-      </div>
+      </FieldTarget>
       <div className="report-banner-meta">
-        <span>报告时间：{time}</span>
-        <span>脚本版本：{version}</span>
+        <FieldTarget path="Head.Time" hidden={isPathHidden(props.hiddenPaths, "Head.Time")} onFieldClick={props.onFieldClick}>
+          <span>报告时间：{time}</span>
+        </FieldTarget>
+        <FieldTarget path="Head.Version" hidden={isPathHidden(props.hiddenPaths, "Head.Version")} onFieldClick={props.onFieldClick}>
+          <span>脚本版本：{version}</span>
+        </FieldTarget>
       </div>
       <div className="report-banner-line">########################################################################</div>
-    </FieldTarget>
+    </div>
   );
 }
 

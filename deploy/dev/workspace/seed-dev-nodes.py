@@ -145,7 +145,7 @@ def seed_result(sample, ip, variant):
     media = ensure_mapping(result, "Media")
     mail = ensure_mapping(result, "Mail")
 
-    recorded_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=variant)).replace(microsecond=0)
+    recorded_at = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=variant * 18)).replace(microsecond=0)
     head["IP"] = ip
     head["Version"] = "dev-seed"
     head["ReportTime"] = recorded_at.isoformat().replace("+00:00", "Z")
@@ -269,6 +269,11 @@ def main():
                 {"variant": 0, "summary": "初始快照", "ips": ["203.0.113.10"]},
                 {"variant": 1, "summary": "第二次上报", "ips": ["203.0.113.10"]},
                 {"variant": 2, "summary": "第三次上报", "ips": ["203.0.113.10"]},
+                {"variant": 3, "summary": "第四次上报", "ips": ["203.0.113.10"]},
+                {"variant": 4, "summary": "第五次上报", "ips": ["203.0.113.10"]},
+                {"variant": 5, "summary": "第六次上报", "ips": ["203.0.113.10"]},
+                {"variant": 6, "summary": "第七次上报", "ips": ["203.0.113.10"]},
+                {"variant": 7, "summary": "第八次上报", "ips": ["203.0.113.10"]},
             ],
             "description": "单 IP 当前结果和历史对比。",
         },
@@ -279,8 +284,14 @@ def main():
             "history": [
                 {"variant": 0, "summary": "IPv4 初始快照", "ips": ["198.51.100.20"]},
                 {"variant": 1, "summary": "IPv4 第二次上报", "ips": ["198.51.100.20"]},
-                {"variant": 2, "summary": "IPv6 初始快照", "ips": ["2001:db8::20"]},
-                {"variant": 3, "summary": "IPv6 第二次上报", "ips": ["2001:db8::20"]},
+                {"variant": 2, "summary": "IPv4 第三次上报", "ips": ["198.51.100.20"]},
+                {"variant": 3, "summary": "IPv4 第四次上报", "ips": ["198.51.100.20"]},
+                {"variant": 4, "summary": "IPv4 第五次上报", "ips": ["198.51.100.20"]},
+                {"variant": 5, "summary": "IPv6 初始快照", "ips": ["2001:db8::20"]},
+                {"variant": 6, "summary": "IPv6 第二次上报", "ips": ["2001:db8::20"]},
+                {"variant": 7, "summary": "IPv6 第三次上报", "ips": ["2001:db8::20"]},
+                {"variant": 8, "summary": "IPv6 第四次上报", "ips": ["2001:db8::20"]},
+                {"variant": 9, "summary": "IPv6 第五次上报", "ips": ["2001:db8::20"]},
             ],
             "description": "多 IP 标签切换、排序和分 IP 历史。",
         },

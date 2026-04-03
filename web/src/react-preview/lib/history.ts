@@ -33,6 +33,7 @@ export type HistoryFieldChangeEvent = {
 
 export type HistoryCompareRow = {
   fieldId: string;
+  path: string;
   groupPath: string[];
   fieldLabel: string;
   fieldOptionLabel: string;
@@ -40,6 +41,25 @@ export type HistoryCompareRow = {
   right: DisplayFieldValue;
   changed: boolean;
 };
+
+export function mapDisplayPathToReportPaths(path: string) {
+  if (!path) {
+    return [];
+  }
+  if (path.startsWith("Head.")) {
+    return ["Head"];
+  }
+  if (path === "Info.Coordinate") {
+    return ["Info.Latitude", "Info.Longitude"];
+  }
+  if (path === "Info.UsagePlace") {
+    return ["Info.Region"];
+  }
+  if (path.startsWith("Mail.DNSBlacklist.")) {
+    return ["Mail.DNSBlacklist"];
+  }
+  return [path];
+}
 
 const IGNORED_PATHS = new Set([
   "Head.ReportTime",
@@ -271,6 +291,7 @@ export function buildHistoryCompareRows(leftResult: Record<string, unknown>, rig
       const rightValue = right ?? buildMissingDisplayFieldLike(left!);
       return {
         fieldId: id,
+        path: rightValue.path || leftValue.path,
         groupPath: rightValue.groupPath,
         fieldLabel: rightValue.label,
         fieldOptionLabel: buildDisplayFieldOptionLabel(rightValue),

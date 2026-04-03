@@ -21,7 +21,7 @@ import {
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { renderDisplayValueBadge } from "./lib/display-fields";
 import { formatDateTime } from "./lib/format";
-import { buildHistoryCompareRows, buildHistoryFieldChangeEvents, buildHistoryFieldOptions } from "./lib/history";
+import { buildHistoryCompareRows, buildHistoryFieldChangeEvents, buildHistoryFieldOptions, mapDisplayPathToReportPaths } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
   IntegrationSettings,
@@ -1528,32 +1528,44 @@ function HistoryDateFilterBar(props: {
   );
 }
 
-function CompareSlider(props: {
-  label: string;
-  min: number;
-  max: number;
-  value: number;
-  onChange: (value: number) => void;
+function reportPathMatchesHighlight(nodePath: string, highlightPath: string) {
+  return nodePath === highlightPath;
+}
+
+function CompareReportPane(props: {
+  recordedAt: string;
+  result: Record<string, unknown>;
+  changedPaths: string[];
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+    const nodes = Array.from(containerRef.current.querySelectorAll<HTMLElement>("[data-field-path]"));
+    for (const node of nodes) {
+      const nodePath = node.dataset.fieldPath?.trim() || "";
+      const highlighted = nodePath
+        ? props.changedPaths.some((path) => reportPathMatchesHighlight(nodePath, path))
+        : false;
+      node.classList.toggle("report-compare-highlight", highlighted);
+    }
+  }, [props.changedPaths, props.result]);
+
   return (
-    <label className="grid gap-2 text-sm text-slate-700">
-      <span>{props.label}</span>
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        value={props.value}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-      />
-    </label>
+    <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-slate-900">{formatDateTime(props.recordedAt)}</h2>
+      </div>
+      <div ref={containerRef}>
+        <CurrentReportView result={props.result} hiddenPaths={[]} compact />
+      </div>
+    </section>
   );
 }
 
-function HistoryCompareTable(props: {
-  rows: ReturnType<typeof buildHistoryCompareRows>;
-  leftRecordedAt: string;
-  rightRecordedAt: string;
-}) {
+function HistoryCompareEmptyState(props: { rows: ReturnType<typeof buildHistoryCompareRows> }) {
   if (props.rows.length === 0) {
     return (
       <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
@@ -1561,29 +1573,119 @@ function HistoryCompareTable(props: {
       </div>
     );
   }
+  return null;
+}
+
+function parseRecordedAtTimestamp(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function formatCompareSliderValue(value: number) {
+  return formatDateTime(new Date(value).toISOString());
+}
+
+function clampCompareTimestamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function pickHistoryEntryAtOrBefore(items: NodeHistoryEntry[], timestamp: number) {
+  let candidate = items[0] ?? null;
+  for (const item of items) {
+    const itemTimestamp = parseRecordedAtTimestamp(item.recorded_at);
+    if (itemTimestamp <= timestamp) {
+      candidate = item;
+      continue;
+    }
+    break;
+  }
+  return candidate;
+}
+
+function CompareTimeline(props: {
+  items: NodeHistoryEntry[];
+  leftTimestamp: number;
+  rightTimestamp: number;
+  onLeftChange: (timestamp: number) => void;
+  onRightChange: (timestamp: number) => void;
+}) {
+  const min = parseRecordedAtTimestamp(props.items[0]?.recorded_at ?? "");
+  const max = parseRecordedAtTimestamp(props.items[props.items.length - 1]?.recorded_at ?? "");
+  const span = Math.max(max - min, 1);
+  const leftPercent = ((props.leftTimestamp - min) / span) * 100;
+  const rightPercent = ((props.rightTimestamp - min) / span) * 100;
+  const points = props.items.map((item) => {
+    const timestamp = parseRecordedAtTimestamp(item.recorded_at);
+    return {
+      id: item.id,
+      recordedAt: item.recorded_at,
+      left: `${((timestamp - min) / span) * 100}%`
+    };
+  });
 
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm">
-      <div className="grid grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(0,1fr)] gap-px rounded-[24px] bg-slate-200 p-px">
-        <div className="rounded-tl-[24px] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">字段</div>
-        <div className="bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">{formatDateTime(props.leftRecordedAt)}</div>
-        <div className="rounded-tr-[24px] bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">{formatDateTime(props.rightRecordedAt)}</div>
-        {props.rows.map((row) => (
-          <Fragment key={row.fieldId}>
-            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
-              <p className="text-sm font-medium text-slate-900">{row.fieldLabel}</p>
-              <p className="text-xs text-slate-500">{row.groupPath.join(" / ")}</p>
+    <section className="compare-timeline-panel rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-slate-900">时间范围</h2>
+          <p className="text-sm text-slate-500">
+            首次上报：{formatDateTime(props.items[0]?.recorded_at)} · 最近上报：{formatDateTime(props.items[props.items.length - 1]?.recorded_at)}
+          </p>
+        </div>
+        <div className="compare-timeline">
+          <div className="compare-timeline-labels">
+            <div className="compare-timeline-value" style={{ left: `${leftPercent}%` }}>
+              {formatCompareSliderValue(props.leftTimestamp)}
             </div>
-            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
-              {renderDisplayValueBadge(row.left)}
+            <div className="compare-timeline-value compare-timeline-value-right" style={{ left: `${rightPercent}%` }}>
+              {formatCompareSliderValue(props.rightTimestamp)}
             </div>
-            <div className={`bg-white px-4 py-3 ${row.changed ? "bg-amber-50/70" : ""}`}>
-              {renderDisplayValueBadge(row.right)}
+          </div>
+          <div className="compare-timeline-track-wrap">
+            <div className="compare-timeline-track" />
+            <div className="compare-timeline-points" aria-hidden="true">
+              {points.map((point) => (
+                <span
+                  key={point.id}
+                  className="compare-timeline-point"
+                  style={{ left: point.left }}
+                  title={formatDateTime(point.recordedAt)}
+                />
+              ))}
             </div>
-          </Fragment>
-        ))}
+            <div
+              className="compare-timeline-range"
+              style={{
+                left: `${Math.min(leftPercent, rightPercent)}%`,
+                width: `${Math.max(rightPercent - leftPercent, 0)}%`
+              }}
+            />
+            <input
+              className="compare-timeline-input compare-timeline-input-left"
+              type="range"
+              min={min}
+              max={max}
+              step={1000}
+              value={props.leftTimestamp}
+              onChange={(event) => props.onLeftChange(clampCompareTimestamp(Number(event.target.value), min, props.rightTimestamp))}
+            />
+            <input
+              className="compare-timeline-input compare-timeline-input-right"
+              type="range"
+              min={min}
+              max={max}
+              step={1000}
+              value={props.rightTimestamp}
+              onChange={(event) => props.onRightChange(clampCompareTimestamp(Number(event.target.value), props.leftTimestamp, max))}
+            />
+          </div>
+          <div className="compare-timeline-ends">
+            <span>{formatDateTime(props.items[0]?.recorded_at)}</span>
+            <span>{formatDateTime(props.items[props.items.length - 1]?.recorded_at)}</span>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -2090,8 +2192,8 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
     selectedTargetID,
     props.onUnauthorized
   );
-  const [startIndex, setStartIndex] = useState(0);
-  const [endIndex, setEndIndex] = useState(0);
+  const [leftTimestamp, setLeftTimestamp] = useState(0);
+  const [rightTimestamp, setRightTimestamp] = useState(0);
 
   function replaceSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -2110,12 +2212,12 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
 
   useEffect(() => {
     if (orderedHistory.length === 0) {
-      setStartIndex(0);
-      setEndIndex(0);
+      setLeftTimestamp(0);
+      setRightTimestamp(0);
       return;
     }
-    setStartIndex(0);
-    setEndIndex(orderedHistory.length - 1);
+    setLeftTimestamp(parseRecordedAtTimestamp(orderedHistory[0].recorded_at));
+    setRightTimestamp(parseRecordedAtTimestamp(orderedHistory[orderedHistory.length - 1].recorded_at));
   }, [detail?.current_target?.id, orderedHistory.length]);
 
   if (loading) {
@@ -2134,13 +2236,17 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
     );
   }
 
-  const maxIndex = Math.max(orderedHistory.length - 1, 0);
-  const safeStartIndex = Math.min(Math.max(startIndex, 0), maxIndex);
-  const safeEndIndex = Math.max(safeStartIndex, Math.min(Math.max(endIndex, 0), maxIndex));
-  const leftEntry = orderedHistory[safeStartIndex] ?? null;
-  const rightEntry = orderedHistory[safeEndIndex] ?? null;
+  const leftEntry = pickHistoryEntryAtOrBefore(orderedHistory, leftTimestamp);
+  const rightEntry = pickHistoryEntryAtOrBefore(orderedHistory, rightTimestamp);
   const compareRows =
     leftEntry && rightEntry ? buildHistoryCompareRows(leftEntry.result, rightEntry.result) : [];
+  const changedPaths = Array.from(
+    new Set(
+      compareRows
+        .filter((row) => row.changed)
+        .flatMap((row) => mapDisplayPathToReportPaths(row.path))
+    )
+  );
   const detailBackTo = `/nodes/${uuid}/history${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
 
   return (
@@ -2202,48 +2308,27 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
           </div>
         ) : (
           <div className="section space-y-6">
-            <section className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
-              <div className="space-y-4">
-                <div className="space-y-1">
-                  <h2 className="text-base font-semibold text-slate-900">时间进度条</h2>
-                  <p className="text-sm text-slate-500">
-                    起点：{formatDateTime(orderedHistory[0]?.recorded_at)} · 终点：{formatDateTime(orderedHistory[orderedHistory.length - 1]?.recorded_at)}
-                  </p>
-                </div>
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-2 rounded-[16px] border border-slate-200 bg-white p-4">
-                    <p className="text-sm font-medium text-slate-900">起始时间</p>
-                    <p className="text-sm text-slate-500">{formatDateTime(leftEntry?.recorded_at)}</p>
-                    <CompareSlider
-                      label="起始快照"
-                      min={0}
-                      max={maxIndex}
-                      value={safeStartIndex}
-                      onChange={(value) => {
-                        setStartIndex(value);
-                        if (value > safeEndIndex) {
-                          setEndIndex(value);
-                        }
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-2 rounded-[16px] border border-slate-200 bg-white p-4">
-                    <p className="text-sm font-medium text-slate-900">终止时间</p>
-                    <p className="text-sm text-slate-500">{formatDateTime(rightEntry?.recorded_at)}</p>
-                    <CompareSlider
-                      label="终止快照"
-                      min={0}
-                      max={maxIndex}
-                      value={safeEndIndex}
-                      onChange={(value) => setEndIndex(Math.max(value, safeStartIndex))}
-                    />
-                  </div>
-                </div>
-              </div>
-            </section>
+            <CompareTimeline
+              items={orderedHistory}
+              leftTimestamp={leftTimestamp}
+              rightTimestamp={rightTimestamp}
+              onLeftChange={(timestamp) => {
+                setLeftTimestamp(timestamp);
+              }}
+              onRightChange={(timestamp) => {
+                setRightTimestamp(timestamp);
+              }}
+            />
 
             {leftEntry && rightEntry ? (
-              <HistoryCompareTable rows={compareRows} leftRecordedAt={leftEntry.recorded_at} rightRecordedAt={rightEntry.recorded_at} />
+              compareRows.length === 0 ? (
+                <HistoryCompareEmptyState rows={compareRows} />
+              ) : (
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <CompareReportPane recordedAt={leftEntry.recorded_at} result={leftEntry.result} changedPaths={changedPaths} />
+                  <CompareReportPane recordedAt={rightEntry.recorded_at} result={rightEntry.result} changedPaths={changedPaths} />
+                </div>
+              )
             ) : null}
           </div>
         )}
