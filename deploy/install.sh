@@ -57,23 +57,45 @@ if [[ ${#TARGET_IPS[@]} -eq 0 ]]; then
 fi
 
 install_dependencies() {
-  if command -v curl >/dev/null 2>&1; then
+  local need_curl=0
+  local need_cron=0
+
+  if ! command -v curl >/dev/null 2>&1; then
+    need_curl=1
+  fi
+  if ! command -v crontab >/dev/null 2>&1 && [ ! -d /etc/cron.d ]; then
+    need_cron=1
+  fi
+  if [ "$need_curl" -eq 0 ] && [ "$need_cron" -eq 0 ]; then
     return
   fi
+
   if command -v apt >/dev/null 2>&1; then
     apt update
-    apt install -y curl
+    local packages=()
+    [ "$need_curl" -eq 1 ] && packages+=("curl")
+    [ "$need_cron" -eq 1 ] && packages+=("cron")
+    apt install -y "${packages[@]}"
     return
   fi
+
   if command -v yum >/dev/null 2>&1; then
-    yum install -y curl
+    local packages=()
+    [ "$need_curl" -eq 1 ] && packages+=("curl")
+    [ "$need_cron" -eq 1 ] && packages+=("cronie")
+    yum install -y "${packages[@]}"
     return
   fi
+
   if command -v apk >/dev/null 2>&1; then
-    apk add --no-cache curl
+    local packages=()
+    [ "$need_curl" -eq 1 ] && packages+=("curl")
+    [ "$need_cron" -eq 1 ] && packages+=("dcron")
+    apk add --no-cache "${packages[@]}"
     return
   fi
-  echo "curl is required, and no supported package manager was found." >&2
+
+  echo "Missing required dependencies (curl/cron), and no supported package manager was found." >&2
   exit 1
 }
 
