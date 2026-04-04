@@ -56,25 +56,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! docker exec -i ipq-workspace-dev sh -lc '
-            set -e
-            echo "=== id ==="
-            id
-            echo "=== workspace tmp ==="
-            mkdir -p /workspace/.tmp
-            ls -ld /workspace /workspace/.tmp
-            echo "=== toolchain ==="
-            which go
-            go version
-            go env GOCACHE GOPATH CGO_ENABLED GOOS GOARCH CC CXX
-            echo "=== compiler ==="
-            which gcc || true
-            gcc --version | head -n 1 || true
-            echo "=== build ==="
-            cd /workspace
-            go build -x -o /workspace/.tmp/ipq-backend-bin ./cmd/ipq
-          ' >/tmp/ipq-backend-build.log 2>&1; then
-            cat /tmp/ipq-backend-build.log
+          if ! docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/build-backend.sh; then
+            docker exec -i ipq-workspace-dev sh -lc 'echo "=== /tmp/ipq-backend-build.log ==="; cat /tmp/ipq-backend-build.log || true'
             exit 1
           fi
 
@@ -113,9 +96,9 @@ jobs:
           set -euo pipefail
           mkdir -p ci-artifacts
           docker compose -f compose.dev.yml logs --no-color > ci-artifacts/docker-compose.log || true
-          cp /tmp/ipq-backend-build.log ci-artifacts/ipq-backend-build.log || true
-          docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend-build.log ci-artifacts/ipq-backend-build.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-backend-bootstrap.log ci-artifacts/ipq-backend-bootstrap.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-frontend.log ci-artifacts/ipq-frontend.log || true
           docker cp ipq-workspace-dev:/workspace/web/playwright-output ci-artifacts/playwright-output || true
 
