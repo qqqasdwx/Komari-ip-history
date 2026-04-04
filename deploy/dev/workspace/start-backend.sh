@@ -31,7 +31,7 @@ if [ -f "${PID_PATH}" ]; then
 fi
 rm -f "${PID_PATH}"
 if [ ! -x "${BINARY_PATH}" ]; then
-  if ! go build -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
+  if ! go build -buildvcs=false -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
     fail
   fi
 fi

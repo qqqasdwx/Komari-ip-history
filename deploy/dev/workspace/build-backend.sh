@@ -31,7 +31,7 @@ fi
 log "gcc=$(which gcc || true)"
 gcc --version >>"${LOG_FILE}" 2>&1 || true
 rm -f "${BINARY_PATH}"
-if ! go build -x -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
+if ! go build -buildvcs=false -x -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
   fail
 fi
 log "binary=$(ls -l "${BINARY_PATH}")"
