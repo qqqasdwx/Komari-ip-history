@@ -49,6 +49,9 @@ jobs:
       - name: Bootstrap workspace
         run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/bootstrap.sh
 
+      - name: Build frontend bundle
+        run: docker exec -i ipq-workspace-dev sh -lc 'cd /workspace/web && npm run build'
+
       - name: Start backend
         run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh
 
