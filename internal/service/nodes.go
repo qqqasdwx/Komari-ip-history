@@ -70,10 +70,13 @@ type PublicTargetDetail struct {
 }
 
 type NodeReportConfig struct {
-	EndpointPath  string   `json:"endpoint_path"`
-	InstallerPath string   `json:"installer_path"`
-	ReporterToken string   `json:"reporter_token"`
-	TargetIPs     []string `json:"target_ips"`
+	EndpointPath   string      `json:"endpoint_path"`
+	InstallerPath  string      `json:"installer_path"`
+	ReporterToken  string      `json:"reporter_token"`
+	TargetIPs      []string    `json:"target_ips"`
+	ScheduleCron   string      `json:"schedule_cron"`
+	RunImmediately bool        `json:"run_immediately"`
+	NextRuns       []time.Time `json:"next_runs"`
 }
 
 type NodeDetail struct {
@@ -144,6 +147,9 @@ func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*model
 			}
 			node.ReporterToken = token
 		}
+		if strings.TrimSpace(node.ReporterScheduleCron) == "" {
+			node.ReporterScheduleCron = defaultReporterScheduleCron
+		}
 		if saveErr := db.Save(&node).Error; saveErr != nil {
 			return nil, true, saveErr
 		}
@@ -159,9 +165,11 @@ func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*model
 	}
 
 	node = models.Node{
-		KomariNodeUUID: input.KomariNodeUUID,
-		Name:           input.Name,
-		ReporterToken:  reporterToken,
+		KomariNodeUUID:         input.KomariNodeUUID,
+		Name:                   input.Name,
+		ReporterToken:          reporterToken,
+		ReporterScheduleCron:   defaultReporterScheduleCron,
+		ReporterRunImmediately: true,
 	}
 	if err := db.Create(&node).Error; err != nil {
 		return nil, false, err
@@ -217,18 +225,18 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 		reportIPs = append(reportIPs, target.TargetIP)
 	}
 
+	reportConfig, err := buildNodeReportConfig(node, reportIPs)
+	if err != nil {
+		return NodeDetail{}, err
+	}
+
 	detail := NodeDetail{
 		KomariNodeUUID: node.KomariNodeUUID,
 		Name:           node.Name,
 		HasData:        node.HasData,
 		UpdatedAt:      node.CurrentResultUpdatedAt,
 		Targets:        targetItems,
-		ReportConfig: NodeReportConfig{
-			EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
-			InstallerPath: "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
-			ReporterToken: node.ReporterToken,
-			TargetIPs:     reportIPs,
-		},
+		ReportConfig:   reportConfig,
 	}
 
 	if selected != nil {
@@ -697,7 +705,7 @@ func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error)
 	}, nil
 }
 
-func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string) (string, error) {
+func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, scheduleCronOverride string, runImmediatelyOverride *bool) (string, error) {
 	if strings.TrimSpace(token) == "" {
 		return "", errors.New("missing reporter token")
 	}
@@ -717,8 +725,19 @@ func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string) (s
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
 	}
+	scheduleCron, runImmediately := normalizeReporterSchedule(node)
+	if strings.TrimSpace(scheduleCronOverride) != "" {
+		scheduleCron = scheduleCronOverride
+	}
+	if runImmediatelyOverride != nil {
+		runImmediately = *runImmediatelyOverride
+	}
+	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	if err != nil {
+		return "", err
+	}
 
-	return buildNodeInstallScript(node, targetIPs, reportEndpointURL), nil
+	return buildNodeInstallScript(node, targetIPs, reportEndpointURL, normalizedCron, runImmediately), nil
 }
 
 func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
@@ -966,12 +985,15 @@ func applyHistoryRange(query *gorm.DB, startAt, endAt *time.Time) *gorm.DB {
 	return query
 }
 
-func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL string) string {
+func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL, scheduleCron string, runImmediately bool) string {
 	var builder strings.Builder
 	unitName := "ipq-reporter-" + node.KomariNodeUUID
-	scriptPath := "/usr/local/bin/" + unitName + ".sh"
+	installDir := "/opt/" + unitName
+	scriptPath := installDir + "/run.sh"
+	legacyScriptPath := "/usr/local/bin/" + unitName + ".sh"
 	servicePath := "/etc/systemd/system/" + unitName + ".service"
 	timerPath := "/etc/systemd/system/" + unitName + ".timer"
+	cronPath := "/etc/cron.d/" + unitName
 
 	builder.WriteString("#!/usr/bin/env bash\n")
 	builder.WriteString("set -euo pipefail\n\n")
@@ -979,6 +1001,35 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	builder.WriteString("  echo \"This installer must be run as root.\" >&2\n")
 	builder.WriteString("  exit 1\n")
 	builder.WriteString("fi\n\n")
+	builder.WriteString("install_dependencies() {\n")
+	builder.WriteString("  if command -v curl >/dev/null 2>&1; then\n")
+	builder.WriteString("    return\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if command -v apt >/dev/null 2>&1; then\n")
+	builder.WriteString("    apt update\n")
+	builder.WriteString("    apt install -y curl\n")
+	builder.WriteString("    return\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if command -v yum >/dev/null 2>&1; then\n")
+	builder.WriteString("    yum install -y curl\n")
+	builder.WriteString("    return\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if command -v apk >/dev/null 2>&1; then\n")
+	builder.WriteString("    apk add --no-cache curl\n")
+	builder.WriteString("    return\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  echo \"curl is required, and no supported package manager was found.\" >&2\n")
+	builder.WriteString("  exit 1\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("install_dependencies\n\n")
+	builder.WriteString("if command -v systemctl >/dev/null 2>&1; then\n")
+	builder.WriteString("  systemctl stop " + shellQuote(unitName+".timer") + " >/dev/null 2>&1 || true\n")
+	builder.WriteString("  systemctl disable " + shellQuote(unitName+".timer") + " >/dev/null 2>&1 || true\n")
+	builder.WriteString("  systemctl stop " + shellQuote(unitName+".service") + " >/dev/null 2>&1 || true\n")
+	builder.WriteString("  systemctl disable " + shellQuote(unitName+".service") + " >/dev/null 2>&1 || true\n")
+	builder.WriteString("fi\n")
+	builder.WriteString("rm -f " + shellQuote(servicePath) + " " + shellQuote(timerPath) + " " + shellQuote(cronPath) + " " + shellQuote(legacyScriptPath) + "\n")
+	builder.WriteString("mkdir -p " + shellQuote(installDir) + "\n\n")
 
 	builder.WriteString("cat > " + shellQuote(scriptPath) + " <<'IPQ_REPORTER_SCRIPT'\n")
 	builder.WriteString("#!/usr/bin/env bash\n")
@@ -1022,37 +1073,37 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	builder.WriteString("IPQ_REPORTER_SCRIPT\n\n")
 
 	builder.WriteString("chmod +x " + shellQuote(scriptPath) + "\n\n")
-	builder.WriteString("cat > " + shellQuote(servicePath) + " <<'IPQ_REPORTER_SERVICE'\n")
-	builder.WriteString("[Unit]\n")
-	builder.WriteString("Description=Komari IP Quality reporter for " + escapeINIValue(node.Name) + "\n")
-	builder.WriteString("After=network-online.target\n")
-	builder.WriteString("Wants=network-online.target\n\n")
-	builder.WriteString("[Service]\n")
-	builder.WriteString("Type=oneshot\n")
-	builder.WriteString("ExecStart=" + scriptPath + "\n")
-	builder.WriteString("IPQ_REPORTER_SERVICE\n\n")
-	builder.WriteString("cat > " + shellQuote(timerPath) + " <<'IPQ_REPORTER_TIMER'\n")
-	builder.WriteString("[Unit]\n")
-	builder.WriteString("Description=Run " + unitName + " hourly\n\n")
-	builder.WriteString("[Timer]\n")
-	builder.WriteString("OnBootSec=5min\n")
-	builder.WriteString("OnUnitActiveSec=1h\n")
-	builder.WriteString("Unit=" + unitName + ".service\n\n")
-	builder.WriteString("[Install]\n")
-	builder.WriteString("WantedBy=timers.target\n")
-	builder.WriteString("IPQ_REPORTER_TIMER\n\n")
-	builder.WriteString("systemctl daemon-reload\n")
-	builder.WriteString("systemctl enable --now " + shellQuote(unitName+".timer") + "\n")
-	builder.WriteString("systemctl start " + shellQuote(unitName+".service") + "\n\n")
+	builder.WriteString("cat > " + shellQuote(cronPath) + " <<'IPQ_REPORTER_CRON'\n")
+	builder.WriteString("SHELL=/bin/bash\n")
+	builder.WriteString("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
+	builder.WriteString(scheduleCron + " root " + scriptPath + "\n")
+	builder.WriteString("IPQ_REPORTER_CRON\n\n")
+	builder.WriteString("chmod 0644 " + shellQuote(cronPath) + "\n")
+	builder.WriteString("if command -v systemctl >/dev/null 2>&1; then\n")
+	builder.WriteString("  systemctl daemon-reload >/dev/null 2>&1 || true\n")
+	builder.WriteString("  if systemctl list-unit-files cron.service >/dev/null 2>&1; then\n")
+	builder.WriteString("    systemctl enable --now cron.service >/dev/null 2>&1 || true\n")
+	builder.WriteString("  elif systemctl list-unit-files crond.service >/dev/null 2>&1; then\n")
+	builder.WriteString("    systemctl enable --now crond.service >/dev/null 2>&1 || true\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("fi\n\n")
+	if runImmediately {
+		builder.WriteString("echo " + shellQuote("Running the reporter immediately once after installation.") + "\n")
+		builder.WriteString("if ! " + shellQuote(scriptPath) + "; then\n")
+		builder.WriteString("  echo " + shellQuote("Immediate run failed. Scheduled execution remains installed.") + " >&2\n")
+		builder.WriteString("fi\n\n")
+	}
 	builder.WriteString("echo " + shellQuote("Installed "+unitName+" with "+strconv.Itoa(len(targetIPs))+" target IP(s).") + "\n")
-	builder.WriteString("echo " + shellQuote("Re-run this command after changing the target IP list to update the service.") + "\n")
+	builder.WriteString("echo " + shellQuote("Schedule: "+scheduleCron) + "\n")
+	if runImmediately {
+		builder.WriteString("echo " + shellQuote("Immediate execution: enabled") + "\n")
+	} else {
+		builder.WriteString("echo " + shellQuote("Immediate execution: disabled") + "\n")
+	}
+	builder.WriteString("echo " + shellQuote("Re-run this command after changing the target IP list or schedule to replace the existing reporter configuration.") + "\n")
 	return builder.String()
 }
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
-}
-
-func escapeINIValue(value string) string {
-	return strings.NewReplacer("\n", " ", "\r", " ").Replace(value)
 }

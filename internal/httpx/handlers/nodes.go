@@ -28,6 +28,9 @@ func (h NodeHandler) List(c *gin.Context) {
 }
 
 func (h NodeHandler) Detail(c *gin.Context) {
+	if delayMS, ok := parseDebugDelayMS(c.Query("debug_delay_ms")); ok {
+		time.Sleep(time.Duration(delayMS) * time.Millisecond)
+	}
 	targetID := parseTargetID(c.Query("target_id"))
 	detail, err := service.GetNodeDetail(h.DB, c.Param("uuid"), targetID)
 	if err != nil {
@@ -179,6 +182,42 @@ func (h NodeHandler) RotateReporterToken(c *gin.Context) {
 	c.JSON(http.StatusOK, config)
 }
 
+func (h NodeHandler) PreviewReportConfig(c *gin.Context) {
+	runImmediately, err := service.ParseOptionalRunImmediately(c.Query("run_immediately"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid run_immediately"})
+		return
+	}
+	preview, previewErr := service.GetNodeReportConfigPreview(h.DB, c.Param("uuid"), c.Query("cron"), runImmediately)
+	if previewErr != nil {
+		if previewErr.Error() == "invalid cron expression" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": previewErr.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+func (h NodeHandler) UpdateReportConfig(c *gin.Context) {
+	var req service.UpdateNodeReportConfigInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	config, updateErr := service.UpdateNodeReportConfig(h.DB, c.Param("uuid"), req)
+	if updateErr != nil {
+		if updateErr.Error() == "invalid cron expression" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": updateErr.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}
+
 func parseTargetID(raw string) *uint {
 	if raw == "" {
 		return nil
@@ -189,6 +228,21 @@ func parseTargetID(raw string) *uint {
 	}
 	targetID := uint(value)
 	return &targetID
+}
+
+func parseDebugDelayMS(raw string) (int, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, false
+	}
+	delayMS, err := strconv.Atoi(value)
+	if err != nil || delayMS <= 0 {
+		return 0, false
+	}
+	if delayMS > 10000 {
+		delayMS = 10000
+	}
+	return delayMS, true
 }
 
 func parsePositiveInt(raw string) int {

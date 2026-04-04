@@ -50,7 +50,7 @@ textarea {
 @media (min-width: 1180px) {
   .react-node-list-head,
   .react-node-list-row {
-    grid-template-columns: minmax(220px, 1.5fr) 92px 180px 56px;
+    grid-template-columns: minmax(220px, 1.5fr) 92px 180px 120px;
     align-items: center;
     gap: 16px;
   }
@@ -58,4 +58,67 @@ textarea {
   .react-node-list-head {
     display: grid;
   }
+}
+
+.report-config-next-runs {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  min-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.report-config-command {
+  min-height: 7.5rem;
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.target-tabs-attached {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: -1px;
+}
+
+.target-tab-shell {
+  position: relative;
+}
+
+.target-tab-button-attached {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-bottom-color: #cbd5e1;
+  border-radius: 14px 14px 0 0;
+  background: #f8fafc;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #475569;
+  transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.target-tab-button-attached:hover {
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+.target-tab-button-attached.is-active {
+  border-color: #cbd5e1;
+  border-bottom-color: #ffffff;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.detail-target-panel {
+  border-top: 1px solid #cbd5e1;
+  padding-top: 20px;
 }

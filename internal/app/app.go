@@ -80,6 +80,8 @@ func Run() error {
 			nodes.POST("/:uuid/targets", nodeHandler.AddTarget)
 			nodes.DELETE("/:uuid/targets/:targetID", nodeHandler.DeleteTarget)
 			nodes.POST("/:uuid/targets/reorder", nodeHandler.ReorderTargets)
+			nodes.GET("/:uuid/report-config/preview", nodeHandler.PreviewReportConfig)
+			nodes.PUT("/:uuid/report-config", nodeHandler.UpdateReportConfig)
 			nodes.POST("/:uuid/reporter-token/rotate", nodeHandler.RotateReporterToken)
 			nodes.DELETE("/:uuid", nodeHandler.Delete)
 		}

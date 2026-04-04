@@ -66,7 +66,16 @@ export type NodeDetail = {
     installer_path: string;
     reporter_token: string;
     target_ips: string[];
+    schedule_cron: string;
+    run_immediately: boolean;
+    next_runs: string[];
   };
+};
+
+export type NodeReportConfigPreview = {
+  schedule_cron: string;
+  run_immediately: boolean;
+  next_runs: string[];
 };
 
 export type PublicTargetListItem = {

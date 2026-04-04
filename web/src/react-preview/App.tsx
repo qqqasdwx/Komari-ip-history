@@ -1,5 +1,6 @@
 import {
   ArrowLeftIcon,
+  Cross2Icon,
   ExitIcon,
   GearIcon,
   PlusIcon,
@@ -29,6 +30,7 @@ import type {
   IntegrationSettings,
   MeResponse,
   NodeDetail,
+  NodeReportConfigPreview,
   NodeHistoryChangeEventPage,
   NodeHistoryDetailResponse,
   NodeHistoryEntry,
@@ -48,6 +50,7 @@ type NavItem = {
 };
 
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
+const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh";
 
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <RowsIcon /> }];
 
@@ -218,12 +221,18 @@ async function copyText(value: string) {
   await navigator.clipboard.writeText(value);
 }
 
-function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void) {
+function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void, debugDelayMS?: number | null) {
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [detail, setDetail] = useState<NodeDetail | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const detailRef = useRef<NodeDetail | null>(null);
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -232,15 +241,29 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
       if (!uuid) {
         setError("节点不存在");
         setLoading(false);
+        setRefreshing(false);
         return;
       }
 
-      setLoading(true);
+      const currentDetail = detailRef.current;
+      const refreshInPlace = currentDetail !== null && currentDetail.komari_node_uuid === uuid;
+      if (refreshInPlace) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError("");
       setErrorStatus(null);
 
       try {
-        const detailPath = `/nodes/${uuid}${targetID ? `?target_id=${targetID}` : ""}`;
+        const query = new URLSearchParams();
+        if (targetID) {
+          query.set("target_id", String(targetID));
+        }
+        if (debugDelayMS && debugDelayMS > 0) {
+          query.set("debug_delay_ms", String(debugDelayMS));
+        }
+        const detailPath = `/nodes/${uuid}${query.size > 0 ? `?${query.toString()}` : ""}`;
         const detailResponse = await apiRequest<NodeDetail>(detailPath);
 
         if (cancelled) {
@@ -259,10 +282,14 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
         if (loadError instanceof RequestError) {
           setErrorStatus(loadError.status);
         }
-        setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
+        const activeDetail = detailRef.current;
+        if (!activeDetail || activeDetail.komari_node_uuid !== uuid) {
+          setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setRefreshing(false);
         }
       }
     }
@@ -272,10 +299,11 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized, reloadToken, targetID, uuid]);
+  }, [debugDelayMS, onUnauthorized, reloadToken, targetID, uuid]);
 
   return {
     loading,
+    refreshing,
     error,
     errorStatus,
     detail,
@@ -1108,13 +1136,15 @@ function StatusPill(props: { hasData: boolean }) {
   );
 }
 
-function NodesPage(props: { onUnauthorized: () => void }) {
+function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [nodes, setNodes] = useState<NodeListItem[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
+  const [reportConfigNodeUUID, setReportConfigNodeUUID] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1157,6 +1187,14 @@ function NodesPage(props: { onUnauthorized: () => void }) {
 
   return (
     <section className="space-y-6">
+      {reportConfigNodeUUID ? (
+        <NodeReportConfigDialog
+          me={props.me}
+          nodeUUID={reportConfigNodeUUID}
+          onClose={() => setReportConfigNodeUUID("")}
+          onUnauthorized={props.onUnauthorized}
+        />
+      ) : null}
       <PageHeader
         title="节点列表"
         subtitle={`${nodes.length} 个已接入节点`}
@@ -1218,29 +1256,52 @@ function NodesPage(props: { onUnauthorized: () => void }) {
           <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-200">
             <div className="react-node-list-head bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               <span>节点</span>
-              <span>状态</span>
-              <span>最近更新</span>
-              <span></span>
+              <span className="text-center">状态</span>
+              <span className="text-center">最近更新</span>
+              <span className="text-center">操作</span>
             </div>
             <div className="react-node-list-body">
               {nodes.map((item) => (
-                <Link
+                <div
                   key={item.komari_node_uuid}
-                  className="react-node-list-row border-t border-slate-200 px-4 py-4 text-sm text-slate-700 transition hover:bg-slate-50 first:border-t-0"
+                  className="react-node-list-row cursor-pointer border-t border-slate-200 px-4 py-4 text-sm text-slate-700 transition hover:bg-slate-50 first:border-t-0"
                   data-node-row="true"
-                  to={`/nodes/${item.komari_node_uuid}`}
+                  data-node-uuid={item.komari_node_uuid}
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => navigate(`/nodes/${item.komari_node_uuid}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/nodes/${item.komari_node_uuid}`);
+                    }
+                  }}
                 >
                   <div className="min-w-0">
                     <strong className="block truncate text-sm font-semibold text-slate-900" data-node-name="true">
                       {item.name}
                     </strong>
                   </div>
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 justify-center">
                     <StatusPill hasData={item.has_data} />
                   </div>
-                  <div className="min-w-0 text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
-                  <div className="text-sm font-semibold text-indigo-600">查看</div>
-                </Link>
+                  <div className="min-w-0 text-center text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      aria-label="上报设置"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                      data-node-report-settings="true"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setReportConfigNodeUUID(item.komari_node_uuid);
+                      }}
+                      type="button"
+                    >
+                      <GearIcon />
+                    </button>
+                    <span className="text-sm font-semibold text-indigo-600">查看</span>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -1270,13 +1331,197 @@ function resolveReportEndpointURL(me: MeResponse, path: string) {
   return `${base}${path}`;
 }
 
-function buildInstallCommand(installerURL: string, reporterToken: string) {
-  return `curl -fsSL -H 'X-IPQ-Reporter-Token: ${reporterToken}' '${installerURL}' | sudo bash`;
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
-  const installerURL = resolveReportEndpointURL(props.me, props.detail.report_config.installer_path);
-  const installCommand = buildInstallCommand(installerURL, props.detail.report_config.reporter_token);
+function buildInstallCommand(
+  reportEndpointURL: string,
+  reporterToken: string,
+  nodeUUID: string,
+  targetIPs: string[],
+  scheduleCron: string,
+  runImmediately: boolean
+) {
+  const args = [
+    "--node-uuid",
+    nodeUUID,
+    "--server",
+    reportEndpointURL,
+    "--token",
+    reporterToken,
+    "--cron",
+    scheduleCron,
+    "--run-immediately",
+    runImmediately ? "1" : "0",
+    ...targetIPs.flatMap((ip) => ["--target-ip", ip])
+  ];
+  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | sudo bash -s -- ${args.map(shellQuote).join(" ")}`;
+}
+
+function ReportConfigSection(props: {
+  me: MeResponse;
+  detail: NodeDetail;
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  targetInput: string;
+  targetError: string;
+  targetSaving: boolean;
+  onTargetInputChange: (value: string) => void;
+  onAddTarget: (event: FormEvent<HTMLFormElement>) => void;
+  onDeleteCurrentTarget: (targetID: number) => void;
+  onSelectTarget: (targetID: number) => void;
+  onReorderTargets: (sourceID: number, destinationID: number) => void;
+}) {
+  const reportEndpointURL = resolveReportEndpointURL(props.me, props.detail.report_config.endpoint_path);
+  const [scheduleCron, setScheduleCron] = useState(props.detail.report_config.schedule_cron);
+  const [runImmediately, setRunImmediately] = useState(props.detail.report_config.run_immediately);
+  const [preview, setPreview] = useState<NodeReportConfigPreview>({
+    schedule_cron: props.detail.report_config.schedule_cron,
+    run_immediately: props.detail.report_config.run_immediately,
+    next_runs: props.detail.report_config.next_runs
+  });
+  const [previewError, setPreviewError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [persistedConfig, setPersistedConfig] = useState({
+    scheduleCron: props.detail.report_config.schedule_cron,
+    runImmediately: props.detail.report_config.run_immediately
+  });
+  const installCommand = buildInstallCommand(
+    reportEndpointURL,
+    props.detail.report_config.reporter_token,
+    props.detail.komari_node_uuid,
+    props.detail.report_config.target_ips,
+    previewError ? props.detail.report_config.schedule_cron : preview.schedule_cron,
+    runImmediately
+  );
+
+  useEffect(() => {
+    if (!props.open) {
+      return;
+    }
+    setScheduleCron(props.detail.report_config.schedule_cron);
+    setRunImmediately(props.detail.report_config.run_immediately);
+    setPreview({
+      schedule_cron: props.detail.report_config.schedule_cron,
+      run_immediately: props.detail.report_config.run_immediately,
+      next_runs: props.detail.report_config.next_runs
+    });
+    setPersistedConfig({
+      scheduleCron: props.detail.report_config.schedule_cron,
+      runImmediately: props.detail.report_config.run_immediately
+    });
+    setPreviewError("");
+    setSaveError("");
+    setSaveState("idle");
+  }, [
+    props.open,
+    props.detail.report_config.next_runs,
+    props.detail.report_config.run_immediately,
+    props.detail.report_config.schedule_cron
+  ]);
+
+  useEffect(() => {
+    if (!props.open) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    const timeoutID = window.setTimeout(async () => {
+      try {
+        const search = new URLSearchParams();
+        search.set("cron", scheduleCron);
+        search.set("run_immediately", runImmediately ? "1" : "0");
+        const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${props.detail.komari_node_uuid}/report-config/preview?${search.toString()}`, {
+          signal: controller.signal
+        });
+        setPreview(data);
+        setPreviewError("");
+      } catch (error) {
+        if (error instanceof RequestError) {
+          setPreviewError(error.message || "Cron 表达式无效。");
+          return;
+        }
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        setPreviewError("无法预览当前计划。");
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutID);
+    };
+  }, [props.detail.komari_node_uuid, props.open, runImmediately, scheduleCron]);
+
+  useEffect(() => {
+    if (!props.open || previewError) {
+      return undefined;
+    }
+    const normalizedCron = preview.schedule_cron.trim();
+    if (
+      normalizedCron === persistedConfig.scheduleCron &&
+      runImmediately === persistedConfig.runImmediately
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timeoutID = window.setTimeout(async () => {
+      setSaveState("saving");
+      setSaveError("");
+      try {
+        const config = await apiRequest<NodeDetail["report_config"]>(`/nodes/${props.detail.komari_node_uuid}/report-config`, {
+          method: "PUT",
+          body: JSON.stringify({
+            schedule_cron: normalizedCron,
+            run_immediately: runImmediately
+          })
+        });
+        if (cancelled) {
+          return;
+        }
+        setPersistedConfig({
+          scheduleCron: config.schedule_cron,
+          runImmediately: config.run_immediately
+        });
+        setScheduleCron(config.schedule_cron);
+        setRunImmediately(config.run_immediately);
+        setPreview({
+          schedule_cron: config.schedule_cron,
+          run_immediately: config.run_immediately,
+          next_runs: config.next_runs
+        });
+        setSaveState("saved");
+        props.onSaved();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        if (error instanceof RequestError) {
+          setSaveError(error.message || "保存失败。");
+        } else {
+          setSaveError("保存失败。");
+        }
+        setSaveState("idle");
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutID);
+    };
+  }, [
+    persistedConfig.runImmediately,
+    persistedConfig.scheduleCron,
+    preview.schedule_cron,
+    previewError,
+    props.detail.komari_node_uuid,
+    props.onSaved,
+    props.open,
+    runImmediately
+  ]);
 
   async function handleCopy(value: string, successText: string) {
     try {
@@ -1287,42 +1532,362 @@ function ReportConfigSection(props: { me: MeResponse; detail: NodeDetail }) {
     }
   }
 
+  if (!props.open) {
+    return null;
+  }
+
   return (
-    <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-node-report-config="true">
-      <div className="section space-y-4">
+    <div className="field-modal-backdrop" onClick={props.onClose}>
+      <section
+        className="field-modal report-config-modal"
+        data-node-report-config="true"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="field-modal-head">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
+            <p className="text-sm text-slate-500">统一管理目标 IP、执行计划和接入命令。</p>
+          </div>
+          <button className="button ghost" onClick={props.onClose} type="button">
+            关闭
+          </button>
+        </div>
+        <div className="field-modal-body">
         <div className="space-y-1">
-          <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
           {props.detail.report_config.target_ips.length > 0 ? (
             <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
           ) : (
             <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
           )}
         </div>
+        <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-slate-900">目标 IP</h3>
+              <p className="text-sm text-slate-500">拖拽可调整顺序，接入命令会按当前顺序依次探查。</p>
+            </div>
+          </div>
+          {props.detail.targets.length > 0 ? (
+            <TargetTabs
+              items={props.detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
+              onDelete={(targetID) => void props.onDeleteCurrentTarget(targetID)}
+              onReorder={(sourceID, destinationID) => void props.onReorderTargets(sourceID, destinationID)}
+              onSelect={(targetID) => props.onSelectTarget(targetID)}
+              selectedId={props.detail.selected_target_id ?? props.detail.current_target?.id ?? null}
+            />
+          ) : (
+            <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+              当前节点还没有目标 IP，请先添加。
+            </div>
+          )}
+          <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_48px]" onSubmit={props.onAddTarget}>
+            <label className="grid min-w-0 gap-2 text-sm text-slate-700">
+              <input
+                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                onChange={(event) => props.onTargetInputChange(event.target.value)}
+                placeholder="例如 1.1.1.1 或 2606:4700:4700::1111"
+                value={props.targetInput}
+              />
+            </label>
+            <button
+              aria-label="添加 IP"
+              className="inline-flex h-11 w-12 items-center justify-center rounded-xl bg-indigo-500 text-sm font-medium text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
+              disabled={props.targetSaving || !props.targetInput.trim()}
+              type="submit"
+            >
+              <PlusIcon />
+            </button>
+          </form>
+          {props.targetError ? <p className="text-sm text-rose-600">{props.targetError}</p> : null}
+        </div>
+        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
+          <label className="space-y-1 text-sm text-slate-700">
+            <span className="font-medium text-slate-900">Cron</span>
+            <input
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              onChange={(event) => setScheduleCron(event.target.value)}
+              placeholder="0 0 * * *"
+              spellCheck={false}
+              value={scheduleCron}
+            />
+            <p className="text-xs text-slate-500">默认每天 0 点执行，使用标准 5 段 cron 表达式。</p>
+          </label>
+          <label className="space-y-1 text-sm text-slate-700">
+            <span className="font-medium text-slate-900">安装后立即执行一次</span>
+            <span className="flex h-11 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <input checked={runImmediately} onChange={(event) => setRunImmediately(event.target.checked)} type="checkbox" />
+              <span>启用</span>
+            </span>
+          </label>
+        </div>
+        {previewError ? <p className="text-sm font-medium text-rose-600">{previewError}</p> : null}
+        {!previewError && saveError ? <p className="text-sm font-medium text-rose-600">{saveError}</p> : null}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <strong className="text-sm text-slate-900">最近 10 次执行时间</strong>
+            <span className="text-xs text-slate-500">
+              {previewError ? "请先修正 Cron" : saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已自动保存" : "自动保存"}
+            </span>
+          </div>
+          <div className="report-config-next-runs">
+            {preview.next_runs.map((value) => (
+              <div key={value} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                {formatDateTime(value)}
+              </div>
+            ))}
+          </div>
+        </div>
         {props.detail.report_config.target_ips.length > 0 ? (
           <>
-            <div className="flex flex-wrap gap-2">
-              {props.detail.report_config.target_ips.map((ip) => (
-                <span
-                  key={ip}
-                  className="inline-flex min-h-8 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700"
-                >
-                  {ip}
-                </span>
-              ))}
-            </div>
             <div className="summary-section">
               <div className="summary-head">
                 <strong>接入命令</strong>
-                <button className="button ghost" onClick={() => void handleCopy(installCommand, "接入命令已复制。")} type="button">
+                <button
+                  className="button ghost"
+                  disabled={previewError !== ""}
+                  onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
+                  type="button"
+                >
                   复制
                 </button>
               </div>
-              <pre className="code-block code-block-compact">{installCommand}</pre>
+              <pre className="code-block report-config-command">{installCommand}</pre>
             </div>
           </>
         ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function NodeReportConfigDialog(props: {
+  me: MeResponse;
+  nodeUUID: string;
+  onClose: () => void;
+  onUnauthorized: () => void;
+}) {
+  const [selectedTargetID, setSelectedTargetID] = useState<number | null>(null);
+  const [targetInput, setTargetInput] = useState("");
+  const [targetError, setTargetError] = useState("");
+  const [targetSaving, setTargetSaving] = useState(false);
+  const { loading, error, detail, reload } = useNodePageData(props.nodeUUID, selectedTargetID, props.onUnauthorized);
+  const [localDetail, setLocalDetail] = useState<NodeDetail | null>(null);
+
+  useEffect(() => {
+    setSelectedTargetID(null);
+    setTargetInput("");
+    setTargetError("");
+  }, [props.nodeUUID]);
+
+  useEffect(() => {
+    setLocalDetail(detail);
+  }, [detail]);
+
+  async function handleAddTarget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      const created = await apiRequest<NodeTargetListItem>(`/nodes/${props.nodeUUID}/targets`, {
+        method: "POST",
+        body: JSON.stringify({ ip: targetInput.trim() })
+      });
+      setTargetInput("");
+      setSelectedTargetID(created.id);
+      setLocalDetail((current) =>
+        current
+          ? {
+              ...current,
+              targets: [...current.targets, created].sort((a, b) => a.sort_order - b.sort_order),
+              selected_target_id: created.id
+            }
+          : current
+      );
+      reload();
+    } catch (targetCreateError) {
+      if (targetCreateError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(targetCreateError instanceof Error ? targetCreateError.message : "添加目标 IP 失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleDeleteTarget(targetID: number) {
+    const previousDetail = localDetail;
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      setLocalDetail((current) => {
+        if (!current) {
+          return current;
+        }
+        const nextTargets = current.targets.filter((item) => item.id !== targetID);
+        const nextSelectedTargetID =
+          current.selected_target_id === targetID
+            ? nextTargets[0]?.id ?? null
+            : current.selected_target_id ?? nextTargets[0]?.id ?? null;
+        const nextCurrentTarget =
+          current.current_target?.id === targetID
+            ? null
+            : current.current_target && nextTargets.some((item) => item.id === current.current_target?.id)
+              ? current.current_target
+              : null;
+        return {
+          ...current,
+          targets: nextTargets,
+          selected_target_id: nextSelectedTargetID,
+          current_target: nextCurrentTarget,
+          report_config: {
+            ...current.report_config,
+            target_ips: nextTargets.map((item) => item.ip)
+          }
+        };
+      });
+      setSelectedTargetID((current) => (current === targetID ? null : current));
+      await apiRequest(`/nodes/${props.nodeUUID}/targets/${targetID}`, { method: "DELETE" });
+    } catch (targetDeleteError) {
+      setLocalDetail(previousDetail);
+      if (targetDeleteError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(targetDeleteError instanceof Error ? targetDeleteError.message : "删除目标 IP 失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleReorderTargets(sourceID: number, destinationID: number) {
+    if (!localDetail) {
+      return;
+    }
+
+    const orderedIDs = localDetail.targets.map((item) => item.id);
+    const sourceIndex = orderedIDs.indexOf(sourceID);
+    const destinationIndex = orderedIDs.indexOf(destinationID);
+    if (sourceIndex === -1 || destinationIndex === -1 || sourceIndex === destinationIndex) {
+      return;
+    }
+
+    const next = [...orderedIDs];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(destinationIndex, 0, moved);
+
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      setLocalDetail((current) => {
+        if (!current) {
+          return current;
+        }
+        const targetMap = new Map(current.targets.map((item) => [item.id, item]));
+        const reorderedTargets = next
+          .map((id, index) => {
+            const item = targetMap.get(id);
+            if (!item) {
+              return null;
+            }
+            return { ...item, sort_order: index };
+          })
+          .filter((item): item is NodeTargetListItem => item !== null);
+        return {
+          ...current,
+          targets: reorderedTargets,
+          report_config: {
+            ...current.report_config,
+            target_ips: reorderedTargets.map((item) => item.ip)
+          }
+        };
+      });
+      await apiRequest(`/nodes/${props.nodeUUID}/targets/reorder`, {
+        method: "POST",
+        body: JSON.stringify({ target_ids: next })
+      });
+    } catch (reorderError) {
+      setLocalDetail(detail);
+      if (reorderError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(reorderError instanceof Error ? reorderError.message : "调整目标 IP 顺序失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  if (loading && !localDetail) {
+    return (
+      <div className="field-modal-backdrop" onClick={props.onClose}>
+        <section className="field-modal report-config-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="field-modal-head">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
+              <p className="text-sm text-slate-500">正在加载当前节点配置。</p>
+            </div>
+            <button className="button ghost" onClick={props.onClose} type="button">
+              关闭
+            </button>
+          </div>
+          <div className="field-modal-body">
+            <div className="grid gap-3">
+              <div className="h-12 animate-pulse rounded-2xl bg-slate-100" />
+              <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />
+              <div className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+            </div>
+          </div>
+        </section>
       </div>
-    </section>
+    );
+  }
+
+  if (error || !localDetail) {
+    return (
+      <div className="field-modal-backdrop" onClick={props.onClose}>
+        <section className="field-modal report-config-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="field-modal-head">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
+              <p className="text-sm text-slate-500">加载失败，请重试。</p>
+            </div>
+            <button className="button ghost" onClick={props.onClose} type="button">
+              关闭
+            </button>
+          </div>
+          <div className="field-modal-body space-y-4">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
+              {error || "加载节点上报设置失败。"}
+            </div>
+            <div>
+              <button className="button" onClick={reload} type="button">
+                重试
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <ReportConfigSection
+      detail={localDetail}
+      me={props.me}
+      onAddTarget={handleAddTarget}
+      onClose={props.onClose}
+      onSaved={reload}
+      onDeleteCurrentTarget={(targetID) => void handleDeleteTarget(targetID)}
+      onReorderTargets={(sourceID, destinationID) => void handleReorderTargets(sourceID, destinationID)}
+      onSelectTarget={(targetID) => setSelectedTargetID(targetID)}
+      onTargetInputChange={setTargetInput}
+      open={true}
+      targetError={targetError}
+      targetInput={targetInput}
+      targetSaving={targetSaving}
+    />
   );
 }
 
@@ -1378,6 +1943,7 @@ function HistoryChangeFiltersBar(props: {
       <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.8fr)_minmax(180px,220px)_minmax(220px,1fr)]">
         <div className="relative" ref={rangePanelRef}>
           <button
+            data-history-range-trigger="true"
             className={[
               "flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm outline-none transition focus:ring-2 focus:ring-indigo-100",
               rangeOpen || props.startDate || props.endDate
@@ -1919,8 +2485,11 @@ function TargetTabs(props: {
   selectedId: number | null;
   onSelect: (targetID: number) => void;
   onReorder?: (sourceID: number, destinationID: number) => void;
+  onDelete?: (targetID: number) => void;
+  variant?: "default" | "attached";
 }) {
   const [draggingTargetID, setDraggingTargetID] = useState<number | null>(null);
+  const isAttached = props.variant === "attached";
 
   function handleDrop(destinationID: number) {
     if (!props.onReorder || draggingTargetID === null || draggingTargetID === destinationID) {
@@ -1932,36 +2501,60 @@ function TargetTabs(props: {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className={isAttached ? "target-tabs target-tabs-attached" : "flex flex-wrap items-center gap-2"}>
       {props.items.map((item) => (
-        <button
-          key={item.id}
-          className={[
-            "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
-            props.selectedId === item.id
-              ? "border-indigo-200 bg-indigo-50 text-indigo-600"
-              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-indigo-600"
-          ].join(" ")}
-          draggable={Boolean(props.onReorder)}
-          onClick={() => props.onSelect(item.id)}
-          onDragOver={(event: DragEvent<HTMLButtonElement>) => {
-            if (props.onReorder) {
-              event.preventDefault();
-            }
-          }}
-          onDragStart={() => setDraggingTargetID(item.id)}
-          onDrop={() => handleDrop(item.id)}
-          onDragEnd={() => setDraggingTargetID(null)}
-          type="button"
-        >
-          <span
+        <div key={item.id} className={isAttached ? "group relative target-tab-shell" : "group relative"}>
+          <button
             className={[
-              "inline-block h-2.5 w-2.5 rounded-full",
-              item.has_data ? "bg-emerald-500" : "bg-slate-300"
+              isAttached
+                ? "target-tab-button target-tab-button-attached"
+                : "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
+              props.onDelete ? "pr-10" : "",
+              props.selectedId === item.id
+                ? isAttached
+                  ? "is-active"
+                  : "border-indigo-200 bg-indigo-50 text-indigo-600"
+                : isAttached
+                  ? ""
+                  : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-indigo-600"
             ].join(" ")}
-          />
-          <span>{item.label}</span>
-        </button>
+            draggable={Boolean(props.onReorder)}
+            onClick={() => props.onSelect(item.id)}
+            onDragOver={(event: DragEvent<HTMLButtonElement>) => {
+              if (props.onReorder) {
+                event.preventDefault();
+              }
+            }}
+            onDragStart={() => setDraggingTargetID(item.id)}
+            onDrop={() => handleDrop(item.id)}
+            onDragEnd={() => setDraggingTargetID(null)}
+            type="button"
+          >
+            <span
+              className={[
+                "inline-block h-2.5 w-2.5 rounded-full",
+                item.has_data ? "bg-emerald-500" : "bg-slate-300"
+              ].join(" ")}
+            />
+            <span>{item.label}</span>
+          </button>
+          {props.onDelete ? (
+            <button
+              aria-label={`删除 ${item.label}`}
+              className={[
+                "absolute inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600",
+                isAttached ? "right-2 top-[18px]" : "right-2 top-1/2 -translate-y-1/2"
+              ].join(" ")}
+              onClick={(event) => {
+                event.stopPropagation();
+                void props.onDelete?.(item.id);
+              }}
+              type="button"
+            >
+              <Cross2Icon />
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   );
@@ -2006,10 +2599,23 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const komariReturn = searchParams.get("komari_return")?.trim() || "";
   const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
-  const [targetInput, setTargetInput] = useState("");
-  const [targetError, setTargetError] = useState("");
-  const [targetSaving, setTargetSaving] = useState(false);
-  const { loading, error, errorStatus, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const debugDelayMS = Number(searchParams.get("debug_delay_ms") || "") || null;
+  const { loading, refreshing, error, errorStatus, detail, reload } = useNodePageData(
+    uuid,
+    selectedTargetID,
+    props.onUnauthorized,
+    debugDelayMS
+  );
+  const [showDelayedRefreshing, setShowDelayedRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (!refreshing) {
+      setShowDelayedRefreshing(false);
+      return undefined;
+    }
+    const timeoutID = window.setTimeout(() => setShowDelayedRefreshing(true), 180);
+    return () => window.clearTimeout(timeoutID);
+  }, [refreshing]);
 
   function replaceTargetSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -2022,85 +2628,9 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
-  async function handleAddTarget(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setTargetSaving(true);
-    setTargetError("");
-    try {
-      const created = await apiRequest<NodeTargetListItem>(`/nodes/${uuid}/targets`, {
-        method: "POST",
-        body: JSON.stringify({ ip: targetInput.trim() })
-      });
-      setTargetInput("");
-      replaceTargetSelection(created.id);
-      reload();
-    } catch (targetCreateError) {
-      if (targetCreateError instanceof UnauthorizedError) {
-        props.onUnauthorized();
-        return;
-      }
-      setTargetError(targetCreateError instanceof Error ? targetCreateError.message : "添加目标 IP 失败");
-    } finally {
-      setTargetSaving(false);
-    }
-  }
-
-  async function handleDeleteTarget(targetID: number) {
-    setTargetSaving(true);
-    setTargetError("");
-    try {
-      await apiRequest(`/nodes/${uuid}/targets/${targetID}`, { method: "DELETE" });
-      replaceTargetSelection(null);
-      reload();
-    } catch (targetDeleteError) {
-      if (targetDeleteError instanceof UnauthorizedError) {
-        props.onUnauthorized();
-        return;
-      }
-      setTargetError(targetDeleteError instanceof Error ? targetDeleteError.message : "删除目标 IP 失败");
-    } finally {
-      setTargetSaving(false);
-    }
-  }
-
-  async function handleReorderTargets(sourceID: number, destinationID: number) {
-    if (!detail) {
-      return;
-    }
-
-    const orderedIDs = detail.targets.map((item) => item.id);
-    const sourceIndex = orderedIDs.indexOf(sourceID);
-    const destinationIndex = orderedIDs.indexOf(destinationID);
-    if (sourceIndex === -1 || destinationIndex === -1 || sourceIndex === destinationIndex) {
-      return;
-    }
-
-    const next = [...orderedIDs];
-    const [moved] = next.splice(sourceIndex, 1);
-    next.splice(destinationIndex, 0, moved);
-
-    setTargetSaving(true);
-    setTargetError("");
-    try {
-      await apiRequest(`/nodes/${uuid}/targets/reorder`, {
-        method: "POST",
-        body: JSON.stringify({ target_ids: next })
-      });
-      reload();
-    } catch (reorderError) {
-      if (reorderError instanceof UnauthorizedError) {
-        props.onUnauthorized();
-        return;
-      }
-      setTargetError(reorderError instanceof Error ? reorderError.message : "调整目标 IP 顺序失败");
-    } finally {
-      setTargetSaving(false);
-    }
-  }
-
   const historyPath = `/nodes/${uuid}/history`;
 
-  if (loading) {
+  if (loading && !detail) {
     return <NodeDetailLoading />;
   }
 
@@ -2114,7 +2644,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     );
   }
 
-  if (error || !detail) {
+  if ((error && !detail) || !detail) {
     return (
       <NodePageError
         title="节点详情"
@@ -2144,72 +2674,37 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         }
       />
 
-      {!isEmbed ? <ReportConfigSection me={props.me} detail={detail} /> : null}
-
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
         <div className="section space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
-              <p className="text-sm text-slate-500">拖拽可调整顺序，默认展示第一个目标 IP。</p>
-            </div>
-            {detail.current_target ? (
-              <button
-                className="inline-flex h-10 items-center rounded-xl border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={() => void handleDeleteTarget(detail.current_target!.id)}
-                type="button"
-                disabled={targetSaving}
-              >
-                删除当前 IP
-              </button>
-            ) : null}
-          </div>
-
           {detail.targets.length > 0 ? (
             <TargetTabs
               items={detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
               selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
               onSelect={(targetID) => replaceTargetSelection(targetID)}
-              onReorder={(sourceID, destinationID) => void handleReorderTargets(sourceID, destinationID)}
+              variant="attached"
             />
           ) : (
             <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              当前节点还没有目标 IP，请先添加。
+              当前节点还没有目标 IP，请返回节点列表打开上报设置添加。
             </div>
           )}
-
-          <form className="flex flex-wrap items-start gap-3" onSubmit={handleAddTarget}>
-            <label className="grid min-w-[240px] flex-1 gap-2 text-sm text-slate-700">
-              <span>添加目标 IP</span>
-              <input
-                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-                placeholder="例如 1.1.1.1 或 2606:4700:4700::1111"
-                value={targetInput}
-                onChange={(event) => setTargetInput(event.target.value)}
-              />
-            </label>
-            <button
-              className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-500 px-4 text-sm font-medium text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
-              type="submit"
-              disabled={targetSaving || !targetInput.trim()}
-            >
-              <PlusIcon />
-              <span>{targetSaving ? "处理中..." : "添加 IP"}</span>
-            </button>
-          </form>
-          {targetError ? <p className="text-sm text-rose-600">{targetError}</p> : null}
         </div>
 
         {detail.current_target ? (
           <>
             <div className="section">
-              <h2 className="mb-4 text-base font-semibold text-slate-900">当前 IP 质量</h2>
-              <div data-detail-report="true">
-                <CurrentReportView
-                  result={detail.current_target.current_result}
-                  hiddenPaths={[]}
-                  compact={isEmbed}
-                />
+              <div className="detail-target-panel" data-detail-report="true">
+                {showDelayedRefreshing ? (
+                  <div className="flex min-h-[240px] items-center justify-center rounded-[20px] border border-slate-200 bg-slate-50 text-sm text-slate-500">
+                    加载中…
+                  </div>
+                ) : (
+                  <CurrentReportView
+                    result={detail.current_target.current_result}
+                    hiddenPaths={[]}
+                    compact={isEmbed}
+                  />
+                )}
               </div>
             </div>
           </>
@@ -3237,7 +3732,7 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
     <Routes>
       <Route path="/" element={<Navigate to="/nodes" replace />} />
       <Route path="/connect" element={<ConnectPage onUnauthorized={props.onUnauthorized} />} />
-      <Route path="/nodes" element={<NodesPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/nodes" element={<NodesPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid" element={<NodeDetailPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid/history" element={<NodeHistoryPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid/compare" element={<NodeHistoryComparePage onUnauthorized={props.onUnauthorized} />} />

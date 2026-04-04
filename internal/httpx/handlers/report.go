@@ -47,6 +47,11 @@ func (h ReportHandler) Report(c *gin.Context) {
 
 func (h ReportHandler) InstallScript(c *gin.Context) {
 	token := extractReporterToken(c)
+	runImmediately, err := service.ParseOptionalRunImmediately(c.Query("run_immediately"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid run_immediately"})
+		return
+	}
 
 	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
 	if err != nil {
@@ -64,12 +69,12 @@ func (h ReportHandler) InstallScript(c *gin.Context) {
 	}
 
 	reportEndpointURL := strings.TrimRight(publicBaseURL, "/") + h.Cfg.APIBase() + "/report/nodes/" + c.Param("uuid")
-	script, err := service.GetNodeInstallScript(h.DB, c.Param("uuid"), token, reportEndpointURL)
+	script, err := service.GetNodeInstallScript(h.DB, c.Param("uuid"), token, reportEndpointURL, c.Query("cron"), runImmediately)
 	if err != nil {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "no target ip configured":
+		case "no target ip configured", "invalid cron expression":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {

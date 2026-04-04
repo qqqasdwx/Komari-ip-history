@@ -1313,13 +1313,20 @@ textarea {
 
 .field-modal {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   width: min(560px, 100%);
+  max-height: min(88vh, 980px);
   padding: 20px;
   border-radius: 24px;
   border: 1px solid rgba(226, 232, 240, 0.95);
   background: #fff;
   box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.report-config-modal {
+  width: min(860px, 100%);
 }
 
 .field-modal-head,
@@ -1333,6 +1340,10 @@ textarea {
 .field-modal-body {
   display: grid;
   gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .report-hidden-outline {
@@ -1582,6 +1593,86 @@ textarea {
 .details-panel > .section,
 .details-panel > .report-config {
   padding: 18px;
+}
+
+.target-tabs-attached {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px;
+  margin-bottom: -1px;
+}
+
+.target-tab-shell {
+  position: relative;
+}
+
+.target-tab-button {
+  border: 0;
+  outline: 0;
+}
+
+.target-tab-button-attached {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #d7deea;
+  border-bottom-color: #cfd8e5;
+  border-radius: 14px 14px 0 0;
+  background:
+    linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
+  color: #475569;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 0 rgba(148, 163, 184, 0.08);
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.target-tab-button-attached:hover {
+  border-color: #c5d1e0;
+  background:
+    linear-gradient(180deg, #fbfdff 0%, #f2f6fb 100%);
+  color: #334155;
+}
+
+.target-tab-button-attached.is-active {
+  z-index: 2;
+  color: #0f172a;
+  border-color: #cfd8e5;
+  border-bottom-color: #ffffff;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 1),
+    0 -1px 0 rgba(255, 255, 255, 1),
+    0 8px 18px rgba(148, 163, 184, 0.12);
+}
+
+.target-tab-button-attached:focus-visible {
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+.target-tab-shell > button[aria-label^="删除"] {
+  z-index: 3;
+}
+
+.detail-target-panel {
+  position: relative;
+  margin-top: -1px;
+  padding-top: 14px;
+  border-top: 1px solid #d7deea;
 }
 
 .embed-shell {

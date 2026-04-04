@@ -53,7 +53,7 @@ if (rowCount > 0) {
     }
   }
 
-  const firstUUID = await chosenRow.getAttribute('href');
+  const firstUUID = await chosenRow.getAttribute('data-node-uuid');
   const firstName = ((await chosenRow.locator('[data-node-name="true"]').textContent()) || '').trim();
   if (!firstName || !firstUUID) {
     throw new Error('react node row data is empty');
@@ -71,36 +71,44 @@ if (rowCount > 0) {
     await page.waitForLoadState('networkidle');
   }
 
-  await chosenRow.click();
-  await page.waitForURL('**/#/nodes/**');
-  await page.waitForLoadState('networkidle');
-  const detailReport = page.locator('[data-detail-report="true"]');
-  if ((await detailReport.count()) === 0) {
+  await chosenRow.getByRole('button', { name: '上报设置' }).click();
+  await page.locator('[data-node-report-config="true"]').waitFor({ state: 'visible', timeout: 10000 });
+  if ((await page.getByText('接入命令', { exact: true }).count()) === 0) {
     await page.getByPlaceholder('例如 1.1.1.1 或 2606:4700:4700::1111').fill('203.0.113.10');
     await page.getByRole('button', { name: '添加 IP' }).click();
   }
 
-  await detailReport.waitFor();
-
-  const detailReportCount = await detailReport.count();
   const reportConfigCount = await page.locator('[data-node-report-config="true"]').count();
-  if (detailReportCount === 0 || reportConfigCount === 0) {
-    throw new Error('react detail page missing current report or report config');
+  if (reportConfigCount === 0) {
+    throw new Error('react node list modal missing report config');
   }
+  const configText = await page.locator('[data-node-report-config="true"]').innerText();
   const installCommandCount = await page.getByText('接入命令', { exact: true }).count();
   if (installCommandCount === 0) {
-    throw new Error('react detail page missing install command');
+    throw new Error('react node list modal missing install command');
   }
-  const detailText = await page.locator('body').innerText();
-  if (!detailText.includes('当前命令会顺序探查以下 IP') && !detailText.includes('请先添加目标 IP，添加后才会生成接入命令。')) {
+  if (!configText.includes('当前命令会顺序探查以下 IP') && !configText.includes('请先添加目标 IP，添加后才会生成接入命令。')) {
     throw new Error('react detail page missing monitored IP hint');
   }
-  if (detailText.includes('上报地址') || detailText.includes('Reporter Token')) {
+  if (configText.includes('上报地址') || configText.includes('Reporter Token')) {
     throw new Error('react detail page still exposes report endpoint or token');
   }
+  if (!configText.includes('Cron') || !configText.includes('最近 10 次执行时间')) {
+    throw new Error('react detail page missing schedule controls');
+  }
+  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh')) {
+    throw new Error('react node list modal install command is not using GitHub raw install script');
+  }
+  await page.getByRole('button', { name: '关闭' }).click();
+
+  await page.locator(`[data-node-row="true"][data-node-uuid="${firstUUID}"]`).click({ position: { x: 24, y: 24 } });
+  await page.waitForURL(`**/#/nodes/${firstUUID}`);
+  await page.waitForLoadState('networkidle');
+  const detailReport = page.locator('[data-detail-report="true"]');
+  await detailReport.waitFor();
 
   const detailData = JSON.parse(
-    (await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID.split('/').pop()}`)).text
+    (await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}`)).text
   );
   const currentTarget = detailData.current_target;
   const reporterToken = detailData.report_config.reporter_token;
@@ -109,7 +117,7 @@ if (rowCount > 0) {
       (
         await jsonFetch(
           page,
-          `${appBaseURL}/api/v1/nodes/${firstUUID.split('/').pop()}/history?target_id=${currentTarget.id}&limit=3`
+          `${appBaseURL}/api/v1/nodes/${firstUUID}/history?target_id=${currentTarget.id}&limit=3`
         )
       ).text
     );
@@ -125,7 +133,7 @@ if (rowCount > 0) {
           ...(typeof nextResult.Head === 'object' && nextResult.Head ? nextResult.Head : {}),
           ReportTime: `history-seed-${index}`
         };
-        const reportResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID.split('/').pop()}`, {
+        const reportResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}`, {
           method: 'POST',
           headers: {
             'X-IPQ-Reporter-Token': reporterToken
@@ -145,6 +153,10 @@ if (rowCount > 0) {
   }
 
   const detailURL = page.url();
+  const detailReportConfigButtonCount = await page.getByRole('button', { name: '上报设置' }).count();
+  if (detailReportConfigButtonCount !== 0) {
+    throw new Error('react detail page should not expose report config entry');
+  }
   const historyLinkCount = await page.getByRole('link', { name: '查看历史记录' }).count();
   if (historyLinkCount > 0) {
     await page.getByRole('link', { name: '查看历史记录' }).click();
@@ -156,10 +168,7 @@ if (rowCount > 0) {
     await dateInputs.nth(0).fill('2026-04-02T00:00');
     await dateInputs.nth(1).fill('2026-04-02T23:59');
     await page.getByRole('button', { name: '应用筛选' }).click();
-    await page.getByText(/变化记录/).first().waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('button', { name: /2026-04-02.*2026-04-02/ }).click();
-    await page.getByRole('button', { name: '清空' }).click();
-    await page.getByText(/变化记录/).first().waitFor({ state: 'visible', timeout: 10000 });
+    await page.locator('[data-history-change-row="true"]').first().waitFor({ state: 'visible', timeout: 10000 });
     await page.getByRole('link', { name: '快照对比' }).click();
     await page.waitForURL('**/#/nodes/**/compare**');
     await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
