@@ -21,6 +21,14 @@ export type IntegrationSettings = {
   guest_read_enabled: boolean;
 };
 
+export type HistoryRetentionSettings = {
+  retention_days: number;
+  history_bytes: number;
+  recent_growth_bytes_per_day: number;
+  estimated_retained_bytes: number;
+  estimated_is_unbounded: boolean;
+};
+
 export type NodeListItem = {
   komari_node_uuid: string;
   name: string;

@@ -2,12 +2,14 @@ package app
 
 import (
 	"net/http"
+	"time"
 
 	"komari-ip-history/internal/config"
 	"komari-ip-history/internal/database"
 	"komari-ip-history/internal/httpx/handlers"
 	"komari-ip-history/internal/httpx/middleware"
 	"komari-ip-history/internal/render"
+	"komari-ip-history/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,6 +22,14 @@ func Run() error {
 		return err
 	}
 	_ = database.CleanupExpiredSessions(db)
+	_, _ = service.CleanupExpiredHistorySnapshots(db, time.Now().UTC())
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for tick := range ticker.C {
+			_, _ = service.CleanupExpiredHistorySnapshots(db, tick.UTC())
+		}
+	}()
 
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
@@ -50,6 +60,8 @@ func Run() error {
 			admin.GET("/runtime", adminHandler.Runtime)
 			admin.GET("/integration", adminHandler.GetIntegrationSettings)
 			admin.PUT("/integration", adminHandler.PutIntegrationSettings)
+			admin.GET("/history-retention", adminHandler.GetHistoryRetentionSettings)
+			admin.PUT("/history-retention", adminHandler.PutHistoryRetentionSettings)
 			admin.PUT("/profile", adminHandler.UpdateProfile)
 			admin.GET("/header-preview", adminHandler.HeaderPreview)
 		}

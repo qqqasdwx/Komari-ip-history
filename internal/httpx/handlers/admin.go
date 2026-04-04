@@ -90,6 +90,32 @@ func (h AdminHandler) PutIntegrationSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, settings)
 }
 
+func (h AdminHandler) GetHistoryRetentionSettings(c *gin.Context) {
+	settings, err := service.GetHistoryRetentionSettings(h.DB)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load history retention settings"})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
+func (h AdminHandler) PutHistoryRetentionSettings(c *gin.Context) {
+	var req struct {
+		RetentionDays int `json:"retention_days"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+
+	settings, err := service.SetHistoryRetentionSettings(h.DB, req.RetentionDays)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, settings)
+}
+
 func (h AdminHandler) UpdateProfile(c *gin.Context) {
 	user, ok := middleware.GetCurrentUser(c)
 	if !ok {
