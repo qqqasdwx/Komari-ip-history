@@ -52,6 +52,9 @@ jobs:
       - name: Build frontend bundle
         run: docker exec -i ipq-workspace-dev sh -lc 'cd /workspace/web && npm run build'
 
+      - name: Build backend binary
+        run: docker exec -i ipq-workspace-dev sh -lc 'mkdir -p /workspace/.tmp && cd /workspace && go build -o /workspace/.tmp/ipq-backend-bin ./cmd/ipq'
+
       - name: Start backend
         shell: bash
         run: |
