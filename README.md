@@ -12,6 +12,7 @@
 - `public/`：前端构建产物目录，由 Go 服务统一提供。
 - `compose.dev.yml`：开发环境编排，当前按“单开发工作容器 + Komari + 统一反代”组织。
 - `deploy/dev/workspace/Dockerfile`：开发工作容器镜像定义，内置 Go 和 Node.js 工具链。
+- `Dockerfile`：生产镜像定义，构建前端产物并打包 Go 服务。
 
 当前阶段已经落下的骨架包括：
 
@@ -93,3 +94,77 @@ docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/wor
 4. 如果页面仍不对，再看具体页面 DOM、截图、接口返回
 
 不要第一反应就归因到浏览器缓存。
+
+## Docker 部署
+
+仓库现在有正式生产镜像：
+
+- `Dockerfile`
+- GitHub Actions 会把镜像发布到：
+  - `ghcr.io/<owner>/<repo>`
+
+当前 workflow：
+
+- `.github/workflows/docker.yml`
+- 触发条件：
+  - push 到 `main/master`
+  - `v*` tag
+  - `workflow_dispatch`
+- PR 只做 build，不 push
+
+### 运行时必须确认的环境变量
+
+- `IPQ_PUBLIC_BASE_URL`
+  - 必填
+  - 用于生成 Komari header、跳转地址、接入命令
+  - 例：`https://ipq.example.com`
+- `IPQ_DEFAULT_ADMIN_USERNAME`
+  - 首次启动默认管理员用户名
+- `IPQ_DEFAULT_ADMIN_PASSWORD`
+  - 首次启动默认管理员密码
+
+### 常用运行时环境变量
+
+- `IPQ_LISTEN`
+  - 默认 `:8090`
+- `IPQ_DB_PATH`
+  - 默认 `/data/ipq.db`
+- `IPQ_SESSION_COOKIE`
+  - 默认 `ipq_session`
+- `IPQ_COOKIE_SECURE`
+  - HTTPS 部署时应设为 `true`
+- `IPQ_BASE_PATH`
+  - 默认空，表示根路径部署
+
+### 部署约束
+
+- 生产镜像默认按**根路径**构建前端：
+  - `VITE_BASE_PATH=/`
+- 所以最稳的部署方式是：
+  - 直接挂在独立域名根路径
+
+如果以后要走子路径，例如 `/ipq/`，不能只改运行时环境变量，还需要在构建镜像时同步传：
+
+```bash
+docker build --build-arg VITE_BASE_PATH=/ipq/ -t ghcr.io/<owner>/<repo>:custom .
+```
+
+并且运行时同时设置：
+
+```bash
+IPQ_BASE_PATH=/ipq
+```
+
+### 最小运行示例
+
+```bash
+docker run -d \
+  --name komari-ip-history \
+  -p 8090:8090 \
+  -v "$(pwd)/data:/data" \
+  -e IPQ_PUBLIC_BASE_URL=https://ipq.example.com \
+  -e IPQ_DEFAULT_ADMIN_USERNAME=admin \
+  -e IPQ_DEFAULT_ADMIN_PASSWORD=change-me \
+  -e IPQ_COOKIE_SECURE=true \
+  ghcr.io/<owner>/<repo>:latest
+```

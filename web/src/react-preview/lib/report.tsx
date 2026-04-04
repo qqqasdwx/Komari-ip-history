@@ -396,7 +396,7 @@ function ScoreSection(props: { structured: StructuredCurrentResult; hiddenPaths:
   const score = props.structured.score;
   if (!score) return null;
 
-  const order = ["IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "Cloudflare", "DBIP"];
+  const order = ["IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "DBIP"];
   const rows = orderedReportEntries(score, order);
 
   return (
@@ -492,7 +492,7 @@ function MediaSection(props: { structured: StructuredCurrentResult; hiddenPaths:
   const media = props.structured.media;
   if (!media) return null;
 
-  const serviceOrder = ["TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Spotify", "Reddit", "ChatGPT"];
+  const serviceOrder = ["TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Reddit", "ChatGPT"];
   const services = orderedReportEntries(media, serviceOrder).map(([key]) => reportFieldLabel(key));
   const mediaMap = new Map(orderedReportEntries(media, serviceOrder).map(([key, value]) => [reportFieldLabel(key), { key, value: isRecord(value) ? value : {} }]));
 

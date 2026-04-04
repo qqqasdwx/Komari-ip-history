@@ -131,7 +131,7 @@ if (rowCount > 0) {
         nextResult.Score.IPQS = 30 + index;
         nextResult.Head = {
           ...(typeof nextResult.Head === 'object' && nextResult.Head ? nextResult.Head : {}),
-          ReportTime: `history-seed-${index}`
+          Time: `history-seed-${index}`
         };
         const reportResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}`, {
           method: 'POST',

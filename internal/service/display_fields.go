@@ -81,7 +81,7 @@ func reportFieldLabel(key string) string {
 		"TikTok":            "TikTok",
 		"Youtube":           "Youtube",
 		"Netflix":           "Netflix",
-		"Spotify":           "Spotify",
+		"Reddit":            "Reddit",
 		"ChatGPT":           "ChatGPT",
 		"Port25":            "25端口",
 		"MailRU":            "MailRU",
@@ -402,7 +402,7 @@ func extractDisplayFieldValues(result map[string]any) ([]DisplayFieldValue, erro
 	}
 	renderExtraRows(&items, typeGroup, "Type", []string{"IP类型属性"}, []string{"Usage", "Company"})
 
-	for _, entry := range orderedReportEntries(score, []string{"IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "Cloudflare", "DBIP"}) {
+	for _, entry := range orderedReportEntries(score, []string{"IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "DBIP"}) {
 		key := entry[0].(string)
 		text, tone := reportRiskMeta(entry[1])
 		pushDisplayField(&items, "Score."+key, []string{"风险评分"}, reportFieldLabel(key), text, tone, false)
@@ -425,7 +425,7 @@ func extractDisplayFieldValues(result map[string]any) ([]DisplayFieldValue, erro
 	}
 	renderExtraRows(&items, factor, "Factor", []string{"风险因子"}, factorRowOrder)
 
-	for _, entry := range orderedReportEntries(media, []string{"TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Spotify", "Reddit", "ChatGPT"}) {
+	for _, entry := range orderedReportEntries(media, []string{"TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Reddit", "ChatGPT"}) {
 		key := entry[0].(string)
 		record, ok := asMap(entry[1])
 		if !ok {

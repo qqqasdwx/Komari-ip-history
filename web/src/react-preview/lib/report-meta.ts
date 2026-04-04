@@ -40,7 +40,7 @@ export function reportFieldLabel(key: string) {
     TikTok: "TikTok",
     Youtube: "Youtube",
     Netflix: "Netflix",
-    Spotify: "Spotify",
+    Reddit: "Reddit",
     ChatGPT: "ChatGPT",
     Port25: "25端口",
     MailRU: "MailRU",

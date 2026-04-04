@@ -200,7 +200,7 @@ export function extractDisplayFieldValues(result: Record<string, unknown>) {
   }
   renderExtraRows(items, { record: type, basePath: "Type", groupPath: ["IP类型属性"], skipKeys: ["Usage", "Company"] });
 
-  for (const [key, value] of orderedReportEntries(score, ["IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "Cloudflare", "DBIP"])) {
+  for (const [key, value] of orderedReportEntries(score, ["IP2LOCATION", "SCAMALYTICS", "ipapi", "AbuseIPDB", "IPQS", "DBIP"])) {
     const meta = reportRiskMeta(value);
     pushField(items, {
       path: `Score.${key}`,
@@ -226,7 +226,7 @@ export function extractDisplayFieldValues(result: Record<string, unknown>) {
   }
   renderExtraRows(items, { record: factor, basePath: "Factor", groupPath: ["风险因子"], skipKeys: factorRowOrder });
 
-  for (const [key, value] of orderedReportEntries(media, ["TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Spotify", "Reddit", "ChatGPT"])) {
+  for (const [key, value] of orderedReportEntries(media, ["TikTok", "DisneyPlus", "Netflix", "Youtube", "AmazonPrimeVideo", "Reddit", "ChatGPT"])) {
     if (!isRecord(value)) continue;
     pushField(items, {
       path: `Media.${key}.Status`,

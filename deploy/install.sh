@@ -122,13 +122,16 @@ trap cleanup EXIT
 for TARGET_IP in "${TARGET_IPS[@]}"; do
   SAFE_NAME=\$(printf '%s' "\$TARGET_IP" | tr ':/' '__')
   RESULT_FILE="\$WORKDIR/\$SAFE_NAME.json"
+  PROBE_EXIT=0
   if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i "\$TARGET_IP" -o "\$RESULT_FILE"; then
-    echo "IPQuality probe failed: \$TARGET_IP" >&2
-    continue
+    PROBE_EXIT=\$?
   fi
   if [ ! -s "\$RESULT_FILE" ]; then
-    echo "IPQuality probe returned empty result: \$TARGET_IP" >&2
+    echo "IPQuality probe failed or returned empty result: \$TARGET_IP" >&2
     continue
+  fi
+  if [ "\$PROBE_EXIT" -ne 0 ]; then
+    echo "IPQuality probe exited with code \$PROBE_EXIT for \$TARGET_IP, but JSON output was produced; continuing to upload." >&2
   fi
   {
     printf '{"target_ip":"%s","result":' "\$TARGET_IP"

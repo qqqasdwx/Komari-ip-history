@@ -9,9 +9,9 @@ func DefaultTargetResult(nodeUUID, nodeName, targetIP string) (string, string, t
 	now := time.Now().UTC()
 	payload := map[string]any{
 		"Head": map[string]any{
-			"IP":        targetIP,
-			"Version":   "dev-mock",
-			"ReportTime": now.Format(time.RFC3339),
+			"IP":      targetIP,
+			"Version": "dev-mock",
+			"Time":    now.Format(time.RFC3339),
 		},
 		"Meta": map[string]any{
 			"node_uuid":  nodeUUID,
@@ -20,15 +20,21 @@ func DefaultTargetResult(nodeUUID, nodeName, targetIP string) (string, string, t
 			"updated_at": now.Format(time.RFC3339),
 		},
 		"Score": map[string]any{
-			"Scamalytics": 18,
+			"SCAMALYTICS": 18,
 			"AbuseIPDB":   0,
 			"IPQS":        22,
+			"DBIP":        0,
 		},
 		"Media": map[string]any{
 			"Netflix": map[string]any{
 				"Status": "Yes",
 				"Region": "US",
 				"Type":   "Originals",
+			},
+			"Reddit": map[string]any{
+				"Status": "Yes",
+				"Region": "US",
+				"Type":   "Web",
 			},
 			"ChatGPT": map[string]any{
 				"Status": "Yes",
@@ -37,8 +43,14 @@ func DefaultTargetResult(nodeUUID, nodeName, targetIP string) (string, string, t
 			},
 		},
 		"Mail": map[string]any{
-			"Blacklisted": 0,
-			"Available":   true,
+			"Port25": true,
+			"Gmail":  true,
+			"DNSBlacklist": map[string]any{
+				"Total":       10,
+				"Clean":       10,
+				"Marked":      0,
+				"Blacklisted": 0,
+			},
 		},
 	}
 
