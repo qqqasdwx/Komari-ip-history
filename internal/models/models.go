@@ -56,12 +56,12 @@ type NodeHistory struct {
 
 type NodeTargetHistory struct {
 	ID           uint       `gorm:"primaryKey" json:"id"`
-	NodeTargetID uint       `gorm:"index;not null" json:"node_target_id"`
+	NodeTargetID uint       `gorm:"index;index:idx_node_target_history_target_recorded,priority:1;not null" json:"node_target_id"`
 	NodeTarget   NodeTarget `gorm:"constraint:OnDelete:CASCADE" json:"-"`
 	ResultJSON   string     `gorm:"type:longtext" json:"result_json"`
 	Summary      string     `gorm:"size:512" json:"summary"`
-	IsFavorite   bool       `gorm:"not null;default:false" json:"is_favorite"`
-	RecordedAt   time.Time  `gorm:"index;not null" json:"recorded_at"`
+	IsFavorite   bool       `gorm:"not null;default:false;index:idx_node_target_history_favorite_recorded,priority:1" json:"is_favorite"`
+	RecordedAt   time.Time  `gorm:"index;index:idx_node_target_history_target_recorded,priority:2;index:idx_node_target_history_favorite_recorded,priority:2;not null" json:"recorded_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
 

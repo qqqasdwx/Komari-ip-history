@@ -45,6 +45,9 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	if err := migrateLegacyNodeTargets(db); err != nil {
 		return nil, err
 	}
+	if err := cleanupLegacyNodeHistory(db); err != nil {
+		return nil, err
+	}
 	if err := rebuildNodeAggregates(db); err != nil {
 		return nil, err
 	}
@@ -147,6 +150,11 @@ func migrateLegacyNodeTargets(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func cleanupLegacyNodeHistory(db *gorm.DB) error {
+	subquery := db.Model(&models.NodeTarget{}).Distinct("node_id").Select("node_id")
+	return db.Where("node_id IN (?)", subquery).Delete(&models.NodeHistory{}).Error
 }
 
 func extractLegacyTargetIP(raw string) string {
