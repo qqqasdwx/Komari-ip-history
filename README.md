@@ -24,7 +24,7 @@
 - 当前默认按根路径独立部署，本服务可直接挂在 `/`。
 - 开发环境反代骨架仍保留子路径兼容能力，但不再代表默认产品部署形态。
 - 容器化开发工作流：默认通过 `docker compose exec workspace ...` 在容器内执行依赖安装、构建与测试。
-- GitHub Actions CI：自动执行 Go 构建、前端构建，以及基于开发容器环境的 Playwright 主流程验证。
+- GitHub Actions 已拆成轻量 CI、独立 E2E 和 Docker 发布三条线。
 
 进一步设计边界见：
 
@@ -105,6 +105,17 @@ docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/wor
 
 当前 workflow：
 
+- `.github/workflows/ci.yml`
+  - push 到 `main/master`
+  - `pull_request`
+  - 只跑：
+    - `go test`
+    - `go build`
+    - `npm run build`
+- `.github/workflows/e2e.yml`
+  - push 到 `main/master`
+  - `workflow_dispatch`
+  - 跑基于开发容器环境的 Playwright 主流程验证
 - `.github/workflows/docker.yml`
 - 触发条件：
   - push 到 `main/master`

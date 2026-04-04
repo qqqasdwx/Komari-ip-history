@@ -1,0 +1,84 @@
+name: e2e
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start docker compose stack
+        run: docker compose -f compose.dev.yml up -d --build
+
+      - name: Bootstrap workspace
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/bootstrap.sh
+
+      - name: Build frontend bundle
+        run: docker exec -i ipq-workspace-dev sh -lc 'cd /workspace/web && npm run build'
+
+      - name: Build backend binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/build-backend.sh; then
+            docker exec -i ipq-workspace-dev sh -lc 'echo "=== /tmp/ipq-backend-build.log ==="; cat /tmp/ipq-backend-build.log || true'
+            exit 1
+          fi
+
+      - name: Start backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh; then
+            docker exec -i ipq-workspace-dev sh -lc 'echo "=== /tmp/ipq-backend-bootstrap.log ==="; cat /tmp/ipq-backend-bootstrap.log || true; echo "=== /tmp/ipq-backend.log ==="; cat /tmp/ipq-backend.log || true'
+            exit 1
+          fi
+
+      - name: Start frontend
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-frontend.sh
+
+      - name: Wait for proxy and app
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in {1..60}; do
+            if curl -fsS http://localhost:8080/ >/dev/null && curl -fsS http://localhost:8090/ >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "services did not become ready in time" >&2
+          exit 1
+
+      - name: Run Playwright e2e
+        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
+
+      - name: Collect artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+          docker compose -f compose.dev.yml logs --no-color > ci-artifacts/docker-compose.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend-build.log ci-artifacts/ipq-backend-build.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend-bootstrap.log ci-artifacts/ipq-backend-bootstrap.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-frontend.log ci-artifacts/ipq-frontend.log || true
+          docker cp ipq-workspace-dev:/workspace/web/playwright-output ci-artifacts/playwright-output || true
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: ci-artifacts
+
+      - name: Stop docker compose stack
+        if: always()
+        run: docker compose -f compose.dev.yml down -v
