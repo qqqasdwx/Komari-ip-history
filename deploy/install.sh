@@ -119,7 +119,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for TARGET_IP in "${TARGET_IPS[@]}"; do
+for TARGET_IP in "\${TARGET_IPS[@]}"; do
   SAFE_NAME=\$(printf '%s' "\$TARGET_IP" | tr ':/' '__')
   RESULT_FILE="\$WORKDIR/\$SAFE_NAME.json"
   PROBE_EXIT=0
