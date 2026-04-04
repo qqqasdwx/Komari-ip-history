@@ -1701,9 +1701,10 @@ function reportPathMatchesHighlight(nodePath: string, highlightPath: string) {
 }
 
 function CompareReportPane(props: {
-  recordedAt: string;
-  result: Record<string, unknown>;
+  entry: NodeHistoryEntry;
   changedPaths: string[];
+  favoriteSaving: boolean;
+  onToggleFavorite: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -1719,15 +1720,35 @@ function CompareReportPane(props: {
         : false;
       node.classList.toggle("report-compare-highlight", highlighted);
     }
-  }, [props.changedPaths, props.result]);
+  }, [props.changedPaths, props.entry.result]);
 
   return (
     <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-slate-900">{formatDateTime(props.recordedAt)}</h2>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold text-slate-900">{formatDateTime(props.entry.recorded_at)}</h2>
+          {props.entry.is_favorite ? (
+            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+              已收藏
+            </span>
+          ) : null}
+        </div>
+        <button
+          className={[
+            "inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium transition",
+            props.entry.is_favorite
+              ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300"
+              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-600"
+          ].join(" ")}
+          disabled={props.favoriteSaving}
+          onClick={props.onToggleFavorite}
+          type="button"
+        >
+          {props.favoriteSaving ? "处理中..." : props.entry.is_favorite ? "取消收藏" : "收藏快照"}
+        </button>
       </div>
       <div ref={containerRef}>
-        <CurrentReportView result={props.result} hiddenPaths={[]} compact />
+        <CurrentReportView result={props.entry.result} hiddenPaths={[]} compact />
       </div>
     </section>
   );
@@ -1787,18 +1808,27 @@ function CompareTimeline(props: {
     return {
       id: item.id,
       recordedAt: item.recorded_at,
-      left: `${((timestamp - min) / span) * 100}%`
+      left: `${((timestamp - min) / span) * 100}%`,
+      isFavorite: item.is_favorite
     };
   });
 
   return (
     <section className="compare-timeline-panel rounded-[18px] border border-slate-200 bg-slate-50 p-4">
       <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold text-slate-900">时间范围</h2>
-          <p className="text-sm text-slate-500">
-            首次上报：{formatDateTime(props.items[0]?.recorded_at)} · 最近上报：{formatDateTime(props.items[props.items.length - 1]?.recorded_at)}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">时间范围</h2>
+            <p className="text-sm text-slate-500">
+              首次上报：{formatDateTime(props.items[0]?.recorded_at)} · 最近上报：{formatDateTime(props.items[props.items.length - 1]?.recorded_at)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="compare-timeline-point compare-timeline-point-legend" aria-hidden="true" />
+            <span>普通快照</span>
+            <span className="compare-timeline-point compare-timeline-point-favorite compare-timeline-point-legend" aria-hidden="true" />
+            <span>已收藏</span>
+          </div>
         </div>
         <div className="compare-timeline">
           <div className="compare-timeline-labels">
@@ -1815,9 +1845,9 @@ function CompareTimeline(props: {
               {points.map((point) => (
                 <span
                   key={point.id}
-                  className="compare-timeline-point"
+                  className={["compare-timeline-point", point.isFavorite ? "compare-timeline-point-favorite" : ""].filter(Boolean).join(" ")}
                   style={{ left: point.left }}
-                  title={formatDateTime(point.recordedAt)}
+                  title={`${formatDateTime(point.recordedAt)}${point.isFavorite ? " · 已收藏" : ""}`}
                 />
               ))}
             </div>
@@ -2373,13 +2403,20 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
   const [searchParams] = useSearchParams();
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
   const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
+  const compareTargetID = detail?.current_target?.id ?? selectedTargetID ?? null;
   const { loading: historyLoading, error: historyError, items: historyItems, reload: reloadHistory } = useAllNodeHistoryData(
     uuid,
-    selectedTargetID,
+    compareTargetID,
     props.onUnauthorized
   );
+  const [historyItemsOverride, setHistoryItemsOverride] = useState<NodeHistoryEntry[] | null>(null);
   const [leftTimestamp, setLeftTimestamp] = useState(0);
   const [rightTimestamp, setRightTimestamp] = useState(0);
+  const [favoriteSavingIDs, setFavoriteSavingIDs] = useState<number[]>([]);
+
+  useEffect(() => {
+    setHistoryItemsOverride(historyItems);
+  }, [historyItems]);
 
   function replaceSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -2392,7 +2429,8 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
-  const orderedHistory = [...historyItems].sort(
+  const effectiveHistoryItems = historyItemsOverride ?? historyItems;
+  const orderedHistory = [...effectiveHistoryItems].sort(
     (left, right) => new Date(left.recorded_at).getTime() - new Date(right.recorded_at).getTime()
   );
 
@@ -2434,6 +2472,47 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
     )
   );
   const detailBackTo = `/nodes/${uuid}/history${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
+
+  async function toggleSnapshotFavorite(entry: NodeHistoryEntry) {
+    setFavoriteSavingIDs((current) => (current.includes(entry.id) ? current : [...current, entry.id]));
+    const nextFavorite = !entry.is_favorite;
+    setHistoryItemsOverride((current) =>
+      (current ?? historyItems).map((item) =>
+        item.id === entry.id
+          ? {
+              ...item,
+              is_favorite: nextFavorite
+            }
+          : item
+      )
+    );
+    try {
+      const suffix = compareTargetID ? `?target_id=${compareTargetID}` : "";
+      if (entry.is_favorite) {
+        await apiRequest<NodeHistoryEntry>(`/nodes/${uuid}/history/${entry.id}/favorite${suffix}`, { method: "DELETE" });
+      } else {
+        await apiRequest<NodeHistoryEntry>(`/nodes/${uuid}/history/${entry.id}/favorite${suffix}`, { method: "POST" });
+      }
+    } catch (toggleError) {
+      setHistoryItemsOverride((current) =>
+        (current ?? historyItems).map((item) =>
+          item.id === entry.id
+            ? {
+                ...item,
+                is_favorite: entry.is_favorite
+              }
+            : item
+        )
+      );
+      if (toggleError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      window.alert(toggleError instanceof Error ? toggleError.message : "更新快照收藏状态失败");
+    } finally {
+      setFavoriteSavingIDs((current) => current.filter((id) => id !== entry.id));
+    }
+  }
 
   return (
     <section className="space-y-6">
@@ -2498,12 +2577,8 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
               items={orderedHistory}
               leftTimestamp={leftTimestamp}
               rightTimestamp={rightTimestamp}
-              onLeftChange={(timestamp) => {
-                setLeftTimestamp(timestamp);
-              }}
-              onRightChange={(timestamp) => {
-                setRightTimestamp(timestamp);
-              }}
+              onLeftChange={(timestamp) => setLeftTimestamp(timestamp)}
+              onRightChange={(timestamp) => setRightTimestamp(timestamp)}
             />
 
             {leftEntry && rightEntry ? (
@@ -2511,8 +2586,18 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
                 <HistoryCompareEmptyState rows={compareRows} />
               ) : (
                 <div className="grid gap-6 xl:grid-cols-2">
-                  <CompareReportPane recordedAt={leftEntry.recorded_at} result={leftEntry.result} changedPaths={changedPaths} />
-                  <CompareReportPane recordedAt={rightEntry.recorded_at} result={rightEntry.result} changedPaths={changedPaths} />
+                  <CompareReportPane
+                    entry={leftEntry}
+                    changedPaths={changedPaths}
+                    favoriteSaving={favoriteSavingIDs.includes(leftEntry.id)}
+                    onToggleFavorite={() => toggleSnapshotFavorite(leftEntry)}
+                  />
+                  <CompareReportPane
+                    entry={rightEntry}
+                    changedPaths={changedPaths}
+                    favoriteSaving={favoriteSavingIDs.includes(rightEntry.id)}
+                    onToggleFavorite={() => toggleSnapshotFavorite(rightEntry)}
+                  />
                 </div>
               )
             ) : null}

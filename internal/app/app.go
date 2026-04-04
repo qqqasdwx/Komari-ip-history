@@ -63,6 +63,8 @@ func Run() error {
 			nodes.GET("/:uuid/history/events", nodeHandler.HistoryEvents)
 			nodes.GET("/:uuid/history/fields", nodeHandler.HistoryFields)
 			nodes.GET("/:uuid/history/:historyID", nodeHandler.HistoryDetail)
+			nodes.POST("/:uuid/history/:historyID/favorite", nodeHandler.FavoriteHistory)
+			nodes.DELETE("/:uuid/history/:historyID/favorite", nodeHandler.UnfavoriteHistory)
 			nodes.POST("/:uuid/targets", nodeHandler.AddTarget)
 			nodes.DELETE("/:uuid/targets/:targetID", nodeHandler.DeleteTarget)
 			nodes.POST("/:uuid/targets/reorder", nodeHandler.ReorderTargets)

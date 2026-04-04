@@ -98,6 +98,7 @@ type NodeHistoryEntry struct {
 	ID         uint           `json:"id"`
 	TargetID   uint           `json:"target_id"`
 	TargetIP   string         `json:"target_ip"`
+	IsFavorite bool           `json:"is_favorite"`
 	RecordedAt time.Time      `json:"recorded_at"`
 	Summary    string         `json:"summary"`
 	Result     map[string]any `json:"result"`
@@ -250,7 +251,7 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 		return NodeHistoryPage{}, err
 	}
 
-	selected, err := selectNodeTarget(targets, selectedTargetID)
+	_, scopedTargets, err := resolveHistoryTargetScope(targets, selectedTargetID)
 	if err != nil {
 		return NodeHistoryPage{}, err
 	}
@@ -265,17 +266,12 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 	}
 
 	targetByID := make(map[uint]models.NodeTarget, len(targets))
-	targetIDs := make([]uint, 0, len(targets))
 	for _, target := range targets {
 		targetByID[target.ID] = target
-		targetIDs = append(targetIDs, target.ID)
 	}
-
-	var targetScope []uint
-	if selected != nil {
-		targetScope = []uint{selected.ID}
-	} else {
-		targetScope = targetIDs
+	targetScope := make([]uint, 0, len(scopedTargets))
+	for _, target := range scopedTargets {
+		targetScope = append(targetScope, target.ID)
 	}
 
 	baseQuery := db.Model(&models.NodeTargetHistory{}).Where("node_target_id IN ?", targetScope)
@@ -308,6 +304,7 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 			ID:         item.ID,
 			TargetID:   item.NodeTargetID,
 			TargetIP:   target.TargetIP,
+			IsFavorite: item.IsFavorite,
 			RecordedAt: item.RecordedAt,
 			Summary:    item.Summary,
 			Result:     decodeResultJSON(item.ResultJSON),
@@ -338,15 +335,23 @@ func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, hist
 		return NodeHistoryDetail{}, err
 	}
 
-	selected, err := selectNodeTarget(targets, selectedTargetID)
+	_, scopedTargets, err := resolveHistoryTargetScope(targets, selectedTargetID)
 	if err != nil {
 		return NodeHistoryDetail{}, err
 	}
-	if selected == nil {
+	if len(scopedTargets) == 0 {
 		return NodeHistoryDetail{}, gorm.ErrRecordNotFound
 	}
+	targetByID := make(map[uint]models.NodeTarget, len(targets))
+	targetScope := make([]uint, 0, len(scopedTargets))
+	for _, target := range targets {
+		targetByID[target.ID] = target
+	}
+	for _, target := range scopedTargets {
+		targetScope = append(targetScope, target.ID)
+	}
 
-	query := db.Where("id = ? AND node_target_id = ?", historyID, selected.ID)
+	query := db.Where("id = ? AND node_target_id IN ?", historyID, targetScope)
 	query = applyHistoryRange(query, startAt, endAt)
 
 	var history models.NodeTargetHistory
@@ -354,11 +359,13 @@ func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, hist
 		return NodeHistoryDetail{}, err
 	}
 
+	target := targetByID[history.NodeTargetID]
 	detail := NodeHistoryDetail{
 		Item: NodeHistoryEntry{
 			ID:         history.ID,
-			TargetID:   selected.ID,
-			TargetIP:   selected.TargetIP,
+			TargetID:   target.ID,
+			TargetIP:   target.TargetIP,
+			IsFavorite: history.IsFavorite,
 			RecordedAt: history.RecordedAt,
 			Summary:    history.Summary,
 			Result:     decodeResultJSON(history.ResultJSON),
@@ -367,14 +374,15 @@ func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, hist
 
 	var previous models.NodeTargetHistory
 	previousQuery := db.
-		Where("node_target_id = ? AND recorded_at < ?", selected.ID, history.RecordedAt).
+		Where("node_target_id = ? AND recorded_at < ?", history.NodeTargetID, history.RecordedAt).
 		Order("recorded_at DESC")
 	previousQuery = applyHistoryRange(previousQuery, startAt, endAt)
 	if err := previousQuery.First(&previous).Error; err == nil {
 		detail.Previous = &NodeHistoryEntry{
 			ID:         previous.ID,
-			TargetID:   selected.ID,
-			TargetIP:   selected.TargetIP,
+			TargetID:   target.ID,
+			TargetIP:   target.TargetIP,
+			IsFavorite: previous.IsFavorite,
 			RecordedAt: previous.RecordedAt,
 			Summary:    previous.Summary,
 			Result:     decodeResultJSON(previous.ResultJSON),
@@ -384,6 +392,54 @@ func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, hist
 	}
 
 	return detail, nil
+}
+
+func SetNodeHistoryFavorite(db *gorm.DB, uuid string, selectedTargetID *uint, historyID uint, favorite bool) (NodeHistoryEntry, error) {
+	if historyID == 0 {
+		return NodeHistoryEntry{}, errors.New("history id is required")
+	}
+
+	_, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
+		return NodeHistoryEntry{}, err
+	}
+
+	_, scopedTargets, err := resolveHistoryTargetScope(targets, selectedTargetID)
+	if err != nil {
+		return NodeHistoryEntry{}, err
+	}
+	if len(scopedTargets) == 0 {
+		return NodeHistoryEntry{}, gorm.ErrRecordNotFound
+	}
+
+	targetByID := make(map[uint]models.NodeTarget, len(targets))
+	targetScope := make([]uint, 0, len(scopedTargets))
+	for _, target := range targets {
+		targetByID[target.ID] = target
+	}
+	for _, target := range scopedTargets {
+		targetScope = append(targetScope, target.ID)
+	}
+
+	var history models.NodeTargetHistory
+	if err := db.Where("id = ? AND node_target_id IN ?", historyID, targetScope).First(&history).Error; err != nil {
+		return NodeHistoryEntry{}, err
+	}
+	if err := db.Model(&history).Update("is_favorite", favorite).Error; err != nil {
+		return NodeHistoryEntry{}, err
+	}
+	history.IsFavorite = favorite
+
+	target := targetByID[history.NodeTargetID]
+	return NodeHistoryEntry{
+		ID:         history.ID,
+		TargetID:   target.ID,
+		TargetIP:   target.TargetIP,
+		IsFavorite: history.IsFavorite,
+		RecordedAt: history.RecordedAt,
+		Summary:    history.Summary,
+		Result:     decodeResultJSON(history.ResultJSON),
+	}, nil
 }
 
 func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displayIP string) (PublicNodeDetail, error) {
@@ -793,6 +849,23 @@ func selectNodeTarget(targets []models.NodeTarget, selectedTargetID *uint) (*mod
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func resolveHistoryTargetScope(targets []models.NodeTarget, selectedTargetID *uint) (*models.NodeTarget, []models.NodeTarget, error) {
+	if len(targets) == 0 {
+		return nil, nil, nil
+	}
+	if selectedTargetID == nil || *selectedTargetID == 0 {
+		return nil, append([]models.NodeTarget{}, targets...), nil
+	}
+	selected, err := selectNodeTarget(targets, selectedTargetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if selected == nil {
+		return nil, nil, nil
+	}
+	return selected, []models.NodeTarget{*selected}, nil
 }
 
 func decodeResultJSON(raw string) map[string]any {

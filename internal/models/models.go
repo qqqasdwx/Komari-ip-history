@@ -60,6 +60,7 @@ type NodeTargetHistory struct {
 	NodeTarget   NodeTarget `gorm:"constraint:OnDelete:CASCADE" json:"-"`
 	ResultJSON   string     `gorm:"type:longtext" json:"result_json"`
 	Summary      string     `gorm:"size:512" json:"summary"`
+	IsFavorite   bool       `gorm:"not null;default:false" json:"is_favorite"`
 	RecordedAt   time.Time  `gorm:"index;not null" json:"recorded_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 }

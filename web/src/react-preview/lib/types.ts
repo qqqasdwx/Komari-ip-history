@@ -88,6 +88,7 @@ export type NodeHistoryEntry = {
   id: number;
   target_id: number;
   target_ip: string;
+  is_favorite: boolean;
   recorded_at: string;
   summary: string;
   result: Record<string, unknown>;

@@ -91,6 +91,36 @@ func (h NodeHandler) HistoryDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, item)
 }
 
+func (h NodeHandler) FavoriteHistory(c *gin.Context) {
+	targetID := parseTargetID(c.Query("target_id"))
+	historyIDValue, err := strconv.ParseUint(c.Param("historyID"), 10, 64)
+	if err != nil || historyIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid history id"})
+		return
+	}
+	item, favoriteErr := service.SetNodeHistoryFavorite(h.DB, c.Param("uuid"), targetID, uint(historyIDValue), true)
+	if favoriteErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "history not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+func (h NodeHandler) UnfavoriteHistory(c *gin.Context) {
+	targetID := parseTargetID(c.Query("target_id"))
+	historyIDValue, err := strconv.ParseUint(c.Param("historyID"), 10, 64)
+	if err != nil || historyIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid history id"})
+		return
+	}
+	item, favoriteErr := service.SetNodeHistoryFavorite(h.DB, c.Param("uuid"), targetID, uint(historyIDValue), false)
+	if favoriteErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "history not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
 func (h NodeHandler) AddTarget(c *gin.Context) {
 	var req service.AddNodeTargetInput
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"container/heap"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,17 +22,17 @@ type NodeHistoryFieldOptionList struct {
 }
 
 type NodeHistoryChangeEvent struct {
-	ID                string            `json:"id"`
-	TargetID          uint              `json:"target_id"`
-	TargetIP          string            `json:"target_ip"`
-	FieldID           string            `json:"field_id"`
-	GroupPath         []string          `json:"group_path"`
-	FieldLabel        string            `json:"field_label"`
-	FieldOptionLabel  string            `json:"field_option_label"`
-	Previous          DisplayFieldValue `json:"previous"`
-	Current           DisplayFieldValue `json:"current"`
-	PreviousRecordedAt string           `json:"previous_recorded_at"`
-	RecordedAt        time.Time         `json:"recorded_at"`
+	ID                 string            `json:"id"`
+	TargetID           uint              `json:"target_id"`
+	TargetIP           string            `json:"target_ip"`
+	FieldID            string            `json:"field_id"`
+	GroupPath          []string          `json:"group_path"`
+	FieldLabel         string            `json:"field_label"`
+	FieldOptionLabel   string            `json:"field_option_label"`
+	Previous           DisplayFieldValue `json:"previous"`
+	Current            DisplayFieldValue `json:"current"`
+	PreviousRecordedAt string            `json:"previous_recorded_at"`
+	RecordedAt         time.Time         `json:"recorded_at"`
 }
 
 type NodeHistoryChangeEventPage struct {
@@ -43,33 +44,36 @@ type NodeHistoryChangeEventPage struct {
 }
 
 func GetNodeHistoryEvents(db *gorm.DB, uuid string, selectedTargetID *uint, fieldID string, page, pageSize int, startAt, endAt *time.Time) (NodeHistoryChangeEventPage, error) {
-	entries, err := loadNodeHistoryEntriesForEvents(db, uuid, selectedTargetID, endAt)
-	if err != nil {
-		return NodeHistoryChangeEventPage{}, err
-	}
-	events, err := buildNodeHistoryChangeEvents(entries, startAt)
-	if err != nil {
-		return NodeHistoryChangeEventPage{}, err
-	}
-
-	fieldID = strings.TrimSpace(strings.ToLower(fieldID))
-	if fieldID != "" {
-		filtered := make([]NodeHistoryChangeEvent, 0, len(events))
-		for _, event := range events {
-			if event.FieldID == fieldID {
-				filtered = append(filtered, event)
-			}
-		}
-		events = filtered
-	}
-
 	page = normalizeHistoryPage(page)
 	pageSize = normalizeHistoryPageSize(0, pageSize)
-	total := int64(len(events))
+	keep := page * pageSize
+	selected := &historyEventTopKHeap{}
+	heap.Init(selected)
+	total := int64(0)
+
+	if err := streamNodeHistoryChangeEvents(db, uuid, selectedTargetID, startAt, endAt, fieldID, func(event NodeHistoryChangeEvent) error {
+		total += 1
+		if keep <= 0 {
+			return nil
+		}
+		if selected.Len() < keep {
+			heap.Push(selected, event)
+			return nil
+		}
+		if compareHistoryEventOrder(event, (*selected)[0]) > 0 {
+			heap.Pop(selected)
+			heap.Push(selected, event)
+		}
+		return nil
+	}); err != nil {
+		return NodeHistoryChangeEventPage{}, err
+	}
+
 	totalPages := 0
 	if total > 0 {
 		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
 	}
+	events := selected.ItemsDescending()
 	startIndex := (page - 1) * pageSize
 	if startIndex >= len(events) {
 		return NodeHistoryChangeEventPage{
@@ -95,23 +99,18 @@ func GetNodeHistoryEvents(db *gorm.DB, uuid string, selectedTargetID *uint, fiel
 }
 
 func GetNodeHistoryFieldOptions(db *gorm.DB, uuid string, selectedTargetID *uint, startAt, endAt *time.Time) (NodeHistoryFieldOptionList, error) {
-	entries, err := loadNodeHistoryEntriesForEvents(db, uuid, selectedTargetID, endAt)
-	if err != nil {
-		return NodeHistoryFieldOptionList{}, err
-	}
-	events, err := buildNodeHistoryChangeEvents(entries, startAt)
-	if err != nil {
-		return NodeHistoryFieldOptionList{}, err
-	}
 	seen := make(map[string]NodeHistoryFieldOption)
-	for _, event := range events {
+	if err := streamNodeHistoryChangeEvents(db, uuid, selectedTargetID, startAt, endAt, "", func(event NodeHistoryChangeEvent) error {
 		if _, ok := seen[event.FieldID]; ok {
-			continue
+			return nil
 		}
 		seen[event.FieldID] = NodeHistoryFieldOption{
 			ID:    event.FieldID,
 			Label: event.FieldOptionLabel,
 		}
+		return nil
+	}); err != nil {
+		return NodeHistoryFieldOptionList{}, err
 	}
 	items := make([]NodeHistoryFieldOption, 0, len(seen))
 	for _, item := range seen {
@@ -123,86 +122,95 @@ func GetNodeHistoryFieldOptions(db *gorm.DB, uuid string, selectedTargetID *uint
 	return NodeHistoryFieldOptionList{Items: items}, nil
 }
 
-func loadNodeHistoryEntriesForEvents(db *gorm.DB, uuid string, selectedTargetID *uint, endAt *time.Time) ([]NodeHistoryEntry, error) {
+type nodeHistoryEventRow struct {
+	ID           uint
+	NodeTargetID uint
+	ResultJSON   string
+	RecordedAt   time.Time
+}
+
+func streamNodeHistoryChangeEvents(
+	db *gorm.DB,
+	uuid string,
+	selectedTargetID *uint,
+	startAt, endAt *time.Time,
+	fieldID string,
+	visit func(NodeHistoryChangeEvent) error,
+) error {
 	_, targets, err := loadNodeWithTargets(db, uuid)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	selected, err := selectNodeTarget(targets, selectedTargetID)
+	_, scopedTargets, err := resolveHistoryTargetScope(targets, selectedTargetID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(targets) == 0 {
-		return []NodeHistoryEntry{}, nil
+		return nil
 	}
 
 	targetByID := make(map[uint]models.NodeTarget, len(targets))
-	targetIDs := make([]uint, 0, len(targets))
 	for _, target := range targets {
 		targetByID[target.ID] = target
-		targetIDs = append(targetIDs, target.ID)
 	}
-	targetScope := targetIDs
-	if selected != nil {
-		targetScope = []uint{selected.ID}
+	targetScope := make([]uint, 0, len(scopedTargets))
+	for _, target := range scopedTargets {
+		targetScope = append(targetScope, target.ID)
+	}
+	normalizedFieldID := strings.TrimSpace(strings.ToLower(fieldID))
+	var endBoundary time.Time
+	hasEndBoundary := endAt != nil && !endAt.IsZero()
+	if hasEndBoundary {
+		endBoundary = endAt.UTC()
+	}
+	var startBoundary time.Time
+	hasStartBoundary := startAt != nil && !startAt.IsZero()
+	if hasStartBoundary {
+		startBoundary = startAt.UTC()
 	}
 
-	query := db.Where("node_target_id IN ?", targetScope).Order("node_target_id ASC").Order("recorded_at ASC").Order("id ASC")
-	if endAt != nil && !endAt.IsZero() {
-		query = query.Where("recorded_at <= ?", endAt.UTC())
+	query := db.Model(&models.NodeTargetHistory{}).
+		Select("id", "node_target_id", "result_json", "recorded_at").
+		Where("node_target_id IN ?", targetScope).
+		Order("recorded_at ASC").
+		Order("node_target_id ASC").
+		Order("id ASC")
+	if hasEndBoundary {
+		query = query.Where("recorded_at <= ?", endBoundary)
 	}
 
-	var history []models.NodeTargetHistory
-	if err := query.Find(&history).Error; err != nil {
-		return nil, err
+	rows, err := query.Rows()
+	if err != nil {
+		return err
 	}
+	defer rows.Close()
 
-	items := make([]NodeHistoryEntry, 0, len(history))
-	for _, item := range history {
-		target := targetByID[item.NodeTargetID]
-		items = append(items, NodeHistoryEntry{
-			ID:         item.ID,
-			TargetID:   item.NodeTargetID,
-			TargetIP:   target.TargetIP,
-			RecordedAt: item.RecordedAt,
-			Summary:    item.Summary,
-			Result:     decodeResultJSON(item.ResultJSON),
-		})
-	}
-	return items, nil
-}
+	previousStateByTarget := make(map[uint]map[string]DisplayFieldValue)
+	previousStateSinceByTarget := make(map[uint]map[string]time.Time)
 
-func buildNodeHistoryChangeEvents(items []NodeHistoryEntry, startAt *time.Time) ([]NodeHistoryChangeEvent, error) {
-	ordered := append([]NodeHistoryEntry{}, items...)
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].TargetID == ordered[j].TargetID {
-			if ordered[i].RecordedAt.Equal(ordered[j].RecordedAt) {
-				return ordered[i].ID < ordered[j].ID
-			}
-			return ordered[i].RecordedAt.Before(ordered[j].RecordedAt)
+	for rows.Next() {
+		var row nodeHistoryEventRow
+		if err := db.ScanRows(rows, &row); err != nil {
+			return err
 		}
-		return ordered[i].TargetID < ordered[j].TargetID
-	})
 
-	events := make([]NodeHistoryChangeEvent, 0)
-	previousMapByTarget := make(map[uint]map[string]DisplayFieldValue)
-	previousEntryByTarget := make(map[uint]*NodeHistoryEntry)
-
-	for _, item := range ordered {
-		currentValues, err := extractDisplayFieldValues(item.Result)
+		currentValues, err := extractDisplayFieldValues(decodeResultJSON(row.ResultJSON))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		currentMap := make(map[string]DisplayFieldValue, len(currentValues))
 		for _, value := range currentValues {
 			currentMap[value.ID] = value
 		}
-		previousMap := previousMapByTarget[item.TargetID]
-		previousEntry := previousEntryByTarget[item.TargetID]
-		ids := unionFieldIDs(previousMap, currentMap)
+		previousState := previousStateByTarget[row.NodeTargetID]
+		previousStateSince := previousStateSinceByTarget[row.NodeTargetID]
+		ids := unionFieldIDs(previousState, currentMap)
+		nextState := make(map[string]DisplayFieldValue, len(ids))
+		nextStateSince := make(map[string]time.Time, len(ids))
 		for _, id := range ids {
 			currentValue, currentOk := currentMap[id]
-			previousValue, previousOk := previousMap[id]
+			previousValue, previousOk := previousState[id]
+			previousRecordedAtValue, previousRecordedAtOK := previousStateSince[id]
 			if !currentOk && !previousOk {
 				continue
 			}
@@ -213,19 +221,31 @@ func buildNodeHistoryChangeEvents(items []NodeHistoryEntry, startAt *time.Time) 
 				currentValue = buildMissingDisplayFieldLike(previousValue)
 			}
 			if compareDisplayFieldValues(previousValue, currentValue) {
+				nextState[id] = currentValue
+				if previousRecordedAtOK && !previousRecordedAtValue.IsZero() {
+					nextStateSince[id] = previousRecordedAtValue
+				} else {
+					nextStateSince[id] = row.RecordedAt
+				}
 				continue
 			}
-			if startAt != nil && item.RecordedAt.Before(startAt.UTC()) {
+			nextState[id] = currentValue
+			nextStateSince[id] = row.RecordedAt
+			if hasStartBoundary && row.RecordedAt.Before(startBoundary) {
 				continue
 			}
+			if normalizedFieldID != "" && id != normalizedFieldID {
+				continue
+			}
+			target := targetByID[row.NodeTargetID]
 			previousRecordedAt := ""
-			if previousEntry != nil {
-				previousRecordedAt = previousEntry.RecordedAt.Format(time.RFC3339)
+			if previousRecordedAtOK && !previousRecordedAtValue.IsZero() {
+				previousRecordedAt = previousRecordedAtValue.Format(time.RFC3339)
 			}
-			events = append(events, NodeHistoryChangeEvent{
-				ID:                 strconvID(item.ID) + ":" + id,
-				TargetID:           item.TargetID,
-				TargetIP:           item.TargetIP,
+			if err := visit(NodeHistoryChangeEvent{
+				ID:                 strconvID(row.ID) + ":" + id,
+				TargetID:           row.NodeTargetID,
+				TargetIP:           target.TargetIP,
 				FieldID:            id,
 				GroupPath:          append([]string{}, currentValue.GroupPath...),
 				FieldLabel:         currentValue.Label,
@@ -233,24 +253,76 @@ func buildNodeHistoryChangeEvents(items []NodeHistoryEntry, startAt *time.Time) 
 				Previous:           previousValue,
 				Current:            currentValue,
 				PreviousRecordedAt: previousRecordedAt,
-				RecordedAt:         item.RecordedAt,
-			})
+				RecordedAt:         row.RecordedAt,
+			}); err != nil {
+				return err
+			}
 		}
-		previousMapByTarget[item.TargetID] = currentMap
-		copyEntry := item
-		previousEntryByTarget[item.TargetID] = &copyEntry
+		previousStateByTarget[row.NodeTargetID] = nextState
+		previousStateSinceByTarget[row.NodeTargetID] = nextStateSince
 	}
 
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].RecordedAt.Equal(events[j].RecordedAt) {
-			if events[i].TargetIP == events[j].TargetIP {
-				return strings.Compare(events[i].FieldOptionLabel, events[j].FieldOptionLabel) < 0
-			}
-			return strings.Compare(events[i].TargetIP, events[j].TargetIP) < 0
-		}
-		return events[i].RecordedAt.After(events[j].RecordedAt)
+	return rows.Err()
+}
+
+type historyEventTopKHeap []NodeHistoryChangeEvent
+
+func (h historyEventTopKHeap) Len() int { return len(h) }
+
+func (h historyEventTopKHeap) Less(i, j int) bool {
+	return compareHistoryEventOrder(h[i], h[j]) < 0
+}
+
+func (h historyEventTopKHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *historyEventTopKHeap) Push(value any) {
+	*h = append(*h, value.(NodeHistoryChangeEvent))
+}
+
+func (h *historyEventTopKHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	value := old[last]
+	*h = old[:last]
+	return value
+}
+
+func (h historyEventTopKHeap) ItemsDescending() []NodeHistoryChangeEvent {
+	items := append([]NodeHistoryChangeEvent{}, h...)
+	sort.Slice(items, func(i, j int) bool {
+		return compareHistoryEventOrder(items[i], items[j]) > 0
 	})
-	return events, nil
+	return items
+}
+
+func compareHistoryEventOrder(left, right NodeHistoryChangeEvent) int {
+	if left.RecordedAt.After(right.RecordedAt) {
+		return 1
+	}
+	if left.RecordedAt.Before(right.RecordedAt) {
+		return -1
+	}
+	if cmp := strings.Compare(left.TargetIP, right.TargetIP); cmp != 0 {
+		if cmp < 0 {
+			return 1
+		}
+		return -1
+	}
+	if cmp := strings.Compare(left.FieldOptionLabel, right.FieldOptionLabel); cmp != 0 {
+		if cmp < 0 {
+			return 1
+		}
+		return -1
+	}
+	if cmp := strings.Compare(left.ID, right.ID); cmp != 0 {
+		if cmp < 0 {
+			return 1
+		}
+		return -1
+	}
+	return 0
 }
 
 func unionFieldIDs(left map[string]DisplayFieldValue, right map[string]DisplayFieldValue) []string {

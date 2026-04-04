@@ -1425,6 +1425,20 @@ textarea {
   opacity: 1;
 }
 
+.compare-timeline-point-favorite {
+  background: #ef4444;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px rgba(239, 68, 68, 0.2);
+}
+
+.compare-timeline-point-legend {
+  position: static;
+  transform: none;
+  width: 10px;
+  height: 10px;
+}
+
 .compare-timeline-range {
   position: absolute;
   height: 6px;
