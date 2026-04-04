@@ -53,7 +53,30 @@ jobs:
         run: docker exec -i ipq-workspace-dev sh -lc 'cd /workspace/web && npm run build'
 
       - name: Build backend binary
-        run: docker exec -i ipq-workspace-dev sh -lc 'mkdir -p /workspace/.tmp && cd /workspace && go build -o /workspace/.tmp/ipq-backend-bin ./cmd/ipq'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker exec -i ipq-workspace-dev sh -lc '
+            set -e
+            echo "=== id ==="
+            id
+            echo "=== workspace tmp ==="
+            mkdir -p /workspace/.tmp
+            ls -ld /workspace /workspace/.tmp
+            echo "=== toolchain ==="
+            which go
+            go version
+            go env GOCACHE GOPATH CGO_ENABLED GOOS GOARCH CC CXX
+            echo "=== compiler ==="
+            which gcc || true
+            gcc --version | head -n 1 || true
+            echo "=== build ==="
+            cd /workspace
+            go build -x -o /workspace/.tmp/ipq-backend-bin ./cmd/ipq
+          ' >/tmp/ipq-backend-build.log 2>&1; then
+            cat /tmp/ipq-backend-build.log
+            exit 1
+          fi
 
       - name: Start backend
         shell: bash
@@ -90,6 +113,7 @@ jobs:
           set -euo pipefail
           mkdir -p ci-artifacts
           docker compose -f compose.dev.yml logs --no-color > ci-artifacts/docker-compose.log || true
+          cp /tmp/ipq-backend-build.log ci-artifacts/ipq-backend-build.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-backend-bootstrap.log ci-artifacts/ipq-backend-bootstrap.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-frontend.log ci-artifacts/ipq-frontend.log || true
