@@ -50,7 +50,7 @@ type NavItem = {
 };
 
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
-const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh";
+const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
 
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <RowsIcon /> }];
 
@@ -218,7 +218,29 @@ function routeLabel(pathname: string) {
 }
 
 async function copyText(value: string) {
-  await navigator.clipboard.writeText(value);
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-1000px";
+  textarea.style.left = "-1000px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("copy command failed");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void, debugDelayMS?: number | null) {
@@ -1356,7 +1378,8 @@ function buildInstallCommand(
     runImmediately ? "1" : "0",
     ...targetIPs.flatMap((ip) => ["--target-ip", ip])
   ];
-  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | sudo bash -s -- ${args.map(shellQuote).join(" ")}`;
+  const argString = args.map(shellQuote).join(" ");
+  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | ( if [ "$(id -u)" -eq 0 ]; then bash -s -- ${argString}; elif command -v sudo >/dev/null 2>&1; then sudo bash -s -- ${argString}; else echo "Please run as root or install sudo." >&2; exit 1; fi )`;
 }
 
 function ReportConfigSection(props: {
