@@ -53,7 +53,13 @@ jobs:
         run: docker exec -i ipq-workspace-dev sh -lc 'cd /workspace/web && npm run build'
 
       - name: Start backend
-        run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh; then
+            docker exec -i ipq-workspace-dev sh -lc 'echo "=== /tmp/ipq-backend-bootstrap.log ==="; cat /tmp/ipq-backend-bootstrap.log || true; echo "=== /tmp/ipq-backend.log ==="; cat /tmp/ipq-backend.log || true'
+            exit 1
+          fi
 
       - name: Start frontend
         run: docker exec -i ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-frontend.sh
@@ -82,6 +88,7 @@ jobs:
           mkdir -p ci-artifacts
           docker compose -f compose.dev.yml logs --no-color > ci-artifacts/docker-compose.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-backend.log ci-artifacts/ipq-backend.log || true
+          docker cp ipq-workspace-dev:/tmp/ipq-backend-bootstrap.log ci-artifacts/ipq-backend-bootstrap.log || true
           docker cp ipq-workspace-dev:/tmp/ipq-frontend.log ci-artifacts/ipq-frontend.log || true
           docker cp ipq-workspace-dev:/workspace/web/playwright-output ci-artifacts/playwright-output || true
 
