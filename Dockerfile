@@ -44,6 +44,9 @@ WORKDIR /app
 
 COPY --from=app-build /out/ipq /app/ipq
 COPY --from=web-build /src/public /app/public
+COPY deploy/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+RUN chmod +x /app/docker-entrypoint.sh
 
 ENV IPQ_APP_ENV=production
 ENV GIN_MODE=release
@@ -53,6 +56,4 @@ ENV IPQ_DB_PATH=/data/ipq.db
 VOLUME ["/data"]
 EXPOSE 8090
 
-USER ipq
-
-ENTRYPOINT ["/app/ipq"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
