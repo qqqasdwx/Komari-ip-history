@@ -188,8 +188,10 @@ trap cleanup EXIT
 for TARGET_IP in "\${TARGET_IPS[@]}"; do
   SAFE_NAME=\$(printf '%s' "\$TARGET_IP" | tr ':/' '__')
   RESULT_FILE="\$WORKDIR/\$SAFE_NAME.json"
+  PROBE_LOG="\$WORKDIR/\$SAFE_NAME.log"
   PROBE_EXIT=0
-  if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i "\$TARGET_IP" -o "\$RESULT_FILE"; then
+  echo "Probing \$TARGET_IP..."
+  if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i "\$TARGET_IP" -o "\$RESULT_FILE" >"\$PROBE_LOG" 2>&1; then
     PROBE_EXIT=\$?
   fi
   if [ ! -s "\$RESULT_FILE" ]; then
@@ -208,6 +210,7 @@ for TARGET_IP in "\${TARGET_IPS[@]}"; do
       -H "X-IPQ-Reporter-Token: \${REPORTER_TOKEN}" \
       --data-binary @- \
       "\$REPORT_ENDPOINT" >/dev/null
+  echo "Uploaded result for \$TARGET_IP."
 done
 EOF
 
@@ -231,7 +234,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 if [[ "$RUN_IMMEDIATELY" == "1" || "$RUN_IMMEDIATELY" == "true" ]]; then
-  echo "Running the reporter immediately once after installation."
+  echo "Running the reporter immediately once after installation. This may take several minutes."
   if ! "$SCRIPT_PATH"; then
     echo "Immediate run failed. Scheduled execution remains installed." >&2
   fi
