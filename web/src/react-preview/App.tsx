@@ -1347,10 +1347,9 @@ function NodeDetailLoading() {
   );
 }
 
-function resolveReportEndpointURL(me: MeResponse, path: string) {
+function resolvePublicBaseURL(me: MeResponse) {
   const publicBaseURL = (me.public_base_url ?? "").replace(/\/$/, "");
-  const base = publicBaseURL || window.location.origin;
-  return `${base}${path}`;
+  return publicBaseURL || window.location.origin;
 }
 
 function shellQuote(value: string) {
@@ -1358,25 +1357,17 @@ function shellQuote(value: string) {
 }
 
 function buildInstallCommand(
-  reportEndpointURL: string,
+  publicBaseURL: string,
   reporterToken: string,
-  nodeUUID: string,
-  targetIPs: string[],
-  scheduleCron: string,
-  runImmediately: boolean
+  nodeUUID: string
 ) {
   const args = [
     "--node-uuid",
     nodeUUID,
     "--server",
-    reportEndpointURL,
+    publicBaseURL,
     "--token",
-    reporterToken,
-    "--cron",
-    scheduleCron,
-    "--run-immediately",
-    runImmediately ? "1" : "0",
-    ...targetIPs.flatMap((ip) => ["--target-ip", ip])
+    reporterToken
   ];
   const argString = args.map(shellQuote).join(" ");
   return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | ( if [ "$(id -u)" -eq 0 ]; then bash -s -- ${argString}; elif command -v sudo >/dev/null 2>&1; then sudo bash -s -- ${argString}; else echo "Please run as root or install sudo." >&2; exit 1; fi )`;
@@ -1397,7 +1388,7 @@ function ReportConfigSection(props: {
   onSelectTarget: (targetID: number) => void;
   onReorderTargets: (sourceID: number, destinationID: number) => void;
 }) {
-  const reportEndpointURL = resolveReportEndpointURL(props.me, props.detail.report_config.endpoint_path);
+  const publicBaseURL = resolvePublicBaseURL(props.me);
   const [scheduleCron, setScheduleCron] = useState(props.detail.report_config.schedule_cron);
   const [runImmediately, setRunImmediately] = useState(props.detail.report_config.run_immediately);
   const [preview, setPreview] = useState<NodeReportConfigPreview>({
@@ -1413,12 +1404,9 @@ function ReportConfigSection(props: {
     runImmediately: props.detail.report_config.run_immediately
   });
   const installCommand = buildInstallCommand(
-    reportEndpointURL,
+    publicBaseURL,
     props.detail.report_config.reporter_token,
-    props.detail.komari_node_uuid,
-    props.detail.report_config.target_ips,
-    previewError ? props.detail.report_config.schedule_cron : preview.schedule_cron,
-    runImmediately
+    props.detail.komari_node_uuid
   );
 
   useEffect(() => {

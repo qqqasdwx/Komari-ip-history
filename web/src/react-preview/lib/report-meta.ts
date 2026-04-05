@@ -75,29 +75,44 @@ export function reportUsageMeta(value: unknown) {
   }
 
   const text = String(value).trim().toLowerCase();
-  if (["isp", "residential", "line isp", "broadband", "home", "consumer"].includes(text)) {
+  if (["isp", "residential", "line isp", "broadband", "home", "consumer", "家宽"].includes(text)) {
     return { text: "家宽", tone: "good" as const };
   }
-  if (["business", "commercial", "enterprise"].includes(text)) {
+  if (["business", "commercial", "enterprise", "商业"].includes(text)) {
     return { text: "商业", tone: "warn" as const };
   }
-  if (["hosting", "datacenter", "data center", "server", "cloud", "vps"].includes(text)) {
+  if (["hosting", "datacenter", "data center", "server", "cloud", "vps", "机房"].includes(text)) {
     return { text: "机房", tone: "bad" as const };
   }
-  if (["mobile", "cellular", "wireless"].includes(text)) {
-    return { text: "移动", tone: "good" as const };
+  if (["mobile", "cellular", "wireless", "mobile isp", "手机"].includes(text)) {
+    return { text: "手机", tone: "good" as const };
   }
-  if (["education", "edu", "university"].includes(text)) {
-    return { text: "教育", tone: "neutral" as const };
+  if (["education", "edu", "university", "教育"].includes(text)) {
+    return { text: "教育", tone: "warn" as const };
   }
+  if (["government", "gov", "政府"].includes(text)) return { text: "政府", tone: "warn" as const };
+  if (["banking", "bank", "银行"].includes(text)) return { text: "银行", tone: "warn" as const };
+  if (["organization", "org", "组织"].includes(text)) return { text: "组织", tone: "warn" as const };
+  if (["military", "mil", "军队"].includes(text)) return { text: "军队", tone: "warn" as const };
+  if (["library", "lib", "图书馆"].includes(text)) return { text: "图书馆", tone: "warn" as const };
+  if (["reserved", "rsv", "保留"].includes(text)) return { text: "保留", tone: "warn" as const };
+  if (["other", "其他"].includes(text)) return { text: "其他", tone: "warn" as const };
+  if (["cdn"].includes(text)) return { text: "CDN", tone: "bad" as const };
+  if (["spider", "web spider", "search engine spider", "蜘蛛"].includes(text)) return { text: "蜘蛛", tone: "bad" as const };
 
   return { text: String(value), tone: "neutral" as const };
 }
 
 export function reportIPTypeText(value: unknown) {
-  if (reportMissingText(value)) return "N/A";
-  if (String(value).trim().toLowerCase() === "geo-consistent") return "原生IP";
-  return String(value);
+  return reportIPTypeMeta(value).text;
+}
+
+export function reportIPTypeMeta(value: unknown) {
+  if (reportMissingText(value)) return { text: "N/A", tone: "muted" as const };
+  const text = String(value).trim().toLowerCase();
+  if (text === "geo-consistent" || text === "原生ip") return { text: "原生IP", tone: "good" as const };
+  if (text === "geo-discrepant" || text === "广播ip") return { text: "广播IP", tone: "bad" as const };
+  return { text: String(value), tone: "neutral" as const };
 }
 
 export function reportMediaStatusText(value: unknown) {
@@ -140,9 +155,9 @@ export function reportRiskMeta(value: unknown) {
 }
 
 export function reportToneFromText(text: string): DisplayTone {
-  if (["解锁", "原生", "原创", "家宽", "移动", "可用", "否"].includes(text) || text.startsWith("[")) return "good";
-  if (text === "商业" || text === "网页") return "warn";
-  if (["失败", "机房", "是", "不可用"].includes(text)) return "bad";
+  if (["解锁", "原生", "原创", "家宽", "手机", "原生IP", "可用", "否"].includes(text) || text.startsWith("[")) return "good";
+  if (["商业", "教育", "政府", "银行", "组织", "军队", "图书馆", "保留", "其他", "网页"].includes(text)) return "warn";
+  if (["失败", "机房", "CDN", "蜘蛛", "广播IP", "是", "不可用"].includes(text)) return "bad";
   if (text === "N/A") return "muted";
   return "neutral";
 }

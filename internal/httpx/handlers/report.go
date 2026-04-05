@@ -90,6 +90,46 @@ func (h ReportHandler) InstallScript(c *gin.Context) {
 	c.Data(http.StatusOK, "text/x-shellscript; charset=utf-8", []byte(script))
 }
 
+func (h ReportHandler) InstallConfig(c *gin.Context) {
+	token := extractReporterToken(c)
+
+	integration, err := service.GetIntegrationSettings(h.DB, h.Cfg.PublicBaseURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load integration settings"})
+		return
+	}
+
+	publicBaseURL := integration.EffectivePublicBaseURL
+	if publicBaseURL == "" {
+		publicBaseURL = inferredPublicBaseURL(c, h.Cfg.BasePath)
+	}
+	if publicBaseURL == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to infer public base url"})
+		return
+	}
+
+	reportEndpointURL := strings.TrimRight(publicBaseURL, "/") + h.Cfg.APIBase() + "/report/nodes/" + c.Param("uuid")
+	config, err := service.GetNodeInstallConfig(h.DB, c.Param("uuid"), token, reportEndpointURL)
+	if err != nil {
+		switch err.Error() {
+		case "missing reporter token", "invalid reporter token":
+			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
+		case "no target ip configured":
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		default:
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+				return
+			}
+				c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to build install config"})
+			}
+			return
+		}
+
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, config)
+}
+
 func extractReporterToken(c *gin.Context) string {
 	if token := strings.TrimSpace(c.GetHeader("X-IPQ-Reporter-Token")); token != "" {
 		return token

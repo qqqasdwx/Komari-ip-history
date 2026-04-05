@@ -4,6 +4,7 @@ import {
   reportBoolText,
   reportCountryText,
   reportFieldLabel,
+  reportIPTypeMeta,
   reportIPTypeText,
   reportMediaStatusText,
   reportMediaTypeText,
@@ -165,7 +166,13 @@ export function extractDisplayFieldValues(result: Record<string, unknown>) {
   pushField(items, { path: "Info.UsagePlace", groupPath: ["基础信息（Maxmind 数据库）"], label: "使用地", text: usagePlaceText || "N/A", tone: "good" });
   pushField(items, { path: "Info.RegisteredRegion", groupPath: ["基础信息（Maxmind 数据库）"], label: "注册地", text: registeredText, tone: "good" });
   pushField(items, { path: "Info.TimeZone", groupPath: ["基础信息（Maxmind 数据库）"], label: "时区", text: reportMissingText(info.TimeZone) ? "N/A" : String(info.TimeZone), tone: "good" });
-  pushField(items, { path: "Info.Type", groupPath: ["基础信息（Maxmind 数据库）"], label: "IP类型", text: reportIPTypeText(info.Type), tone: "good" });
+  pushField(items, {
+    path: "Info.Type",
+    groupPath: ["基础信息（Maxmind 数据库）"],
+    label: "IP类型",
+    text: reportIPTypeText(info.Type),
+    tone: reportIPTypeMeta(info.Type).tone
+  });
   renderExtraRows(items, {
     record: info,
     basePath: "Info",

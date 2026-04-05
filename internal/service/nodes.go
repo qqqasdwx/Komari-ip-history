@@ -79,6 +79,13 @@ type NodeReportConfig struct {
 	NextRuns       []time.Time `json:"next_runs"`
 }
 
+type NodeInstallConfig struct {
+	ReportEndpoint string   `json:"report_endpoint"`
+	ScheduleCron   string   `json:"schedule_cron"`
+	RunImmediately bool     `json:"run_immediately"`
+	TargetIPs      []string `json:"target_ips"`
+}
+
 type NodeDetail struct {
 	KomariNodeUUID   string               `json:"komari_node_uuid"`
 	Name             string               `json:"name"`
@@ -738,6 +745,40 @@ func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, sc
 	}
 
 	return buildNodeInstallScript(node, targetIPs, reportEndpointURL, normalizedCron, runImmediately), nil
+}
+
+func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (NodeInstallConfig, error) {
+	if strings.TrimSpace(token) == "" {
+		return NodeInstallConfig{}, errors.New("missing reporter token")
+	}
+
+	node, targets, err := loadNodeWithTargets(db, uuid)
+	if err != nil {
+		return NodeInstallConfig{}, err
+	}
+	if node.ReporterToken == "" || token != node.ReporterToken {
+		return NodeInstallConfig{}, errors.New("invalid reporter token")
+	}
+	if len(targets) == 0 {
+		return NodeInstallConfig{}, errors.New("no target ip configured")
+	}
+
+	targetIPs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIPs = append(targetIPs, target.TargetIP)
+	}
+	scheduleCron, runImmediately := normalizeReporterSchedule(node)
+	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	if err != nil {
+		return NodeInstallConfig{}, err
+	}
+
+	return NodeInstallConfig{
+		ReportEndpoint: reportEndpointURL,
+		ScheduleCron:   normalizedCron,
+		RunImmediately: runImmediately,
+		TargetIPs:      targetIPs,
+	}, nil
 }
 
 func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {

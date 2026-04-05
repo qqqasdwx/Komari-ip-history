@@ -52,6 +52,7 @@ func Run() error {
 		api.POST("/embed/nodes/register", embedHandler.Register)
 		api.GET("/public/nodes/:uuid/current", publicHandler.Current)
 		api.GET("/report/nodes/:uuid/install.sh", reportHandler.InstallScript)
+		api.GET("/report/nodes/:uuid/install-config", reportHandler.InstallConfig)
 		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
 		admin := api.Group("/admin")

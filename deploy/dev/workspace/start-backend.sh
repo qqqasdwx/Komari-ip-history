@@ -30,10 +30,8 @@ if [ -f "${PID_PATH}" ]; then
   fi
 fi
 rm -f "${PID_PATH}"
-if [ ! -x "${BINARY_PATH}" ]; then
-  if ! go build -buildvcs=false -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
-    fail
-  fi
+if ! go build -buildvcs=false -o "${BINARY_PATH}" ./cmd/ipq >>"${LOG_FILE}" 2>&1; then
+  fail
 fi
 log "binary=$(ls -l "${BINARY_PATH}")"
 nohup "${BINARY_PATH}" >/tmp/ipq-backend.log 2>&1 &

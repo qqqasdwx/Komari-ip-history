@@ -122,6 +122,50 @@ func TestGetNodeHistoryEventsTracksPreviousRecordedAtPerFieldChange(t *testing.T
 	}
 }
 
+func TestGetNodeHistoryEventsIgnoresHeadTimeChanges(t *testing.T) {
+	db := openHistoryEventsTestDB(t)
+
+	node := models.Node{
+		KomariNodeUUID: "node-ignore-head-time",
+		Name:           "node-ignore-head-time",
+		ReporterToken:  "token",
+	}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", SortOrder: 0}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	mustInsertTargetHistory(t, db, target.ID, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), func(result map[string]any) {
+		setNestedValue(result, []string{"Head", "Time"}, "2026-01-01 00:00:00")
+		setNestedValue(result, []string{"Info", "Organization"}, "Org A")
+	})
+	mustInsertTargetHistory(t, db, target.ID, time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), func(result map[string]any) {
+		setNestedValue(result, []string{"Head", "Time"}, "2026-01-02 00:00:00")
+		setNestedValue(result, []string{"Info", "Organization"}, "Org A")
+	})
+
+	startAt := time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC)
+	page, err := GetNodeHistoryEvents(db, node.KomariNodeUUID, &target.ID, "", 1, 10, &startAt, nil)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	if page.Total != 0 {
+		t.Fatalf("expected no events when only head time changed, got %d", page.Total)
+	}
+
+	fields, err := GetNodeHistoryFieldOptions(db, node.KomariNodeUUID, &target.ID, &startAt, nil)
+	if err != nil {
+		t.Fatalf("field options: %v", err)
+	}
+	if len(fields.Items) != 0 {
+		t.Fatalf("expected no field options when only head time changed, got %d", len(fields.Items))
+	}
+}
+
 func openHistoryEventsTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 

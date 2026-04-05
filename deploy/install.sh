@@ -2,7 +2,7 @@
 set -euo pipefail
 
 NODE_UUID=""
-REPORT_ENDPOINT=""
+SERVER_BASE_URL=""
 REPORTER_TOKEN=""
 SCHEDULE_CRON="0 0 * * *"
 RUN_IMMEDIATELY="1"
@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --server)
-      REPORT_ENDPOINT="${2:-}"
+      SERVER_BASE_URL="${2:-}"
       shift 2
       ;;
     --token)
@@ -46,12 +46,19 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ -z "$NODE_UUID" || -z "$REPORT_ENDPOINT" || -z "$REPORTER_TOKEN" ]]; then
+if [[ -z "$NODE_UUID" || -z "$SERVER_BASE_URL" || -z "$REPORTER_TOKEN" ]]; then
   echo "Missing required arguments: --node-uuid, --server, --token" >&2
   exit 1
 fi
 
-if [[ ${#TARGET_IPS[@]} -eq 0 ]]; then
+SERVER_BASE_URL="${SERVER_BASE_URL%/}"
+LEGACY_INLINE_MODE=0
+if [[ "$SERVER_BASE_URL" == */api/v1/report/nodes/* ]]; then
+  LEGACY_INLINE_MODE=1
+  REPORT_ENDPOINT="$SERVER_BASE_URL"
+fi
+
+if [[ ${#TARGET_IPS[@]} -eq 0 && "$LEGACY_INLINE_MODE" -eq 1 ]]; then
   echo "At least one --target-ip is required." >&2
   exit 1
 fi
@@ -59,6 +66,7 @@ fi
 install_dependencies() {
   local need_curl=0
   local need_cron=0
+  local need_jq=0
 
   if ! command -v curl >/dev/null 2>&1; then
     need_curl=1
@@ -66,7 +74,10 @@ install_dependencies() {
   if ! command -v crontab >/dev/null 2>&1 && [ ! -d /etc/cron.d ]; then
     need_cron=1
   fi
-  if [ "$need_curl" -eq 0 ] && [ "$need_cron" -eq 0 ]; then
+  if ! command -v jq >/dev/null 2>&1; then
+    need_jq=1
+  fi
+  if [ "$need_curl" -eq 0 ] && [ "$need_cron" -eq 0 ] && [ "$need_jq" -eq 0 ]; then
     return
   fi
 
@@ -75,6 +86,7 @@ install_dependencies() {
     local packages=()
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("cron")
+    [ "$need_jq" -eq 1 ] && packages+=("jq")
     apt install -y "${packages[@]}"
     return
   fi
@@ -83,6 +95,7 @@ install_dependencies() {
     local packages=()
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("cronie")
+    [ "$need_jq" -eq 1 ] && packages+=("jq")
     yum install -y "${packages[@]}"
     return
   fi
@@ -91,15 +104,46 @@ install_dependencies() {
     local packages=()
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("dcron")
+    [ "$need_jq" -eq 1 ] && packages+=("jq")
     apk add --no-cache "${packages[@]}"
     return
   fi
 
-  echo "Missing required dependencies (curl/cron), and no supported package manager was found." >&2
+  echo "Missing required dependencies (curl/cron/jq), and no supported package manager was found." >&2
   exit 1
 }
 
 install_dependencies
+
+if [[ "$LEGACY_INLINE_MODE" -eq 0 ]]; then
+  CONFIG_URL="${SERVER_BASE_URL}/api/v1/report/nodes/${NODE_UUID}/install-config"
+  CONFIG_FILE="$(mktemp)"
+  cleanup_config() {
+    rm -f "$CONFIG_FILE"
+  }
+  trap cleanup_config EXIT
+
+  curl -fsSL \
+    -H "X-IPQ-Reporter-Token: ${REPORTER_TOKEN}" \
+    "$CONFIG_URL" -o "$CONFIG_FILE"
+
+  REPORT_ENDPOINT="$(jq -er '.report_endpoint' "$CONFIG_FILE")"
+  SCHEDULE_CRON="$(jq -er '.schedule_cron' "$CONFIG_FILE")"
+  if jq -e '.run_immediately == true' "$CONFIG_FILE" >/dev/null 2>&1; then
+    RUN_IMMEDIATELY="1"
+  else
+    RUN_IMMEDIATELY="0"
+  fi
+  mapfile -t TARGET_IPS < <(jq -er '.target_ips[]' "$CONFIG_FILE")
+  if [[ -z "${REPORT_ENDPOINT:-}" ]]; then
+    echo "Install config did not include report_endpoint." >&2
+    exit 1
+  fi
+  if [[ ${#TARGET_IPS[@]} -eq 0 ]]; then
+    echo "Install config did not include any target IPs." >&2
+    exit 1
+  fi
+fi
 
 UNIT_NAME="ipq-reporter-${NODE_UUID}"
 INSTALL_DIR="/opt/${UNIT_NAME}"

@@ -163,16 +163,34 @@ func reportUsageMeta(value any) (string, string) {
 	}
 	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
 	switch {
-	case containsString([]string{"isp", "residential", "line isp", "broadband", "home", "consumer"}, text):
+	case containsString([]string{"isp", "residential", "line isp", "broadband", "home", "consumer", "家宽"}, text):
 		return "家宽", "good"
-	case containsString([]string{"business", "commercial", "enterprise"}, text):
+	case containsString([]string{"business", "commercial", "enterprise", "商业"}, text):
 		return "商业", "warn"
-	case containsString([]string{"hosting", "datacenter", "data center", "server", "cloud", "vps"}, text):
+	case containsString([]string{"hosting", "datacenter", "data center", "server", "cloud", "vps", "机房"}, text):
 		return "机房", "bad"
-	case containsString([]string{"mobile", "cellular", "wireless"}, text):
-		return "移动", "good"
-	case containsString([]string{"education", "edu", "university"}, text):
-		return "教育", "neutral"
+	case containsString([]string{"mobile", "cellular", "wireless", "mobile isp", "手机"}, text):
+		return "手机", "good"
+	case containsString([]string{"education", "edu", "university", "教育"}, text):
+		return "教育", "warn"
+	case containsString([]string{"government", "gov", "政府"}, text):
+		return "政府", "warn"
+	case containsString([]string{"banking", "bank", "银行"}, text):
+		return "银行", "warn"
+	case containsString([]string{"organization", "org", "组织"}, text):
+		return "组织", "warn"
+	case containsString([]string{"military", "mil", "军队"}, text):
+		return "军队", "warn"
+	case containsString([]string{"library", "lib", "图书馆"}, text):
+		return "图书馆", "warn"
+	case containsString([]string{"reserved", "rsv", "保留"}, text):
+		return "保留", "warn"
+	case containsString([]string{"other", "其他"}, text):
+		return "其他", "warn"
+	case containsString([]string{"cdn"}, text):
+		return "CDN", "bad"
+	case containsString([]string{"spider", "web spider", "search engine spider", "蜘蛛"}, text):
+		return "蜘蛛", "bad"
 	default:
 		return fmt.Sprint(value), "neutral"
 	}
@@ -188,13 +206,23 @@ func containsString(items []string, value string) bool {
 }
 
 func reportIPTypeText(value any) string {
+	text, _ := reportIPTypeMeta(value)
+	return text
+}
+
+func reportIPTypeMeta(value any) (string, string) {
 	if reportMissingText(value) {
-		return "N/A"
+		return "N/A", "muted"
 	}
-	if strings.ToLower(strings.TrimSpace(fmt.Sprint(value))) == "geo-consistent" {
-		return "原生IP"
+	text := strings.ToLower(strings.TrimSpace(fmt.Sprint(value)))
+	switch text {
+	case "geo-consistent", "原生ip":
+		return "原生IP", "good"
+	case "geo-discrepant", "广播ip":
+		return "广播IP", "bad"
+	default:
+		return fmt.Sprint(value), "neutral"
 	}
-	return fmt.Sprint(value)
 }
 
 func reportMediaStatusText(value any) string {
@@ -260,11 +288,11 @@ func reportRiskMeta(value any) (string, string) {
 
 func reportToneFromText(text string) string {
 	switch {
-	case containsString([]string{"解锁", "原生", "原创", "家宽", "移动", "可用", "否"}, text), strings.HasPrefix(text, "["):
+	case containsString([]string{"解锁", "原生", "原创", "家宽", "手机", "原生IP", "可用", "否"}, text), strings.HasPrefix(text, "["):
 		return "good"
-	case text == "商业" || text == "网页":
+	case containsString([]string{"商业", "教育", "政府", "银行", "组织", "军队", "图书馆", "保留", "其他", "网页"}, text):
 		return "warn"
-	case containsString([]string{"失败", "机房", "是", "不可用"}, text):
+	case containsString([]string{"失败", "机房", "CDN", "蜘蛛", "广播IP", "是", "不可用"}, text):
 		return "bad"
 	case text == "N/A":
 		return "muted"
@@ -381,7 +409,8 @@ func extractDisplayFieldValues(result map[string]any) ([]DisplayFieldValue, erro
 	pushDisplayField(&items, "Info.UsagePlace", []string{"基础信息（Maxmind 数据库）"}, "使用地", fallbackText(usagePlaceText), "good", false)
 	pushDisplayField(&items, "Info.RegisteredRegion", []string{"基础信息（Maxmind 数据库）"}, "注册地", registeredText, "good", false)
 	pushDisplayField(&items, "Info.TimeZone", []string{"基础信息（Maxmind 数据库）"}, "时区", valueOrNA(info["TimeZone"]), "good", false)
-	pushDisplayField(&items, "Info.Type", []string{"基础信息（Maxmind 数据库）"}, "IP类型", reportIPTypeText(info["Type"]), "good", false)
+	ipTypeText, ipTypeTone := reportIPTypeMeta(info["Type"])
+	pushDisplayField(&items, "Info.Type", []string{"基础信息（Maxmind 数据库）"}, "IP类型", ipTypeText, ipTypeTone, false)
 
 	renderExtraRows(&items, info, "Info", []string{"基础信息（Maxmind 数据库）"}, []string{"ASN", "Organization", "Latitude", "Longitude", "DMS", "Map", "City", "Region", "Continent", "RegisteredRegion", "TimeZone", "Type"})
 

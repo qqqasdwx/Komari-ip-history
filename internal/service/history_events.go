@@ -43,6 +43,10 @@ type NodeHistoryChangeEventPage struct {
 	TotalPages int                      `json:"total_pages"`
 }
 
+var ignoredHistoryEventFieldIDs = map[string]struct{}{
+	"head.time": {},
+}
+
 func GetNodeHistoryEvents(db *gorm.DB, uuid string, selectedTargetID *uint, fieldID string, page, pageSize int, startAt, endAt *time.Time) (NodeHistoryChangeEventPage, error) {
 	page = normalizeHistoryPage(page)
 	pageSize = normalizeHistoryPageSize(0, pageSize)
@@ -208,6 +212,13 @@ func streamNodeHistoryChangeEvents(
 		nextState := make(map[string]DisplayFieldValue, len(ids))
 		nextStateSince := make(map[string]time.Time, len(ids))
 		for _, id := range ids {
+			if shouldIgnoreHistoryEventField(id) {
+				if currentValue, currentOk := currentMap[id]; currentOk {
+					nextState[id] = currentValue
+					nextStateSince[id] = row.RecordedAt
+				}
+				continue
+			}
 			currentValue, currentOk := currentMap[id]
 			previousValue, previousOk := previousState[id]
 			previousRecordedAtValue, previousRecordedAtOK := previousStateSince[id]
@@ -356,4 +367,9 @@ func buildMissingDisplayFieldLike(source DisplayFieldValue) DisplayFieldValue {
 
 func strconvID(id uint) string {
 	return strconv.FormatUint(uint64(id), 10)
+}
+
+func shouldIgnoreHistoryEventField(id string) bool {
+	_, ok := ignoredHistoryEventFieldIDs[strings.TrimSpace(strings.ToLower(id))]
+	return ok
 }

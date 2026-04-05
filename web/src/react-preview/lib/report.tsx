@@ -5,6 +5,7 @@ import {
   reportBoolText,
   reportCountryText,
   reportFieldLabel,
+  reportIPTypeMeta,
   reportIPTypeText,
   reportMediaStatusText,
   reportMediaTypeText,
@@ -336,7 +337,14 @@ function BaseInfoSection(props: { structured: StructuredCurrentResult; hiddenPat
       <ReportKVRow label="使用地" text={usagePlace || "N/A"} tone="good" path="Info.Region" hidden={isPathHidden(props.hiddenPaths, "Info.Region")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="注册地" text={registered} tone="good" path="Info.RegisteredRegion" hidden={isPathHidden(props.hiddenPaths, "Info.RegisteredRegion")} onFieldClick={props.onFieldClick} />
       <ReportKVRow label="时区" text={reportMissingText(info.TimeZone) ? "N/A" : String(info.TimeZone)} tone="good" path="Info.TimeZone" hidden={isPathHidden(props.hiddenPaths, "Info.TimeZone")} onFieldClick={props.onFieldClick} />
-      <ReportKVRow label="IP类型" text={reportIPTypeText(info.Type)} tone="good" path="Info.Type" hidden={isPathHidden(props.hiddenPaths, "Info.Type")} onFieldClick={props.onFieldClick} />
+      <ReportKVRow
+        label="IP类型"
+        text={reportIPTypeText(info.Type)}
+        tone={reportIPTypeMeta(info.Type).tone}
+        path="Info.Type"
+        hidden={isPathHidden(props.hiddenPaths, "Info.Type")}
+        onFieldClick={props.onFieldClick}
+      />
       {renderExtraRows({
         record: info,
         basePath: "Info",
