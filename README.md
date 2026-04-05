@@ -1,181 +1,159 @@
 # Komari-ip-history
 
-本仓库用于开发一个与 Komari 集成的节点 IP 质量展示服务。项目形态是“独立服务 + 注入到 Komari 的轻量前端桥接”，目标是在不修改 Komari 官方源码的前提下，把节点 IP 质量信息挂到 Komari 节点详情页里。
+`Komari-ip-history` 是一个独立部署的 IP 质量服务，用来把 `IPQuality` 的探测结果接到 `Komari` 节点里。
 
-当前实现约定：
+它的目标不是替代 `Komari`，而是补一条 IP 质量能力：
 
-- `docs/`：需求、项目理解、已确认事项、待确认事项。
-- `references/`：上游参考源码与 IPQuality 参考库。
-- `cmd/ipq/`：Go 服务入口。
-- `internal/`：后端基础结构、模型、认证、路由、服务层。
-- `web/`：独立前端源码，使用 npm + Vite。
-- `public/`：前端构建产物目录，由 Go 服务统一提供。
-- `compose.dev.yml`：开发环境编排，当前按“单开发工作容器 + Komari + 统一反代”组织。
-- `deploy/dev/workspace/Dockerfile`：开发工作容器镜像定义，内置 Go 和 Node.js 工具链。
-- `Dockerfile`：生产镜像定义，构建前端产物并打包 Go 服务。
+- 在不修改 `Komari` 官方源码的前提下，通过 `custom_head` 注入入口
+- 在 `Komari` 节点详情页里直接打开 IP 质量结果
+- 支持多 IP 目标、历史变化、快照对比、收藏快照、历史保留策略
 
-当前阶段已经落下的骨架包括：
+## 这个项目适不适合你
 
-- Go + Gin + Gorm + SQLite 的基础后端结构。
-- 单管理员登录、Session Cookie、节点接入记录的基础模型。
-- 独立前端当前以 React 作为主线，已具备最小后台页面骨架：登录、节点列表、节点详情、系统配置。
-- 节点列表行内提供“上报设置”按钮，点击后以弹窗集中管理目标 IP、可配置 cron 计划、是否安装后立即执行一次，以及会随配置动态变化的单条接入命令。
-- 接入命令改为从 GitHub Raw 获取仓库内固定 `deploy/install.sh`，业务参数通过命令行传给安装脚本。
-- 当前默认按根路径独立部署，本服务可直接挂在 `/`。
-- 开发环境反代骨架仍保留子路径兼容能力，但不再代表默认产品部署形态。
-- 容器化开发工作流：默认通过 `docker compose exec workspace ...` 在容器内执行依赖安装、构建与测试。
-- GitHub Actions 已拆成轻量 CI、独立 E2E 和 Docker 发布三条线。
+如果你想要的是下面这些能力，这个项目是合适的：
 
-进一步设计边界见：
+- 在 `Komari` 节点详情页里查看当前 IP 质量
+- 给一个节点配置多个目标 IP，分别采集和展示
+- 查看某个 IP 的历史变化，而不只是当前一次结果
+- 用快照对比页比较两个时间点的完整结果
+- 收藏关键快照，避免被历史清理策略删除
+- 独立部署 IP 质量服务，不改 `Komari` 官方源码
 
-- `docs/已确认事项.md`
-- `docs/待确认事项.md`
+如果你只想看一次性的 `IPQuality` 结果，不需要：
 
-## 本地常用验收命令
+- `Komari` 集成
+- 历史变化
+- 多 IP 管理
 
-开发容器启动后，推荐使用以下命令完成阶段 1 主链路验收：
+那这个项目会偏重。
 
-```powershell
-docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/bootstrap.sh
-docker exec -it ipq-workspace-dev sh -lc "cd /workspace && go build ./cmd/ipq"
-docker exec -it ipq-workspace-dev sh -lc "cd /workspace/web && npm run build"
-docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-backend.sh
-docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/start-frontend.sh
-docker exec -it ipq-workspace-dev sh /workspace/deploy/dev/workspace/run-e2e.sh
-```
+## 当前功能
 
-如果改了前端或前后端联动页面，不要先猜浏览器缓存。先执行：
+- `Komari` 节点详情页注入“打开 IP 质量”入口
+- 管理员 / 游客分流
+- 节点列表行内“上报设置”弹窗
+- 多 IP 目标管理
+- 可配置 `cron` 周期
+- 安装后立即执行一次
+- 单条接入命令，重跑即覆盖更新旧配置
+- 当前结果展示
+- 历史变化列表
+- 快照对比页
+- 收藏快照
+- 全局历史保留策略
 
-```bash
-docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/workspace/reload-ipq.sh
-```
+## 部署方式
 
-这条命令会：
+当前只支持 Docker 部署。
 
-- 重新执行前端构建到 `public/`
-- 重启当前运行中的 Go 后端
-- 等待 `http://127.0.0.1:8090/api/v1/health` 恢复
-
-这个问题已经在联调里反复出现过。以后默认先跑这条命令，再判断是不是缓存。
-
-其中：
-
-- `run-e2e.sh` 会顺序执行：
-- `web/playwright/verify-react-preview-nodes.mjs`
-- `web/playwright/verify-embed-auth-flows.mjs`
-- 新的鉴权脚本会自动清理自身创建的测试节点，并把游客只读开关恢复成默认关闭
-- Playwright 产物输出到 `web/playwright-output/`
-
-## 开发种子节点
-
-联调时如果需要一组固定场景节点，可以执行：
+镜像地址：
 
 ```bash
-docker compose -f compose.dev.yml exec -T workspace sh /workspace/deploy/dev/workspace/seed-dev-nodes.sh
+ghcr.io/qqqasdwx/komari-ip-history:master
 ```
 
-脚本会先清理旧的 `开发种子-*` 节点，再重建这 3 个固定场景：
+### 部署前准备
 
-- `开发种子-空节点`
-  - 无目标 IP，用于验证空状态和游客弹窗空页
-- `开发种子-单IP历史`
-  - 1 个目标 IP，带 3 条历史，用于当前结果和历史对比
-- `开发种子-多IP历史`
-  - 2 个目标 IP，分别带历史，用于标签切换、排序和分 IP 历史
-
-## 页面没变时的排障顺序
-
-如果出现“源码已经改了，但浏览器里还是旧页面”，按这个顺序处理：
-
-1. 执行 `reload-ipq.sh`
-2. 确认健康检查恢复：
-   - `http://127.0.0.1:8090/api/v1/health`
-3. 再刷新浏览器
-4. 如果页面仍不对，再看具体页面 DOM、截图、接口返回
-
-不要第一反应就归因到浏览器缓存。
-
-## Docker 部署
-
-仓库现在有正式生产镜像：
-
-- `Dockerfile`
-- GitHub Actions 会把镜像发布到：
-  - `ghcr.io/<owner>/<repo>`
-
-当前 workflow：
-
-- `.github/workflows/ci.yml`
-  - push 到 `main/master`
-  - `pull_request`
-  - 只跑：
-    - `go test`
-    - `go build`
-    - `npm run build`
-- `.github/workflows/e2e.yml`
-  - push 到 `main/master`
-  - `workflow_dispatch`
-  - 跑基于开发容器环境的 Playwright 主流程验证
-- `.github/workflows/docker.yml`
-- 触发条件：
-  - push 到 `main/master`
-  - `v*` tag
-  - `workflow_dispatch`
-- PR 只做 build，不 push
-
-### 运行时必须确认的环境变量
+至少要准备这 3 个环境变量：
 
 - `IPQ_PUBLIC_BASE_URL`
-  - 必填
-  - 用于生成 Komari header、跳转地址、接入命令
-  - 例：`https://ipq.example.com`
+  - 对外访问地址
+  - 例：`http://your-server-ip`
+  - 用于生成注入脚本地址、接入命令和跳转地址
 - `IPQ_DEFAULT_ADMIN_USERNAME`
-  - 首次启动默认管理员用户名
+  - 初始管理员用户名
 - `IPQ_DEFAULT_ADMIN_PASSWORD`
-  - 首次启动默认管理员密码
+  - 初始管理员密码
 
-### 常用运行时环境变量
+常用可选项：
 
-- `IPQ_LISTEN`
-  - 默认 `:8090`
-- `IPQ_DB_PATH`
-  - 默认 `/data/ipq.db`
-- `IPQ_SESSION_COOKIE`
-  - 默认 `ipq_session`
 - `IPQ_COOKIE_SECURE`
-  - HTTPS 部署时应设为 `true`
-- `IPQ_BASE_PATH`
-  - 默认空，表示根路径部署
+  - HTTP 部署填 `false`
+  - HTTPS 部署填 `true`
+- `IPQ_DB_PATH`
+  - 镜像内默认是 `/data/ipq.db`
 
-### 部署约束
-
-- 生产镜像默认按**根路径**构建前端：
-  - `VITE_BASE_PATH=/`
-- 所以最稳的部署方式是：
-  - 直接挂在独立域名根路径
-
-如果以后要走子路径，例如 `/ipq/`，不能只改运行时环境变量，还需要在构建镜像时同步传：
+### 用 Docker 直接启动
 
 ```bash
-docker build --build-arg VITE_BASE_PATH=/ipq/ -t ghcr.io/<owner>/<repo>:custom .
-```
+docker pull ghcr.io/qqqasdwx/komari-ip-history:master
 
-并且运行时同时设置：
-
-```bash
-IPQ_BASE_PATH=/ipq
-```
-
-### 最小运行示例
-
-```bash
 docker run -d \
   --name komari-ip-history \
   -p 8090:8090 \
   -v "$(pwd)/data:/data" \
-  -e IPQ_PUBLIC_BASE_URL=https://ipq.example.com \
+  -e IPQ_PUBLIC_BASE_URL=http://your-server-ip:8090 \
   -e IPQ_DEFAULT_ADMIN_USERNAME=admin \
-  -e IPQ_DEFAULT_ADMIN_PASSWORD=change-me \
-  -e IPQ_COOKIE_SECURE=true \
-  ghcr.io/<owner>/<repo>:latest
+  -e IPQ_DEFAULT_ADMIN_PASSWORD='change-this-password' \
+  -e IPQ_COOKIE_SECURE=false \
+  ghcr.io/qqqasdwx/komari-ip-history:master
 ```
+
+启动后访问：
+
+```text
+http://your-server-ip:8090/#/login
+```
+
+### 用 Docker Compose 启动
+
+先创建 `compose.yml`：
+
+```yaml
+services:
+  ipq:
+    image: ghcr.io/qqqasdwx/komari-ip-history:master
+    container_name: komari-ip-history
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      IPQ_PUBLIC_BASE_URL: http://your-server-ip:8090
+      IPQ_DEFAULT_ADMIN_USERNAME: admin
+      IPQ_DEFAULT_ADMIN_PASSWORD: change-this-password
+      IPQ_COOKIE_SECURE: "false"
+      IPQ_DB_PATH: /data/ipq.db
+    volumes:
+      - ./data:/data
+```
+
+启动命令：
+
+```bash
+docker compose up -d
+```
+
+更新命令：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### 部署后怎么接 `Komari`
+
+部署完成后，登录 IPQ 后台：
+
+1. 打开 `接入配置`
+2. 复制 `Komari custom_head` 用的注入代码
+3. 粘贴到 `Komari` 的 `custom_head`
+4. 回到 `Komari` 节点页，即可看到“打开 IP 质量”入口
+
+### 说明
+
+- 当前默认按**根路径**部署
+- 如果你先用 HTTP 跑通，这是可以的
+- 真正上线时建议切 HTTPS，并把：
+  - `IPQ_PUBLIC_BASE_URL` 改成 HTTPS 地址
+  - `IPQ_COOKIE_SECURE=true`
+
+## 开发指南
+
+开发环境、联调方式、种子数据、排障流程，放在单独文档里：
+
+- [开发环境说明](docs/开发环境.md)
+
+## 参考
+
+- `Komari` 前端技术栈参考：`references/komari-web`
+- `IPQuality` 字段和展示逻辑参考：`references/IPQuality`
