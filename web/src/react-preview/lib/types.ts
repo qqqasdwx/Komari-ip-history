@@ -65,6 +65,7 @@ export type NodeDetail = {
     endpoint_path: string;
     installer_path: string;
     reporter_token: string;
+    install_token: string;
     target_ips: string[];
     schedule_cron: string;
     run_immediately: boolean;

@@ -1346,6 +1346,37 @@ textarea {
   padding-right: 4px;
 }
 
+.toast-viewport {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 80;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast-item {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.16);
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.toast-item-success {
+  border-color: rgba(99, 102, 241, 0.18);
+}
+
+.toast-item-error {
+  border-color: rgba(244, 63, 94, 0.26);
+  color: #9f1239;
+}
+
 .report-hidden-outline {
   opacity: 0.62;
   box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.22);

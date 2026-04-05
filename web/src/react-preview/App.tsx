@@ -52,6 +52,37 @@ type NavItem = {
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
 const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
 
+type ToastTone = "success" | "error";
+
+type ToastItem = {
+  id: number;
+  message: string;
+  tone: ToastTone;
+};
+
+let toastSeed = 0;
+let toastState: ToastItem[] = [];
+const toastListeners = new Set<(items: ToastItem[]) => void>();
+
+function emitToasts() {
+  const snapshot = [...toastState];
+  for (const listener of toastListeners) {
+    listener(snapshot);
+  }
+}
+
+function dismissToast(id: number) {
+  toastState = toastState.filter((item) => item.id !== id);
+  emitToasts();
+}
+
+function pushToast(message: string, tone: ToastTone = "success") {
+  const id = ++toastSeed;
+  toastState = [...toastState, { id, message, tone }];
+  emitToasts();
+  window.setTimeout(() => dismissToast(id), 2600);
+}
+
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <RowsIcon /> }];
 
 const settingsNavItems: NavItem[] = [
@@ -840,7 +871,13 @@ function buildConnectPath(uuid: string, name: string, options?: { returnTo?: str
   if (options?.resumePopup) {
     params.set("resume", "popup");
   }
-  return `/connect?${params.toString()}`;
+	return `/connect?${params.toString()}`;
+}
+
+function buildReportConfigListPath(uuid: string) {
+  const params = new URLSearchParams();
+  params.set("report_config", uuid);
+  return `/nodes?${params.toString()}`;
 }
 
 function buildKomariResumeURL(returnTo: string, uuid: string, name: string) {
@@ -878,6 +915,31 @@ function AppLoading() {
           <p className="text-sm text-slate-500">正在载入后台工作区...</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToastViewport() {
+  const [items, setItems] = useState<ToastItem[]>(toastState);
+
+  useEffect(() => {
+    toastListeners.add(setItems);
+    return () => {
+      toastListeners.delete(setItems);
+    };
+  }, []);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="toast-viewport" aria-live="polite" aria-atomic="true">
+      {items.map((item) => (
+        <div key={item.id} className={`toast-item toast-item-${item.tone}`}>
+          {item.message}
+        </div>
+      ))}
     </div>
   );
 }
@@ -1160,6 +1222,7 @@ function StatusPill(props: { hasData: boolean }) {
 
 function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [nodes, setNodes] = useState<NodeListItem[]>([]);
@@ -1167,6 +1230,28 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [reportConfigNodeUUID, setReportConfigNodeUUID] = useState("");
+
+  useEffect(() => {
+    const requestedUUID = searchParams.get("report_config")?.trim() || "";
+    if (requestedUUID) {
+      setReportConfigNodeUUID(requestedUUID);
+    }
+  }, [searchParams]);
+
+  function openReportConfig(uuid: string) {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("report_config", uuid);
+    navigate(`/nodes?${nextParams.toString()}`, { replace: true });
+    setReportConfigNodeUUID(uuid);
+  }
+
+  function closeReportConfig() {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("report_config");
+    const query = nextParams.toString();
+    navigate(`/nodes${query ? `?${query}` : ""}`, { replace: true });
+    setReportConfigNodeUUID("");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1213,7 +1298,7 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         <NodeReportConfigDialog
           me={props.me}
           nodeUUID={reportConfigNodeUUID}
-          onClose={() => setReportConfigNodeUUID("")}
+          onClose={closeReportConfig}
           onUnauthorized={props.onUnauthorized}
         />
       ) : null}
@@ -1315,7 +1400,7 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
                       data-node-report-settings="true"
                       onClick={(event) => {
                         event.stopPropagation();
-                        setReportConfigNodeUUID(item.komari_node_uuid);
+                        openReportConfig(item.komari_node_uuid);
                       }}
                       type="button"
                     >
@@ -1348,7 +1433,7 @@ function NodeDetailLoading() {
 }
 
 function resolvePublicBaseURL(me: MeResponse) {
-  const publicBaseURL = (me.public_base_url ?? "").replace(/\/$/, "");
+  const publicBaseURL = (me.effective_public_base_url ?? me.public_base_url ?? "").replace(/\/$/, "");
   return publicBaseURL || window.location.origin;
 }
 
@@ -1358,19 +1443,11 @@ function shellQuote(value: string) {
 
 function buildInstallCommand(
   publicBaseURL: string,
-  reporterToken: string,
-  nodeUUID: string
+  installToken: string
 ) {
-  const args = [
-    "--node-uuid",
-    nodeUUID,
-    "--server",
-    publicBaseURL,
-    "--token",
-    reporterToken
-  ];
+  const args = ["-e", publicBaseURL, "-t", installToken];
   const argString = args.map(shellQuote).join(" ");
-  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | ( if [ "$(id -u)" -eq 0 ]; then bash -s -- ${argString}; elif command -v sudo >/dev/null 2>&1; then sudo bash -s -- ${argString}; else echo "Please run as root or install sudo." >&2; exit 1; fi )`;
+  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | (sudo bash -s -- ${argString} || bash -s -- ${argString})`;
 }
 
 function ReportConfigSection(props: {
@@ -1405,8 +1482,7 @@ function ReportConfigSection(props: {
   });
   const installCommand = buildInstallCommand(
     publicBaseURL,
-    props.detail.report_config.reporter_token,
-    props.detail.komari_node_uuid
+    props.detail.report_config.install_token
   );
 
   useEffect(() => {
@@ -1537,9 +1613,9 @@ function ReportConfigSection(props: {
   async function handleCopy(value: string, successText: string) {
     try {
       await copyText(value);
-      window.alert(successText);
+      pushToast(successText);
     } catch {
-      window.alert("复制失败，请手动复制。");
+      pushToast("复制失败，请手动复制。", "error");
     }
   }
 
@@ -2641,6 +2717,15 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
 
   const historyPath = `/nodes/${uuid}/history`;
 
+  function goToReportConfig() {
+    const path = buildReportConfigListPath(uuid);
+    if (isEmbed) {
+      window.location.assign(toStandaloneAppURL(path));
+      return;
+    }
+    navigate(path);
+  }
+
   if (loading && !detail) {
     return <NodeDetailLoading />;
   }
@@ -2695,8 +2780,11 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
               variant="attached"
             />
           ) : (
-            <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              当前节点还没有目标 IP，请返回节点列表打开上报设置添加。
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              <span>当前节点还没有目标 IP。</span>
+              <button className="button" onClick={goToReportConfig} type="button">
+                去接入
+              </button>
             </div>
           )}
         </div>
@@ -3041,7 +3129,7 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
         props.onUnauthorized();
         return;
       }
-      window.alert(toggleError instanceof Error ? toggleError.message : "更新快照收藏状态失败");
+      pushToast(toggleError instanceof Error ? toggleError.message : "更新快照收藏状态失败", "error");
     } finally {
       setFavoriteSavingIDs((current) => current.filter((id) => id !== entry.id));
     }
@@ -3162,6 +3250,15 @@ function PublicNodeDetailPage() {
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
+  function goToReportConfig() {
+    const path = buildReportConfigListPath(uuid);
+    if (isEmbed) {
+      window.location.assign(toStandaloneAppURL(path));
+      return;
+    }
+    navigate(path);
+  }
+
   if (loading) {
     return <NodeDetailLoading />;
   }
@@ -3193,8 +3290,11 @@ function PublicNodeDetailPage() {
               onSelect={(targetID) => replaceTargetSelection(targetID)}
             />
           ) : (
-            <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              管理员还没有配置可查看的目标 IP。
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+              <span>管理员还没有配置可查看的目标 IP。</span>
+              <button className="button" onClick={goToReportConfig} type="button">
+                去接入
+              </button>
             </div>
           )}
         </div>
@@ -3222,7 +3322,7 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
   const [inlineCode, setInlineCode] = useState("");
   const [savingAddress, setSavingAddress] = useState(false);
   const [savingGuestRead, setSavingGuestRead] = useState(false);
-  const publicBaseURL = (integration?.public_base_url ?? props.me.public_base_url ?? "").trim();
+  const publicBaseURL = (integration?.public_base_url ?? "").trim();
   const savedPublicBaseURL = (integration?.public_base_url ?? "").trim();
   const savedGuestReadEnabled = Boolean(integration?.guest_read_enabled);
   const basePath = runtime?.base_path || props.me.base_path || "";
@@ -3289,9 +3389,9 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
   async function handleCopy(value: string, successText: string) {
     try {
       await copyText(value);
-      window.alert(successText);
+      pushToast(successText);
     } catch {
-      window.alert("复制失败，请手动复制。");
+      pushToast("复制失败，请手动复制。", "error");
     }
   }
 
@@ -3324,7 +3424,7 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
       setRuntime(runtimeResponse);
       setLoaderCode(loaderPreview.code);
       setInlineCode(inlinePreview.code);
-      window.alert(options.successText);
+      pushToast(options.successText);
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -3549,7 +3649,7 @@ function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
       });
       setRetention(saved);
       setRetentionDaysInput(String(saved.retention_days));
-      window.alert("历史保留设置已保存。");
+      pushToast("历史保留设置已保存。");
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
         props.onUnauthorized();
@@ -3649,7 +3749,7 @@ function AdminPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         method: "PUT",
         body: JSON.stringify({ username: username.trim(), password })
       });
-      window.alert("用户信息已保存，请重新登录。");
+      pushToast("用户信息已保存，请重新登录。");
       navigate("/login", { replace: true });
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
@@ -3675,7 +3775,7 @@ function AdminPage(props: { me: MeResponse; onUnauthorized: () => void }) {
           <div className="muted">当前登录账号：{props.me.username ?? "admin"}。修改后会要求重新登录。</div>
         </div>
 
-        <form className="section space-y-4" onSubmit={handleSave}>
+        <form className="section mt-6 space-y-4" onSubmit={handleSave}>
           <label className="grid gap-2 text-sm text-slate-700">
             <span>新用户名</span>
             <input
@@ -3858,33 +3958,36 @@ export function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to={me ? "/nodes" : "/login"} replace />} />
-      <Route path="/public/nodes/:uuid" element={<PublicNodeDetailPage />} />
-      <Route
-        path="/login"
-        element={<LoginPage me={me} onAuthenticated={(nextMe) => setMe(nextMe)} />}
-      />
-      <Route
-        path="/*"
-        element={
-          me ? (
-            <AppShell
-              me={me}
-              onLogout={handleLogout}
-              onUnauthorized={() => {
-                setMe(null);
-              }}
-            />
-          ) : (
-            isEmbed ? (
-              <EmbedAdminAccessBridge />
+    <>
+      <Routes>
+        <Route path="/" element={<Navigate to={me ? "/nodes" : "/login"} replace />} />
+        <Route path="/public/nodes/:uuid" element={<PublicNodeDetailPage />} />
+        <Route
+          path="/login"
+          element={<LoginPage me={me} onAuthenticated={(nextMe) => setMe(nextMe)} />}
+        />
+        <Route
+          path="/*"
+          element={
+            me ? (
+              <AppShell
+                me={me}
+                onLogout={handleLogout}
+                onUnauthorized={() => {
+                  setMe(null);
+                }}
+              />
             ) : (
-              <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
+              isEmbed ? (
+                <EmbedAdminAccessBridge />
+              ) : (
+                <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
+              )
             )
-          )
-        }
-      />
-    </Routes>
+          }
+        />
+      </Routes>
+      <ToastViewport />
+    </>
   );
 }

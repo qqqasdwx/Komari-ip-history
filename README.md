@@ -54,12 +54,8 @@ ghcr.io/qqqasdwx/komari-ip-history:latest
 
 ### 部署前准备
 
-至少要准备这 3 个环境变量：
+至少要准备这 2 个环境变量：
 
-- `IPQ_PUBLIC_BASE_URL`
-  - 对外访问地址
-  - 例：`http://your-server-ip`
-  - 用于生成注入脚本地址、接入命令和跳转地址
 - `IPQ_DEFAULT_ADMIN_USERNAME`
   - 初始管理员用户名
 - `IPQ_DEFAULT_ADMIN_PASSWORD`
@@ -67,11 +63,9 @@ ghcr.io/qqqasdwx/komari-ip-history:latest
 
 常用可选项：
 
-- `IPQ_COOKIE_SECURE`
-  - HTTP 部署填 `false`
-  - HTTPS 部署填 `true`
 - `IPQ_DB_PATH`
   - 镜像内默认是 `/data/ipq.db`
+  - 只有你想改默认位置时才需要设置
 
 ### 用 Docker 直接启动
 
@@ -82,10 +76,9 @@ docker run -d \
   --name komari-ip-history \
   -p 8090:8090 \
   -v "$(pwd)/data:/data" \
-  -e IPQ_PUBLIC_BASE_URL=http://your-server-ip:8090 \
   -e IPQ_DEFAULT_ADMIN_USERNAME=admin \
   -e IPQ_DEFAULT_ADMIN_PASSWORD='change-this-password' \
-  -e IPQ_COOKIE_SECURE=false \
+  # -e IPQ_DB_PATH=/data/ipq.db \
   ghcr.io/qqqasdwx/komari-ip-history:latest
 ```
 
@@ -108,11 +101,9 @@ services:
     ports:
       - "8090:8090"
     environment:
-      IPQ_PUBLIC_BASE_URL: http://your-server-ip:8090
       IPQ_DEFAULT_ADMIN_USERNAME: admin
       IPQ_DEFAULT_ADMIN_PASSWORD: change-this-password
-      IPQ_COOKIE_SECURE: "false"
-      IPQ_DB_PATH: /data/ipq.db
+      # IPQ_DB_PATH: /data/ipq.db
     volumes:
       - ./data:/data
 ```
@@ -142,10 +133,14 @@ docker compose up -d
 ### 说明
 
 - 当前默认按**根路径**部署
-- 如果你先用 HTTP 跑通，这是可以的
-- 真正上线时建议切 HTTPS，并把：
-  - `IPQ_PUBLIC_BASE_URL` 改成 HTTPS 地址
-  - `IPQ_COOKIE_SECURE=true`
+- 默认会按你当前访问服务时的地址动态生成：
+  - 注入脚本地址
+  - 接入命令里的服务端地址
+  - 页面内跳转地址
+- 如果前面有反向代理，请确保正确传递：
+  - `Host`
+  - `X-Forwarded-Proto`
+- 真正上线时建议切 HTTPS
 
 ## 开发指南
 

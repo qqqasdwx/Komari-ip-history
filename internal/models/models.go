@@ -1,6 +1,12 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"komari-ip-history/internal/auth"
+
+	"gorm.io/gorm"
+)
 
 type AdminUser struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
@@ -27,10 +33,23 @@ type Node struct {
 	CurrentResultJSON      string     `gorm:"type:longtext" json:"-"`
 	CurrentResultUpdatedAt *time.Time `json:"current_result_updated_at"`
 	ReporterToken          string     `gorm:"size:128" json:"-"`
+	InstallToken           string     `gorm:"size:48;index;not null;default:''" json:"-"`
 	ReporterScheduleCron   string     `gorm:"size:64;not null;default:'0 0 * * *'" json:"-"`
 	ReporterRunImmediately bool       `gorm:"not null;default:true" json:"-"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+func (n *Node) BeforeCreate(_ *gorm.DB) error {
+	if n.InstallToken != "" {
+		return nil
+	}
+	token, err := auth.NewInstallToken()
+	if err != nil {
+		return err
+	}
+	n.InstallToken = token
+	return nil
 }
 
 type NodeTarget struct {

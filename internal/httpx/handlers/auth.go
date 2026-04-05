@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"komari-ip-history/internal/auth"
@@ -84,6 +85,9 @@ func (h AuthHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load settings"})
 		return
 	}
+	if integration.EffectivePublicBaseURL == "" {
+		integration.EffectivePublicBaseURL = inferredPublicBaseURL(c, h.Cfg.BasePath)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"logged_in":                 true,
 		"username":                  user.Username,
@@ -94,6 +98,21 @@ func (h AuthHandler) Me(c *gin.Context) {
 	})
 }
 
+func requestCookieSecure(c *gin.Context, cfg config.Config) bool {
+	if cfg.CookieSecure {
+		return true
+	}
+
+	scheme := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+	if index := strings.Index(scheme, ","); index >= 0 {
+		scheme = strings.TrimSpace(scheme[:index])
+	}
+	if strings.EqualFold(scheme, "https") {
+		return true
+	}
+	return c.Request.TLS != nil
+}
+
 func cookiePath(cfg config.Config) string {
 	if cfg.BasePath == "" {
 		return "/"
@@ -102,7 +121,8 @@ func cookiePath(cfg config.Config) string {
 }
 
 func setSessionCookie(c *gin.Context, cfg config.Config, value string, maxAge int) {
-	if cfg.CookieSecure {
+	secure := requestCookieSecure(c, cfg)
+	if secure {
 		c.SetSameSite(http.SameSiteNoneMode)
 	} else {
 		c.SetSameSite(http.SameSiteLaxMode)
@@ -114,7 +134,7 @@ func setSessionCookie(c *gin.Context, cfg config.Config, value string, maxAge in
 		maxAge,
 		cookiePath(cfg),
 		"",
-		cfg.CookieSecure,
+		secure,
 		true,
 	)
 }

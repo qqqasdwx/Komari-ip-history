@@ -87,6 +87,7 @@ func buildNodeReportConfig(node models.Node, targetIPs []string) (NodeReportConf
 		EndpointPath:   "/api/v1/report/nodes/" + node.KomariNodeUUID,
 		InstallerPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
 		ReporterToken:  node.ReporterToken,
+		InstallToken:   node.InstallToken,
 		TargetIPs:      targetIPs,
 		ScheduleCron:   preview.ScheduleCron,
 		RunImmediately: preview.RunImmediately,

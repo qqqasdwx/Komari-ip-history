@@ -96,7 +96,7 @@ if (rowCount > 0) {
   if (!configText.includes('Cron') || !configText.includes('最近 10 次执行时间')) {
     throw new Error('react detail page missing schedule controls');
   }
-  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh')) {
+  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh')) {
     throw new Error('react node list modal install command is not using GitHub raw install script');
   }
   await page.getByRole('button', { name: '关闭' }).click();

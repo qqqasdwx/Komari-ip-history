@@ -73,6 +73,7 @@ type NodeReportConfig struct {
 	EndpointPath   string      `json:"endpoint_path"`
 	InstallerPath  string      `json:"installer_path"`
 	ReporterToken  string      `json:"reporter_token"`
+	InstallToken   string      `json:"install_token"`
 	TargetIPs      []string    `json:"target_ips"`
 	ScheduleCron   string      `json:"schedule_cron"`
 	RunImmediately bool        `json:"run_immediately"`
@@ -80,7 +81,9 @@ type NodeReportConfig struct {
 }
 
 type NodeInstallConfig struct {
+	NodeUUID       string   `json:"node_uuid"`
 	ReportEndpoint string   `json:"report_endpoint"`
+	ReporterToken  string   `json:"reporter_token"`
 	ScheduleCron   string   `json:"schedule_cron"`
 	RunImmediately bool     `json:"run_immediately"`
 	TargetIPs      []string `json:"target_ips"`
@@ -138,6 +141,10 @@ func newReporterToken() (string, error) {
 	return auth.NewSessionToken()
 }
 
+func newInstallToken() (string, error) {
+	return auth.NewInstallToken()
+}
+
 func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*models.Node, bool, error) {
 	if strings.TrimSpace(input.KomariNodeUUID) == "" || strings.TrimSpace(input.Name) == "" {
 		return nil, false, errors.New("uuid and name are required")
@@ -153,6 +160,13 @@ func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*model
 				return nil, true, tokenErr
 			}
 			node.ReporterToken = token
+		}
+		if node.InstallToken == "" {
+			token, tokenErr := newInstallToken()
+			if tokenErr != nil {
+				return nil, true, tokenErr
+			}
+			node.InstallToken = token
 		}
 		if strings.TrimSpace(node.ReporterScheduleCron) == "" {
 			node.ReporterScheduleCron = defaultReporterScheduleCron
@@ -170,11 +184,16 @@ func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*model
 	if err != nil {
 		return nil, false, err
 	}
+	installToken, err := newInstallToken()
+	if err != nil {
+		return nil, false, err
+	}
 
 	node = models.Node{
 		KomariNodeUUID:         input.KomariNodeUUID,
 		Name:                   input.Name,
 		ReporterToken:          reporterToken,
+		InstallToken:           installToken,
 		ReporterScheduleCron:   defaultReporterScheduleCron,
 		ReporterRunImmediately: true,
 	}
@@ -774,7 +793,51 @@ func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (N
 	}
 
 	return NodeInstallConfig{
+		NodeUUID:       node.KomariNodeUUID,
 		ReportEndpoint: reportEndpointURL,
+		ReporterToken:  node.ReporterToken,
+		ScheduleCron:   normalizedCron,
+		RunImmediately: runImmediately,
+		TargetIPs:      targetIPs,
+	}, nil
+}
+
+func GetNodeInstallConfigByInstallToken(db *gorm.DB, installToken, reportBaseURL string) (NodeInstallConfig, error) {
+	if strings.TrimSpace(installToken) == "" {
+		return NodeInstallConfig{}, errors.New("missing install token")
+	}
+
+	var node models.Node
+	if err := db.First(&node, "install_token = ?", installToken).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return NodeInstallConfig{}, errors.New("invalid install token")
+		}
+		return NodeInstallConfig{}, err
+	}
+
+	targets := []models.NodeTarget{}
+	if err := db.Where("node_id = ?", node.ID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+		return NodeInstallConfig{}, err
+	}
+	if len(targets) == 0 {
+		return NodeInstallConfig{}, errors.New("no target ip configured")
+	}
+
+	targetIPs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		targetIPs = append(targetIPs, target.TargetIP)
+	}
+	scheduleCron, runImmediately := normalizeReporterSchedule(node)
+	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	if err != nil {
+		return NodeInstallConfig{}, err
+	}
+
+	reportEndpointURL := strings.TrimRight(reportBaseURL, "/") + "/api/v1/report/nodes/" + node.KomariNodeUUID
+	return NodeInstallConfig{
+		NodeUUID:       node.KomariNodeUUID,
+		ReportEndpoint: reportEndpointURL,
+		ReporterToken:  node.ReporterToken,
 		ScheduleCron:   normalizedCron,
 		RunImmediately: runImmediately,
 		TargetIPs:      targetIPs,

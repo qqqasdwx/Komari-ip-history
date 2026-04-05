@@ -3,6 +3,7 @@ set -euo pipefail
 
 NODE_UUID=""
 SERVER_BASE_URL=""
+INSTALL_TOKEN=""
 REPORTER_TOKEN=""
 SCHEDULE_CRON="0 0 * * *"
 RUN_IMMEDIATELY="1"
@@ -10,6 +11,18 @@ TARGET_IPS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -u|--node-uuid)
+      NODE_UUID="${2:-}"
+      shift 2
+      ;;
+    -e|--server)
+      SERVER_BASE_URL="${2:-}"
+      shift 2
+      ;;
+    -t|--install-token)
+      INSTALL_TOKEN="${2:-}"
+      shift 2
+      ;;
     --node-uuid)
       NODE_UUID="${2:-}"
       shift 2
@@ -46,8 +59,8 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ -z "$NODE_UUID" || -z "$SERVER_BASE_URL" || -z "$REPORTER_TOKEN" ]]; then
-  echo "Missing required arguments: --node-uuid, --server, --token" >&2
+if [[ -z "$SERVER_BASE_URL" ]]; then
+  echo "Missing required argument: --server" >&2
   exit 1
 fi
 
@@ -56,6 +69,11 @@ LEGACY_INLINE_MODE=0
 if [[ "$SERVER_BASE_URL" == */api/v1/report/nodes/* ]]; then
   LEGACY_INLINE_MODE=1
   REPORT_ENDPOINT="$SERVER_BASE_URL"
+fi
+
+if [[ "$LEGACY_INLINE_MODE" -eq 0 && -z "$INSTALL_TOKEN" && ( -z "$NODE_UUID" || -z "$REPORTER_TOKEN" ) ]]; then
+  echo "Missing required arguments: --server and either --install-token or legacy --node-uuid + --token" >&2
+  exit 1
 fi
 
 if [[ ${#TARGET_IPS[@]} -eq 0 && "$LEGACY_INLINE_MODE" -eq 1 ]]; then
@@ -116,18 +134,28 @@ install_dependencies() {
 install_dependencies
 
 if [[ "$LEGACY_INLINE_MODE" -eq 0 ]]; then
-  CONFIG_URL="${SERVER_BASE_URL}/api/v1/report/nodes/${NODE_UUID}/install-config"
+  if [[ -n "$INSTALL_TOKEN" ]]; then
+    CONFIG_URL="${SERVER_BASE_URL}/api/v1/report/install-config/${INSTALL_TOKEN}"
+  else
+    CONFIG_URL="${SERVER_BASE_URL}/api/v1/report/nodes/${NODE_UUID}/install-config"
+  fi
   CONFIG_FILE="$(mktemp)"
   cleanup_config() {
     rm -f "$CONFIG_FILE"
   }
   trap cleanup_config EXIT
 
-  curl -fsSL \
-    -H "X-IPQ-Reporter-Token: ${REPORTER_TOKEN}" \
-    "$CONFIG_URL" -o "$CONFIG_FILE"
+  if [[ -n "$INSTALL_TOKEN" ]]; then
+    curl -fsSL "$CONFIG_URL" -o "$CONFIG_FILE"
+  else
+    curl -fsSL \
+      -H "X-IPQ-Reporter-Token: ${REPORTER_TOKEN}" \
+      "$CONFIG_URL" -o "$CONFIG_FILE"
+  fi
 
+  NODE_UUID="$(jq -er '.node_uuid' "$CONFIG_FILE")"
   REPORT_ENDPOINT="$(jq -er '.report_endpoint' "$CONFIG_FILE")"
+  REPORTER_TOKEN="$(jq -er '.reporter_token' "$CONFIG_FILE")"
   SCHEDULE_CRON="$(jq -er '.schedule_cron' "$CONFIG_FILE")"
   if jq -e '.run_immediately == true' "$CONFIG_FILE" >/dev/null 2>&1; then
     RUN_IMMEDIATELY="1"
@@ -234,9 +262,10 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 if [[ "$RUN_IMMEDIATELY" == "1" || "$RUN_IMMEDIATELY" == "true" ]]; then
-  echo "Running the reporter immediately once after installation. This may take several minutes."
-  if ! "$SCRIPT_PATH"; then
-    echo "Immediate run failed. Scheduled execution remains installed." >&2
+  INITIAL_RUN_LOG="${INSTALL_DIR}/initial-run.log"
+  echo "Starting the reporter once in the background after installation."
+  if ! ( nohup "$SCRIPT_PATH" >"$INITIAL_RUN_LOG" 2>&1 & ); then
+    echo "Failed to start the immediate run. Scheduled execution remains installed." >&2
   fi
 fi
 

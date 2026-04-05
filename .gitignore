@@ -45,6 +45,7 @@ data/komari/
 data/*.db
 .cache/
 tmp/
+.tmp/
 
 # Local reference repos
 references/

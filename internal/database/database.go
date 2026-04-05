@@ -38,8 +38,14 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	); err != nil {
 		return nil, err
 	}
+	if err := ensureSchemaColumns(db); err != nil {
+		return nil, err
+	}
 
 	if err := ensureDefaultAdmin(db, cfg); err != nil {
+		return nil, err
+	}
+	if err := ensureNodeInstallTokens(db); err != nil {
 		return nil, err
 	}
 	if err := migrateLegacyNodeTargets(db); err != nil {
@@ -74,6 +80,45 @@ func ensureDefaultAdmin(db *gorm.DB, cfg config.Config) error {
 		PasswordHash: hash,
 	}
 	return db.Create(&user).Error
+}
+
+func ensureSchemaColumns(db *gorm.DB) error {
+	nodeColumns := []string{"ReporterScheduleCron", "ReporterRunImmediately", "InstallToken"}
+	for _, column := range nodeColumns {
+		if db.Migrator().HasColumn(&models.Node{}, column) {
+			continue
+		}
+		if err := db.Migrator().AddColumn(&models.Node{}, column); err != nil {
+			return err
+		}
+	}
+
+	if !db.Migrator().HasColumn(&models.NodeTargetHistory{}, "IsFavorite") {
+		if err := db.Migrator().AddColumn(&models.NodeTargetHistory{}, "IsFavorite"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ensureNodeInstallTokens(db *gorm.DB) error {
+	var nodes []models.Node
+	if err := db.Where("install_token = '' OR install_token IS NULL").Find(&nodes).Error; err != nil {
+		return err
+	}
+
+	for _, node := range nodes {
+		token, err := auth.NewInstallToken()
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&models.Node{}).Where("id = ?", node.ID).Update("install_token", token).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func CleanupExpiredSessions(db *gorm.DB) error {
