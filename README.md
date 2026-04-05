@@ -49,7 +49,7 @@
 镜像地址：
 
 ```bash
-ghcr.io/qqqasdwx/komari-ip-history:master
+ghcr.io/qqqasdwx/komari-ip-history:latest
 ```
 
 ### 部署前准备
@@ -76,7 +76,7 @@ ghcr.io/qqqasdwx/komari-ip-history:master
 ### 用 Docker 直接启动
 
 ```bash
-docker pull ghcr.io/qqqasdwx/komari-ip-history:master
+docker pull ghcr.io/qqqasdwx/komari-ip-history:latest
 
 docker run -d \
   --name komari-ip-history \
@@ -86,7 +86,7 @@ docker run -d \
   -e IPQ_DEFAULT_ADMIN_USERNAME=admin \
   -e IPQ_DEFAULT_ADMIN_PASSWORD='change-this-password' \
   -e IPQ_COOKIE_SECURE=false \
-  ghcr.io/qqqasdwx/komari-ip-history:master
+  ghcr.io/qqqasdwx/komari-ip-history:latest
 ```
 
 启动后访问：
@@ -102,7 +102,7 @@ http://your-server-ip:8090/#/login
 ```yaml
 services:
   ipq:
-    image: ghcr.io/qqqasdwx/komari-ip-history:master
+    image: ghcr.io/qqqasdwx/komari-ip-history:latest
     container_name: komari-ip-history
     restart: unless-stopped
     ports:
