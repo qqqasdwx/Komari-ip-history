@@ -2715,7 +2715,10 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
-  const historyPath = `/nodes/${uuid}/history`;
+  const currentTargetID = detail?.selected_target_id ?? detail?.current_target?.id ?? selectedTargetID ?? null;
+  const targetQuery = currentTargetID ? `?target_id=${currentTargetID}` : "";
+  const historyPath = `/nodes/${uuid}/history${targetQuery}`;
+  const comparePath = `/nodes/${uuid}/compare${targetQuery}`;
 
   function goToReportConfig() {
     const path = buildReportConfigListPath(uuid);
@@ -2753,24 +2756,45 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   }
 
   return (
-    <section className="space-y-6">
+    <section className={isEmbed ? "embed-detail-page space-y-4" : "space-y-6"}>
       <PageHeader
         title={detail.name}
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
         backTo={isEmbed ? undefined : "/nodes"}
         actions={
-          !isEmbed ? (
-            <Link
-              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-              to={historyPath}
-            >
-              查看历史记录
-            </Link>
+          detail.current_target ? (
+            isEmbed ? (
+              <>
+                <a
+                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
+                  href={toStandaloneAppURL(historyPath)}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  历史记录
+                </a>
+                <a
+                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
+                  href={toStandaloneAppURL(comparePath)}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  快照对比
+                </a>
+              </>
+            ) : (
+              <Link
+                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
+                to={historyPath}
+              >
+                查看历史记录
+              </Link>
+            )
           ) : undefined
         }
       />
 
-      <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+      <section className={isEmbed ? "embed-detail-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" : "rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm"}>
         <div className="section space-y-4">
           {detail.targets.length > 0 ? (
             <TargetTabs
@@ -3278,9 +3302,9 @@ function PublicNodeDetailPage() {
   const targets = detail.targets ?? [];
 
   return (
-    <section className="space-y-6">
+    <section className={isEmbed ? "embed-detail-page space-y-4" : "space-y-6"}>
       {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="当前公开结果" backTo="/" /> : null}
-      <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+      <section className={isEmbed ? "embed-detail-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" : "rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm"}>
         <div className="section space-y-4">
           <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
           {targets.length > 0 ? (

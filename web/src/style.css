@@ -1708,11 +1708,97 @@ textarea {
 
 .embed-shell {
   min-height: 100vh;
-  padding: 14px;
+  padding: 12px;
+  background: #fdfdff;
+  color: #1c2024;
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
 .embed-panel {
   max-width: 100%;
+}
+
+.embed-detail-page {
+  gap: 12px;
+}
+
+.embed-detail-page > header {
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 6, 46, 0.12),
+    0 8px 22px rgba(15, 23, 42, 0.04);
+}
+
+.embed-detail-page > header h1 {
+  font-size: 18px;
+  line-height: 1.25;
+  color: #1c2024;
+}
+
+.embed-detail-page > header p {
+  color: #60646c;
+  font-size: 12px;
+}
+
+.embed-detail-page > header a {
+  height: 34px;
+  border-radius: 8px;
+  border-color: rgba(0, 6, 46, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1c2024;
+  font-size: 13px;
+  box-shadow: inset 0 0 0 1px rgba(0, 6, 46, 0.04);
+}
+
+.embed-detail-page > header a:hover {
+  border-color: rgba(37, 99, 235, 0.32);
+  background: rgba(239, 246, 255, 0.9);
+  color: #2563eb;
+}
+
+.embed-detail-card {
+  border-radius: 10px !important;
+  border-color: rgba(0, 6, 46, 0.12) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 6, 46, 0.03),
+    0 10px 28px rgba(15, 23, 42, 0.05) !important;
+}
+
+.embed-detail-card .target-tabs-attached {
+  gap: 4px;
+  padding-left: 0;
+  border-bottom-color: rgba(0, 6, 46, 0.12);
+}
+
+.embed-detail-card .target-tab-button-attached {
+  min-height: 36px;
+  border-radius: 8px 8px 0 0;
+  border-color: transparent;
+  background: rgba(241, 243, 245, 0.72);
+  color: #60646c;
+  box-shadow: none;
+}
+
+.embed-detail-card .target-tab-button-attached:hover {
+  border-color: rgba(0, 6, 46, 0.1);
+  background: rgba(255, 255, 255, 0.86);
+  color: #1c2024;
+}
+
+.embed-detail-card .target-tab-button-attached.is-active {
+  border-color: rgba(0, 6, 46, 0.12);
+  border-bottom-color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.94);
+  color: #1c2024;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.embed-detail-card .detail-target-panel {
+  border-top-color: rgba(0, 6, 46, 0.12);
 }
 
 @media (max-width: 920px) {
