@@ -7,7 +7,16 @@ import {
   ReloadIcon,
   RowsIcon
 } from "@radix-ui/react-icons";
-import { Fragment, type DragEvent, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type CSSProperties,
+  type DragEvent,
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import {
   Link,
   NavLink,
@@ -906,6 +915,47 @@ function postEmbedAction(type: string, payload: Record<string, string>) {
   window.parent.postMessage({ source: "ipq-embed", type, ...payload }, "*");
 }
 
+function getEmbedTheme(searchParams: URLSearchParams) {
+  const theme = (searchParams.get("komari_theme") || "").trim().toLowerCase();
+  if (theme.includes("purcarte")) {
+    return "purcarte";
+  }
+  return "default";
+}
+
+function getEmbedAppearance(searchParams: URLSearchParams) {
+  const appearance = (searchParams.get("komari_appearance") || "").trim().toLowerCase();
+  return appearance === "dark" ? "dark" : "light";
+}
+
+function sanitizeEmbedCSSValue(value: string | null) {
+  const text = (value || "").trim();
+  if (!text || /[;{}]/.test(text) || /url\s*\(/i.test(text)) {
+    return "";
+  }
+  return text;
+}
+
+function getEmbedGlassStyle(searchParams: URLSearchParams): CSSProperties | undefined {
+  if (getEmbedTheme(searchParams) !== "purcarte") {
+    return undefined;
+  }
+
+  const style = {} as CSSProperties & Record<string, string>;
+  const blurParam = (searchParams.get("komari_blur") || "").trim();
+  const blurValue = Number(blurParam.replace(/px$/i, ""));
+  if (Number.isFinite(blurValue)) {
+    style["--ipq-purcarte-blur"] = `${Math.max(0, Math.min(40, blurValue))}px`;
+  }
+
+  const card = sanitizeEmbedCSSValue(searchParams.get("komari_card"));
+  if (card) {
+    style["--ipq-purcarte-card"] = card;
+  }
+
+  return style;
+}
+
 function AppLoading() {
   return (
     <div className="grid min-h-screen place-items-center bg-slate-50 px-6">
@@ -915,6 +965,51 @@ function AppLoading() {
           <p className="text-sm text-slate-500">正在载入后台工作区...</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function EmbedFrameShell(props: { children: ReactNode }) {
+  const [searchParams] = useSearchParams();
+  const isEmbed = searchParams.get("embed") === "1";
+  const embedTheme = getEmbedTheme(searchParams);
+  const embedAppearance = getEmbedAppearance(searchParams);
+  const embedGlassStyle = getEmbedGlassStyle(searchParams);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!isEmbed) {
+      delete root.dataset.ipqEmbedTheme;
+      delete body.dataset.ipqEmbedTheme;
+      delete root.dataset.ipqEmbedAppearance;
+      delete body.dataset.ipqEmbedAppearance;
+      return;
+    }
+
+    root.dataset.ipqEmbedTheme = embedTheme;
+    body.dataset.ipqEmbedTheme = embedTheme;
+    root.dataset.ipqEmbedAppearance = embedAppearance;
+    body.dataset.ipqEmbedAppearance = embedAppearance;
+
+    return () => {
+      delete root.dataset.ipqEmbedTheme;
+      delete body.dataset.ipqEmbedTheme;
+      delete root.dataset.ipqEmbedAppearance;
+      delete body.dataset.ipqEmbedAppearance;
+    };
+  }, [embedAppearance, embedTheme, isEmbed]);
+
+  if (!isEmbed) {
+    return <>{props.children}</>;
+  }
+
+  return (
+    <div
+      className={`embed-shell embed-theme-${embedTheme} embed-appearance-${embedAppearance} bg-slate-50 text-slate-900`}
+      style={embedGlassStyle}
+    >
+      <div className="embed-panel mx-auto max-w-[1120px] space-y-6">{props.children}</div>
     </div>
   );
 }
@@ -1447,7 +1542,7 @@ function buildInstallCommand(
 ) {
   const args = ["-e", publicBaseURL, "-t", installToken];
   const argString = args.map(shellQuote).join(" ");
-  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | (sudo bash -s -- ${argString} || bash -s -- ${argString})`;
+  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${argString}; }`;
 }
 
 function ReportConfigSection(props: {
@@ -3259,6 +3354,7 @@ function PublicNodeDetailPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const isEmbed = searchParams.get("embed") === "1";
+  const nodeName = searchParams.get("node_name")?.trim() || "IP质量体检报告";
   const displayIP = searchParams.get("display_ip")?.trim() || "";
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
   const { loading, error, detail, reload } = usePublicNodePageData(uuid, selectedTargetID, displayIP);
@@ -3275,11 +3371,10 @@ function PublicNodeDetailPage() {
   }
 
   function goToReportConfig() {
-    const path = buildReportConfigListPath(uuid);
     if (isEmbed) {
-      window.location.assign(toStandaloneAppURL(path));
       return;
     }
+    const path = buildReportConfigListPath(uuid);
     navigate(path);
   }
 
@@ -3300,32 +3395,38 @@ function PublicNodeDetailPage() {
   }
 
   const targets = detail.targets ?? [];
+  const currentTargetUpdatedAt = detail.current_target?.updated_at ?? undefined;
 
   return (
     <section className={isEmbed ? "embed-detail-page space-y-4" : "space-y-6"}>
-      {!isEmbed ? <PageHeader title="IP质量体检报告" subtitle="当前公开结果" backTo="/" /> : null}
+      <PageHeader
+        title={isEmbed ? nodeName : "IP质量体检报告"}
+        subtitle={currentTargetUpdatedAt ? `最近更新: ${formatDateTime(currentTargetUpdatedAt)}` : "当前公开结果"}
+        backTo={isEmbed ? undefined : "/"}
+      />
       <section className={isEmbed ? "embed-detail-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" : "rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm"}>
         <div className="section space-y-4">
-          <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
           {targets.length > 0 ? (
             <TargetTabs
               items={targets.map((item) => ({ id: item.id, label: item.label, has_data: item.has_data }))}
               selectedId={detail.selected_target_id ?? detail.current_target?.id ?? null}
               onSelect={(targetID) => replaceTargetSelection(targetID)}
+              variant={isEmbed ? "attached" : "default"}
             />
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>管理员还没有配置可查看的目标 IP。</span>
-              <button className="button" onClick={goToReportConfig} type="button">
-                去接入
-              </button>
+              {!isEmbed ? (
+                <button className="button" onClick={goToReportConfig} type="button">
+                  去接入
+                </button>
+              ) : null}
             </div>
           )}
         </div>
         {detail.current_target ? (
           <div className="section">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">当前 IP 质量</h2>
-            <div data-detail-report="true">
+            <div className="detail-target-panel" data-detail-report="true">
               <CurrentReportView result={detail.current_target.current_result} hiddenPaths={[]} compact={isEmbed} />
             </div>
           </div>
@@ -3862,6 +3963,33 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const isEmbed = searchParams.get("embed") === "1";
+  const embedTheme = getEmbedTheme(searchParams);
+  const embedAppearance = getEmbedAppearance(searchParams);
+  const embedGlassStyle = getEmbedGlassStyle(searchParams);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!isEmbed) {
+      delete root.dataset.ipqEmbedTheme;
+      delete body.dataset.ipqEmbedTheme;
+      delete root.dataset.ipqEmbedAppearance;
+      delete body.dataset.ipqEmbedAppearance;
+      return;
+    }
+
+    root.dataset.ipqEmbedTheme = embedTheme;
+    body.dataset.ipqEmbedTheme = embedTheme;
+    root.dataset.ipqEmbedAppearance = embedAppearance;
+    body.dataset.ipqEmbedAppearance = embedAppearance;
+
+    return () => {
+      delete root.dataset.ipqEmbedTheme;
+      delete body.dataset.ipqEmbedTheme;
+      delete root.dataset.ipqEmbedAppearance;
+      delete body.dataset.ipqEmbedAppearance;
+    };
+  }, [embedAppearance, embedTheme, isEmbed]);
 
   const content = (
     <Routes>
@@ -3886,7 +4014,10 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
 
   if (isEmbed) {
     return (
-      <div className="embed-shell bg-slate-50 text-slate-900">
+      <div
+        className={`embed-shell embed-theme-${embedTheme} embed-appearance-${embedAppearance} bg-slate-50 text-slate-900`}
+        style={embedGlassStyle}
+      >
         <div className="embed-panel mx-auto max-w-[1120px] space-y-6">{content}</div>
       </div>
     );
@@ -3985,7 +4116,14 @@ export function App() {
     <>
       <Routes>
         <Route path="/" element={<Navigate to={me ? "/nodes" : "/login"} replace />} />
-        <Route path="/public/nodes/:uuid" element={<PublicNodeDetailPage />} />
+        <Route
+          path="/public/nodes/:uuid"
+          element={
+            <EmbedFrameShell>
+              <PublicNodeDetailPage />
+            </EmbedFrameShell>
+          }
+        />
         <Route
           path="/login"
           element={<LoginPage me={me} onAuthenticated={(nextMe) => setMe(nextMe)} />}
