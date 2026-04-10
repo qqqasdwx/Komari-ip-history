@@ -28,9 +28,6 @@ func (h NodeHandler) List(c *gin.Context) {
 }
 
 func (h NodeHandler) Detail(c *gin.Context) {
-	if delayMS, ok := parseDebugDelayMS(c.Query("debug_delay_ms")); ok {
-		time.Sleep(time.Duration(delayMS) * time.Millisecond)
-	}
 	targetID := parseTargetID(c.Query("target_id"))
 	detail, err := service.GetNodeDetail(h.DB, c.Param("uuid"), targetID)
 	if err != nil {
@@ -76,22 +73,6 @@ func (h NodeHandler) HistoryFields(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, items)
-}
-
-func (h NodeHandler) HistoryDetail(c *gin.Context) {
-	targetID := parseTargetID(c.Query("target_id"))
-	historyIDValue, err := strconv.ParseUint(c.Param("historyID"), 10, 64)
-	if err != nil || historyIDValue == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid history id"})
-		return
-	}
-	startAt, endAt := parseHistoryDateRange(c.Query("start_date"), c.Query("end_date"))
-	item, detailErr := service.GetNodeHistoryDetail(h.DB, c.Param("uuid"), targetID, uint(historyIDValue), startAt, endAt)
-	if detailErr != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "history not found"})
-		return
-	}
-	c.JSON(http.StatusOK, item)
 }
 
 func (h NodeHandler) FavoriteHistory(c *gin.Context) {
@@ -228,21 +209,6 @@ func parseTargetID(raw string) *uint {
 	}
 	targetID := uint(value)
 	return &targetID
-}
-
-func parseDebugDelayMS(raw string) (int, bool) {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return 0, false
-	}
-	delayMS, err := strconv.Atoi(value)
-	if err != nil || delayMS <= 0 {
-		return 0, false
-	}
-	if delayMS > 10000 {
-		delayMS = 10000
-	}
-	return delayMS, true
 }
 
 func parsePositiveInt(raw string) int {

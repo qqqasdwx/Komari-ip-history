@@ -8,7 +8,6 @@ import {
   RowsIcon
 } from "@radix-ui/react-icons";
 import {
-  Fragment,
   type CSSProperties,
   type DragEvent,
   type FormEvent,
@@ -34,21 +33,18 @@ import { formatDateTime } from "./lib/format";
 import { buildHistoryCompareRows, mapDisplayPathToReportPaths } from "./lib/history";
 import { CurrentReportView } from "./lib/report";
 import type {
-  DisplayFieldValue,
   HistoryRetentionSettings,
   IntegrationSettings,
   MeResponse,
   NodeDetail,
   NodeReportConfigPreview,
   NodeHistoryChangeEventPage,
-  NodeHistoryDetailResponse,
   NodeHistoryEntry,
   NodeHistoryFieldOptionList,
   NodeHistoryListResponse,
   NodeListItem,
   NodeTargetListItem,
   PublicNodeDetail,
-  PublicTargetListItem,
   RuntimeResponse
 } from "./lib/types";
 
@@ -283,7 +279,7 @@ async function copyText(value: string) {
   }
 }
 
-function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void, debugDelayMS?: number | null) {
+function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: () => void) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -322,9 +318,6 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
         if (targetID) {
           query.set("target_id", String(targetID));
         }
-        if (debugDelayMS && debugDelayMS > 0) {
-          query.set("debug_delay_ms", String(debugDelayMS));
-        }
         const detailPath = `/nodes/${uuid}${query.size > 0 ? `?${query.toString()}` : ""}`;
         const detailResponse = await apiRequest<NodeDetail>(detailPath);
 
@@ -361,7 +354,7 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
     return () => {
       cancelled = true;
     };
-  }, [debugDelayMS, onUnauthorized, reloadToken, targetID, uuid]);
+  }, [onUnauthorized, reloadToken, targetID, uuid]);
 
   return {
     loading,
@@ -371,176 +364,6 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
     detail,
     reload: () => setReloadToken((value) => value + 1)
   };
-}
-
-function useNodeHistoryData(
-  uuid: string,
-  targetID: number | null,
-  onUnauthorized: () => void,
-  options?: { limit?: number; page?: number; pageSize?: number; startDate?: string; endDate?: string }
-) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [errorStatus, setErrorStatus] = useState<number | null>(null);
-  const [items, setItems] = useState<NodeHistoryEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(options?.pageSize ?? 20);
-  const [totalPages, setTotalPages] = useState(0);
-  const [reloadToken, setReloadToken] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      if (!uuid) {
-        setError("节点不存在");
-        setErrorStatus(404);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError("");
-      setErrorStatus(null);
-
-      try {
-        const query = new URLSearchParams();
-        if (targetID) {
-          query.set("target_id", String(targetID));
-        }
-        if (options?.limit && options.limit > 0) {
-          query.set("limit", String(options.limit));
-        } else {
-          query.set("page", String(options?.page && options.page > 0 ? options.page : 1));
-          query.set("page_size", String(options?.pageSize && options.pageSize > 0 ? options.pageSize : 20));
-        }
-        if (options?.startDate?.trim()) {
-          query.set("start_date", options.startDate.trim());
-        }
-        if (options?.endDate?.trim()) {
-          query.set("end_date", options.endDate.trim());
-        }
-        const response = await apiRequest<NodeHistoryListResponse>(
-          `/nodes/${uuid}/history${query.size > 0 ? `?${query.toString()}` : ""}`
-        );
-
-        if (cancelled) {
-          return;
-        }
-
-        setItems(response.items ?? []);
-        setTotal(response.total ?? 0);
-        setPage(response.page ?? 1);
-        setPageSize(response.page_size ?? (options?.pageSize ?? 20));
-        setTotalPages(response.total_pages ?? 0);
-      } catch (loadError) {
-        if (cancelled) {
-          return;
-        }
-        if (loadError instanceof UnauthorizedError) {
-          onUnauthorized();
-          return;
-        }
-        if (loadError instanceof RequestError) {
-          setErrorStatus(loadError.status);
-        }
-        setError(loadError instanceof Error ? loadError.message : "加载历史记录失败");
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [onUnauthorized, options?.endDate, options?.limit, options?.page, options?.pageSize, options?.startDate, reloadToken, targetID, uuid]);
-
-  return {
-    loading,
-    error,
-    errorStatus,
-    items,
-    total,
-    page,
-    pageSize,
-    totalPages,
-    reload: () => setReloadToken((value) => value + 1)
-  };
-}
-
-function useNodeHistoryDetailData(
-  uuid: string,
-  targetID: number | null,
-  historyID: number | null,
-  onUnauthorized: () => void,
-  options?: { startDate?: string; endDate?: string }
-) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [detail, setDetail] = useState<NodeHistoryDetailResponse | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      if (!uuid || !historyID) {
-        setDetail(null);
-        setError("");
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      setError("");
-
-      try {
-        const query = new URLSearchParams();
-        if (targetID) {
-          query.set("target_id", String(targetID));
-        }
-        if (options?.startDate?.trim()) {
-          query.set("start_date", options.startDate.trim());
-        }
-        if (options?.endDate?.trim()) {
-          query.set("end_date", options.endDate.trim());
-        }
-        const response = await apiRequest<NodeHistoryDetailResponse>(
-          `/nodes/${uuid}/history/${historyID}${query.size > 0 ? `?${query.toString()}` : ""}`
-        );
-        if (cancelled) {
-          return;
-        }
-        setDetail(response);
-      } catch (loadError) {
-        if (cancelled) {
-          return;
-        }
-        if (loadError instanceof UnauthorizedError) {
-          onUnauthorized();
-          return;
-        }
-        setError(loadError instanceof Error ? loadError.message : "加载历史快照失败");
-        setDetail(null);
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [historyID, onUnauthorized, options?.endDate, options?.startDate, targetID, uuid]);
-
-  return { loading, error, detail };
 }
 
 function useAllNodeHistoryData(
@@ -2415,62 +2238,6 @@ function HistoryPagination(props: {
   );
 }
 
-function HistoryDateFilterBar(props: {
-  startDate: string;
-  endDate: string;
-  onApply: (startDate: string, endDate: string) => void;
-}) {
-  const [startDate, setStartDate] = useState(props.startDate);
-  const [endDate, setEndDate] = useState(props.endDate);
-
-  useEffect(() => {
-    setStartDate(props.startDate);
-  }, [props.startDate]);
-
-  useEffect(() => {
-    setEndDate(props.endDate);
-  }, [props.endDate]);
-
-  return (
-    <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="grid gap-2 text-sm text-slate-700">
-          <span>开始日期</span>
-          <input
-            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-            type="date"
-            value={startDate}
-            onChange={(event) => setStartDate(event.target.value)}
-          />
-        </label>
-        <label className="grid gap-2 text-sm text-slate-700">
-          <span>结束日期</span>
-          <input
-            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-            type="date"
-            value={endDate}
-            onChange={(event) => setEndDate(event.target.value)}
-          />
-        </label>
-        <button
-          className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-          onClick={() => props.onApply(startDate, endDate)}
-          type="button"
-        >
-          应用筛选
-        </button>
-        <button
-          className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
-          onClick={() => props.onApply("", "")}
-          type="button"
-        >
-          清空
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function reportPathMatchesHighlight(nodePath: string, highlightPath: string) {
   return nodePath === highlightPath;
 }
@@ -2781,13 +2548,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const komariReturn = searchParams.get("komari_return")?.trim() || "";
   const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
-  const debugDelayMS = Number(searchParams.get("debug_delay_ms") || "") || null;
-  const { loading, refreshing, error, errorStatus, detail, reload } = useNodePageData(
-    uuid,
-    selectedTargetID,
-    props.onUnauthorized,
-    debugDelayMS
-  );
+  const { loading, refreshing, error, errorStatus, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
   const [showDelayedRefreshing, setShowDelayedRefreshing] = useState(false);
 
   useEffect(() => {

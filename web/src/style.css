@@ -25,8 +25,7 @@ body {
 
 html[data-ipq-embed-theme="purcarte"],
 body[data-ipq-embed-theme="purcarte"],
-body[data-ipq-embed-theme="purcarte"] #app,
-body[data-ipq-embed-theme="purcarte"] .radix-themes {
+body[data-ipq-embed-theme="purcarte"] #app {
   background: transparent !important;
 }
 
@@ -1819,6 +1818,8 @@ textarea {
   --ipq-purcarte-text: rgba(23, 23, 23, 0.96);
   --ipq-purcarte-muted: rgba(49, 49, 49, 0.72);
   --ipq-purcarte-accent: #635bff;
+  --ipq-purcarte-accent-soft: rgba(145, 119, 230, 0.32);
+  --ipq-purcarte-accent-soft-hover: rgba(145, 119, 230, 0.24);
   background: transparent !important;
   color: var(--ipq-purcarte-text) !important;
 }
@@ -1853,7 +1854,7 @@ textarea {
   height: 32px;
   border: 0;
   border-radius: 10px;
-  background: var(--accent-a6, rgba(145, 119, 230, 0.32));
+  background: var(--ipq-purcarte-accent-soft);
   color: var(--ipq-purcarte-accent);
   box-shadow: none;
   backdrop-filter: none;
@@ -1861,7 +1862,7 @@ textarea {
 
 .embed-theme-purcarte .embed-detail-page > header a:hover {
   border-color: transparent;
-  background: var(--accent-a5, rgba(145, 119, 230, 0.24));
+  background: var(--ipq-purcarte-accent-soft-hover);
   color: #4338ca;
 }
 
@@ -1933,6 +1934,8 @@ textarea {
   --ipq-purcarte-text: rgba(250, 250, 250, 0.96);
   --ipq-purcarte-muted: rgba(250, 250, 250, 0.68);
   --ipq-purcarte-accent: #ddd6fe;
+  --ipq-purcarte-accent-soft: rgba(221, 214, 254, 0.18);
+  --ipq-purcarte-accent-soft-hover: rgba(221, 214, 254, 0.12);
   color: var(--ipq-purcarte-text) !important;
 }
 

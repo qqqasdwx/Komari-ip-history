@@ -125,11 +125,6 @@ type NodeHistoryPage struct {
 	TotalPages int                `json:"total_pages"`
 }
 
-type NodeHistoryDetail struct {
-	Item     NodeHistoryEntry  `json:"item"`
-	Previous *NodeHistoryEntry `json:"previous,omitempty"`
-}
-
 type ReportNodeInput struct {
 	TargetIP   string         `json:"target_ip"`
 	Summary    string         `json:"summary"`
@@ -357,75 +352,6 @@ func GetNodeHistory(db *gorm.DB, uuid string, selectedTargetID *uint, limit, pag
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
-}
-
-func GetNodeHistoryDetail(db *gorm.DB, uuid string, selectedTargetID *uint, historyID uint, startAt, endAt *time.Time) (NodeHistoryDetail, error) {
-	if historyID == 0 {
-		return NodeHistoryDetail{}, errors.New("history id is required")
-	}
-
-	_, targets, err := loadNodeWithTargets(db, uuid)
-	if err != nil {
-		return NodeHistoryDetail{}, err
-	}
-
-	_, scopedTargets, err := resolveHistoryTargetScope(targets, selectedTargetID)
-	if err != nil {
-		return NodeHistoryDetail{}, err
-	}
-	if len(scopedTargets) == 0 {
-		return NodeHistoryDetail{}, gorm.ErrRecordNotFound
-	}
-	targetByID := make(map[uint]models.NodeTarget, len(targets))
-	targetScope := make([]uint, 0, len(scopedTargets))
-	for _, target := range targets {
-		targetByID[target.ID] = target
-	}
-	for _, target := range scopedTargets {
-		targetScope = append(targetScope, target.ID)
-	}
-
-	query := db.Where("id = ? AND node_target_id IN ?", historyID, targetScope)
-	query = applyHistoryRange(query, startAt, endAt)
-
-	var history models.NodeTargetHistory
-	if err := query.First(&history).Error; err != nil {
-		return NodeHistoryDetail{}, err
-	}
-
-	target := targetByID[history.NodeTargetID]
-	detail := NodeHistoryDetail{
-		Item: NodeHistoryEntry{
-			ID:         history.ID,
-			TargetID:   target.ID,
-			TargetIP:   target.TargetIP,
-			IsFavorite: history.IsFavorite,
-			RecordedAt: history.RecordedAt,
-			Summary:    history.Summary,
-			Result:     decodeResultJSON(history.ResultJSON),
-		},
-	}
-
-	var previous models.NodeTargetHistory
-	previousQuery := db.
-		Where("node_target_id = ? AND recorded_at < ?", history.NodeTargetID, history.RecordedAt).
-		Order("recorded_at DESC")
-	previousQuery = applyHistoryRange(previousQuery, startAt, endAt)
-	if err := previousQuery.First(&previous).Error; err == nil {
-		detail.Previous = &NodeHistoryEntry{
-			ID:         previous.ID,
-			TargetID:   target.ID,
-			TargetIP:   target.TargetIP,
-			IsFavorite: previous.IsFavorite,
-			RecordedAt: previous.RecordedAt,
-			Summary:    previous.Summary,
-			Result:     decodeResultJSON(previous.ResultJSON),
-		}
-	} else if err != nil && err != gorm.ErrRecordNotFound {
-		return NodeHistoryDetail{}, err
-	}
-
-	return detail, nil
 }
 
 func SetNodeHistoryFavorite(db *gorm.DB, uuid string, selectedTargetID *uint, historyID uint, favorite bool) (NodeHistoryEntry, error) {

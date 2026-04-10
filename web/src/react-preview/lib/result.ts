@@ -1,4 +1,4 @@
-import { compactLabel, formatDisplayValue, isRecord } from "./format";
+import { isRecord } from "./format";
 import ipqualityTemplate from "./ipquality-template.json";
 
 export type StructuredCurrentResult = {
@@ -107,25 +107,4 @@ export function getFilteredCurrentResult(result: Record<string, unknown>, hidden
 
 export function isEmptyRecord(value?: Record<string, unknown>) {
   return !value || Object.keys(value).length === 0;
-}
-
-export function parseResultJSON(raw: string) {
-  try {
-    const parsed = JSON.parse(raw);
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-export function getNodeListSummaryEntries(result: Record<string, unknown>, hiddenPaths: string[]) {
-  const structured = getFilteredCurrentResult(result, hiddenPaths);
-  if (!structured || !structured.score) {
-    return [];
-  }
-
-  return Object.entries(structured.score).map(([key, value]) => ({
-    label: compactLabel(key),
-    value: formatDisplayValue(value)
-  }));
 }

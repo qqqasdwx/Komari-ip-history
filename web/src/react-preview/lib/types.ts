@@ -120,11 +120,6 @@ export type NodeHistoryListResponse = {
   total_pages: number;
 };
 
-export type NodeHistoryDetailResponse = {
-  item: NodeHistoryEntry;
-  previous?: NodeHistoryEntry | null;
-};
-
 export type DisplayFieldValue = {
   id: string;
   path: string;

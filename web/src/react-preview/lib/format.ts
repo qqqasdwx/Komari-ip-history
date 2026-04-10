@@ -9,10 +9,6 @@ export function titleize(key: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function compactLabel(key: string) {
-  return titleize(key).replaceAll(" ", "");
-}
-
 export function formatDisplayValue(value: unknown) {
   if (value === undefined || value === null || value === "") {
     return "N/A";
