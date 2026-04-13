@@ -455,9 +455,9 @@ func GetPublicNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint, displ
 }
 
 func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTargetInput) (NodeTargetListItem, error) {
-	ip := strings.TrimSpace(input.IP)
-	if net.ParseIP(ip) == nil {
-		return NodeTargetListItem{}, errors.New("invalid ip")
+	ip, err := normalizeTargetIP(input.IP)
+	if err != nil {
+		return NodeTargetListItem{}, err
 	}
 
 	var node models.Node
@@ -465,11 +465,11 @@ func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTar
 		return NodeTargetListItem{}, err
 	}
 
-	var duplicate int64
-	if err := db.Model(&models.NodeTarget{}).Where("node_id = ? AND target_ip = ?", node.ID, ip).Count(&duplicate).Error; err != nil {
+	existingTarget, err := findNodeTargetByNormalizedIP(db, node.ID, ip)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return NodeTargetListItem{}, err
 	}
-	if duplicate > 0 {
+	if existingTarget != nil {
 		return NodeTargetListItem{}, errors.New("ip already exists")
 	}
 
@@ -579,10 +579,18 @@ func ReorderNodeTargets(db *gorm.DB, uuid string, input ReorderNodeTargetsInput)
 		for _, target := range targets {
 			existing[target.ID] = struct{}{}
 		}
+		seen := make(map[uint]struct{}, len(input.TargetIDs))
 		for _, targetID := range input.TargetIDs {
 			if _, ok := existing[targetID]; !ok {
 				return errors.New("target_ids mismatch")
 			}
+			if _, ok := seen[targetID]; ok {
+				return errors.New("target_ids mismatch")
+			}
+			seen[targetID] = struct{}{}
+		}
+		if len(seen) != len(existing) {
+			return errors.New("target_ids mismatch")
 		}
 
 		for index, targetID := range input.TargetIDs {
@@ -774,9 +782,9 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 	if strings.TrimSpace(token) == "" {
 		return errors.New("missing reporter token")
 	}
-	targetIP := strings.TrimSpace(input.TargetIP)
-	if net.ParseIP(targetIP) == nil {
-		return errors.New("invalid target ip")
+	targetIP, err := normalizeTargetIP(input.TargetIP)
+	if err != nil {
+		return err
 	}
 	if len(input.Result) == 0 {
 		return errors.New("result is required")
@@ -790,9 +798,9 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 		return errors.New("invalid reporter token")
 	}
 
-	var target models.NodeTarget
-	if err := db.First(&target, "node_id = ? AND target_ip = ?", node.ID, targetIP).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+	target, err := findNodeTargetByNormalizedIP(db, node.ID, targetIP)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("target ip not configured")
 		}
 		return err
@@ -814,7 +822,7 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&target).Updates(map[string]any{
+		if err := tx.Model(target).Updates(map[string]any{
 			"has_data":                  true,
 			"current_summary":           summary,
 			"current_result_json":       string(raw),
@@ -928,6 +936,35 @@ func decodeResultJSON(raw string) map[string]any {
 
 func publicTargetLabel(index int) string {
 	return "IP " + strconv.Itoa(index+1)
+}
+
+func normalizeTargetIP(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	parsed := net.ParseIP(value)
+	if parsed == nil {
+		return "", errors.New("invalid ip")
+	}
+	if ipv4 := parsed.To4(); ipv4 != nil {
+		return ipv4.String(), nil
+	}
+	return parsed.String(), nil
+}
+
+func findNodeTargetByNormalizedIP(db *gorm.DB, nodeID uint, targetIP string) (*models.NodeTarget, error) {
+	var targets []models.NodeTarget
+	if err := db.Where("node_id = ?", nodeID).Find(&targets).Error; err != nil {
+		return nil, err
+	}
+	for index := range targets {
+		normalized, err := normalizeTargetIP(targets[index].TargetIP)
+		if err != nil {
+			continue
+		}
+		if normalized == targetIP {
+			return &targets[index], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func nextNodeTargetSortOrder(db *gorm.DB, nodeID uint) (int, error) {

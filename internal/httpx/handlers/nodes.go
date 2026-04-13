@@ -228,6 +228,14 @@ func parseHistoryDateRange(startRaw, endRaw string) (*time.Time, *time.Time) {
 		if raw == "" {
 			return nil, false
 		}
+		rfcLayouts := []string{time.RFC3339Nano, time.RFC3339}
+		for _, layout := range rfcLayouts {
+			value, err := time.Parse(layout, raw)
+			if err == nil {
+				utc := value.UTC()
+				return &utc, false
+			}
+		}
 		layouts := []struct {
 			layout   string
 			dateOnly bool
@@ -238,7 +246,7 @@ func parseHistoryDateRange(startRaw, endRaw string) (*time.Time, *time.Time) {
 			{layout: "2006-01-02", dateOnly: true},
 		}
 		for _, candidate := range layouts {
-			value, err := time.Parse(candidate.layout, raw)
+			value, err := time.ParseInLocation(candidate.layout, raw, time.Local)
 			if err == nil {
 				utc := value.UTC()
 				return &utc, candidate.dateOnly

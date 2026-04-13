@@ -150,6 +150,10 @@ func (h AdminHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	if err := h.DB.Model(&models.AdminUser{}).Where("id = ?", user.ID).Updates(updates).Error; err != nil {
+		if isUniqueConstraintErr(err) {
+			c.JSON(http.StatusConflict, gin.H{"message": "username already exists"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to update profile"})
 		return
 	}
@@ -160,6 +164,10 @@ func (h AdminHandler) UpdateProfile(c *gin.Context) {
 	}
 	setSessionCookie(c, h.Cfg, "", -1)
 	c.JSON(http.StatusOK, gin.H{"status": "reauth_required"})
+}
+
+func isUniqueConstraintErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint failed")
 }
 
 func (h AdminHandler) HeaderPreview(c *gin.Context) {

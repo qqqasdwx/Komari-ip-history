@@ -207,6 +207,30 @@ function formatDateTimeInputValue(value: Date) {
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
+function historyQueryValueToInputValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed;
+  }
+  return formatDateTimeInputValue(parsed);
+}
+
+function historyInputValueToQueryValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed;
+  }
+  return parsed.toISOString();
+}
+
 function formatDateTimeDisplayValue(value: string) {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -1151,9 +1175,7 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
 
   useEffect(() => {
     const requestedUUID = searchParams.get("report_config")?.trim() || "";
-    if (requestedUUID) {
-      setReportConfigNodeUUID(requestedUUID);
-    }
+    setReportConfigNodeUUID(requestedUUID);
   }, [searchParams]);
 
   function openReportConfig(uuid: string) {
@@ -1913,11 +1935,11 @@ function HistoryChangeFiltersBar(props: {
   const rangePanelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setStartDate(props.startDate);
+    setStartDate(historyQueryValueToInputValue(props.startDate));
   }, [props.startDate]);
 
   useEffect(() => {
-    setEndDate(props.endDate);
+    setEndDate(historyQueryValueToInputValue(props.endDate));
   }, [props.endDate]);
 
   useEffect(() => {
@@ -2011,7 +2033,10 @@ function HistoryChangeFiltersBar(props: {
                 <button
                   className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
                   onClick={() => {
-                    props.onApply({ startDate, endDate });
+                    props.onApply({
+                      startDate: historyInputValueToQueryValue(startDate),
+                      endDate: historyInputValueToQueryValue(endDate)
+                    });
                     setRangeOpen(false);
                   }}
                   type="button"
@@ -2068,7 +2093,7 @@ function HistoryChangeFiltersBar(props: {
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
         <span>当前筛选：</span>
-        <span>时间 {describeHistoryDateRange(props.startDate, props.endDate)}</span>
+        <span>时间 {describeHistoryDateRange(startDate, endDate)}</span>
         <span>IP {selectedTargetLabel}</span>
         <span>字段 {selectedFieldLabel}</span>
       </div>
@@ -2702,8 +2727,9 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
   const historyPage = Number(searchParams.get("page") || "") || 1;
   const startDate = searchParams.get("start_date")?.trim() || "";
   const endDate = searchParams.get("end_date")?.trim() || "";
-  const [selectedFieldID, setSelectedFieldID] = useState("");
-  const [historyPageSize, setHistoryPageSize] = useState(10);
+  const selectedFieldID = searchParams.get("field")?.trim() || "";
+  const requestedPageSize = Number(searchParams.get("page_size") || "");
+  const historyPageSize = [10, 20, 50, 100].includes(requestedPageSize) ? requestedPageSize : 10;
   const { loading, error, detail, reload } = useNodePageData(uuid, selectedTargetID, props.onUnauthorized);
   const {
     loading: historyLoading,
@@ -2728,11 +2754,13 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
     endDate
   });
 
-  useEffect(() => {
-    setSelectedFieldID("");
-  }, [uuid, selectedTargetID, startDate, endDate]);
-
-  function replaceSelection(nextTargetID: number | null, nextPage?: number | null, nextFilters?: { startDate?: string; endDate?: string }) {
+  function replaceSelection(
+    nextTargetID: number | null,
+    nextPage?: number | null,
+    nextFilters?: { startDate?: string; endDate?: string },
+    nextFieldID?: string,
+    nextPageSize?: number
+  ) {
     const params = new URLSearchParams(searchParams);
     if (nextTargetID) {
       params.set("target_id", String(nextTargetID));
@@ -2755,6 +2783,18 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
       params.set("end_date", resolvedEndDate.trim());
     } else {
       params.delete("end_date");
+    }
+    const resolvedFieldID = nextFieldID ?? selectedFieldID;
+    if (resolvedFieldID.trim()) {
+      params.set("field", resolvedFieldID.trim());
+    } else {
+      params.delete("field");
+    }
+    const resolvedPageSize = nextPageSize ?? historyPageSize;
+    if (resolvedPageSize !== 10) {
+      params.set("page_size", String(resolvedPageSize));
+    } else {
+      params.delete("page_size");
     }
     const query = params.toString();
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
@@ -2868,12 +2908,11 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
                 replaceSelection(selectedTargetID, 1, {
                   startDate: nextStartDate,
                   endDate: nextEndDate
-                })
+                }, "")
               }
-              onTargetChange={(targetID) => replaceSelection(targetID, 1)}
+              onTargetChange={(targetID) => replaceSelection(targetID, 1, undefined, "")}
               onFieldChange={(fieldID) => {
-                setSelectedFieldID(fieldID);
-                replaceSelection(selectedTargetID, 1);
+                replaceSelection(selectedTargetID, 1, undefined, fieldID);
               }}
             />
 
@@ -2884,8 +2923,7 @@ function NodeHistoryPage(props: { onUnauthorized: () => void }) {
               pageSize={historyPageSize}
               onPageChange={(page) => replaceSelection(selectedTargetID, page)}
               onPageSizeChange={(pageSize) => {
-                setHistoryPageSize(pageSize);
-                replaceSelection(selectedTargetID, 1);
+                replaceSelection(selectedTargetID, 1, undefined, selectedFieldID, pageSize);
               }}
             />
 
@@ -2934,6 +2972,8 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
   const orderedHistory = [...effectiveHistoryItems].sort(
     (left, right) => new Date(left.recorded_at).getTime() - new Date(right.recorded_at).getTime()
   );
+  const firstRecordedAt = orderedHistory[0]?.recorded_at ?? "";
+  const lastRecordedAt = orderedHistory[orderedHistory.length - 1]?.recorded_at ?? "";
 
   useEffect(() => {
     if (orderedHistory.length === 0) {
@@ -2943,7 +2983,7 @@ function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
     }
     setLeftTimestamp(parseRecordedAtTimestamp(orderedHistory[0].recorded_at));
     setRightTimestamp(parseRecordedAtTimestamp(orderedHistory[orderedHistory.length - 1].recorded_at));
-  }, [detail?.current_target?.id, orderedHistory.length]);
+  }, [detail?.current_target?.id, firstRecordedAt, lastRecordedAt]);
 
   if (loading) {
     return <NodeDetailLoading />;
