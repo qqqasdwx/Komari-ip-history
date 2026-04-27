@@ -14,30 +14,37 @@ import (
 )
 
 const defaultReporterScheduleCron = "0 0 * * *"
+const defaultReporterTimezone = "UTC"
 
 var reporterCronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 type UpdateNodeReportConfigInput struct {
 	ScheduleCron   string `json:"schedule_cron"`
+	Timezone       string `json:"timezone"`
 	RunImmediately bool   `json:"run_immediately"`
 }
 
 type NodeReportConfigPreview struct {
 	ScheduleCron   string      `json:"schedule_cron"`
+	Timezone       string      `json:"timezone"`
 	RunImmediately bool        `json:"run_immediately"`
 	NextRuns       []time.Time `json:"next_runs"`
 }
 
-func normalizeReporterSchedule(node models.Node) (string, bool) {
+func normalizeReporterSchedule(node models.Node) (string, string, bool) {
 	scheduleCron := strings.TrimSpace(node.ReporterScheduleCron)
 	if scheduleCron == "" {
 		scheduleCron = defaultReporterScheduleCron
+	}
+	timezone := strings.TrimSpace(node.ReporterTimezone)
+	if timezone == "" {
+		timezone = defaultReporterTimezone
 	}
 	runImmediately := true
 	if node.ReporterToken != "" || node.ReporterScheduleCron != "" || node.ReporterRunImmediately {
 		runImmediately = node.ReporterRunImmediately
 	}
-	return scheduleCron, runImmediately
+	return scheduleCron, timezone, runImmediately
 }
 
 func parseReporterSchedule(scheduleCron string) (string, cron.Schedule, error) {
@@ -52,76 +59,99 @@ func parseReporterSchedule(scheduleCron string) (string, cron.Schedule, error) {
 	return normalized, schedule, nil
 }
 
-func computeReporterNextRuns(schedule cron.Schedule, now time.Time, count int) []time.Time {
+func parseReporterTimezone(raw string) (string, *time.Location, error) {
+	timezone := strings.TrimSpace(raw)
+	if timezone == "" {
+		timezone = defaultReporterTimezone
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return "", nil, errors.New("invalid timezone")
+	}
+	return timezone, location, nil
+}
+
+func computeReporterNextRuns(schedule cron.Schedule, now time.Time, location *time.Location, count int) []time.Time {
 	if count <= 0 {
 		return []time.Time{}
 	}
 	runs := make([]time.Time, 0, count)
-	cursor := now
+	cursor := now.In(location)
 	for len(runs) < count {
 		cursor = schedule.Next(cursor)
-		runs = append(runs, cursor.UTC())
+		runs = append(runs, cursor)
 	}
 	return runs
 }
 
-func previewNodeReportConfig(scheduleCron string, runImmediately bool, now time.Time) (NodeReportConfigPreview, error) {
+func previewNodeReportConfig(scheduleCron string, timezone string, runImmediately bool, now time.Time) (NodeReportConfigPreview, error) {
 	normalized, schedule, err := parseReporterSchedule(scheduleCron)
+	if err != nil {
+		return NodeReportConfigPreview{}, err
+	}
+	normalizedTimezone, location, err := parseReporterTimezone(timezone)
 	if err != nil {
 		return NodeReportConfigPreview{}, err
 	}
 	return NodeReportConfigPreview{
 		ScheduleCron:   normalized,
+		Timezone:       normalizedTimezone,
 		RunImmediately: runImmediately,
-		NextRuns:       computeReporterNextRuns(schedule, now.UTC(), 10),
+		NextRuns:       computeReporterNextRuns(schedule, now, location, 10),
 	}, nil
 }
 
 func buildNodeReportConfig(node models.Node, targetIPs []string) (NodeReportConfig, error) {
-	scheduleCron, runImmediately := normalizeReporterSchedule(node)
-	preview, err := previewNodeReportConfig(scheduleCron, runImmediately, time.Now().UTC())
+	scheduleCron, timezone, runImmediately := normalizeReporterSchedule(node)
+	preview, err := previewNodeReportConfig(scheduleCron, timezone, runImmediately, time.Now().UTC())
 	if err != nil {
 		return NodeReportConfig{}, err
 	}
+	routeUUID := nodeRouteUUID(node)
 	return NodeReportConfig{
-		EndpointPath:   "/api/v1/report/nodes/" + node.KomariNodeUUID,
-		InstallerPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
+		EndpointPath:   "/api/v1/report/nodes/" + routeUUID,
+		InstallerPath:  "/api/v1/report/nodes/" + routeUUID + "/install.sh",
 		ReporterToken:  node.ReporterToken,
 		InstallToken:   node.InstallToken,
 		TargetIPs:      targetIPs,
 		ScheduleCron:   preview.ScheduleCron,
+		Timezone:       preview.Timezone,
 		RunImmediately: preview.RunImmediately,
 		NextRuns:       preview.NextRuns,
 	}, nil
 }
 
-func GetNodeReportConfigPreview(db *gorm.DB, uuid string, scheduleCron string, runImmediately *bool) (NodeReportConfigPreview, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+func GetNodeReportConfigPreview(db *gorm.DB, uuid string, scheduleCron string, timezone string, runImmediately *bool) (NodeReportConfigPreview, error) {
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
 		return NodeReportConfigPreview{}, err
 	}
-	storedCron, storedRunImmediately := normalizeReporterSchedule(node)
+	storedCron, storedTimezone, storedRunImmediately := normalizeReporterSchedule(node)
 	if strings.TrimSpace(scheduleCron) == "" {
 		scheduleCron = storedCron
+	}
+	if strings.TrimSpace(timezone) == "" {
+		timezone = storedTimezone
 	}
 	nextRunImmediately := storedRunImmediately
 	if runImmediately != nil {
 		nextRunImmediately = *runImmediately
 	}
-	return previewNodeReportConfig(scheduleCron, nextRunImmediately, time.Now().UTC())
+	return previewNodeReportConfig(scheduleCron, timezone, nextRunImmediately, time.Now().UTC())
 }
 
 func UpdateNodeReportConfig(db *gorm.DB, uuid string, input UpdateNodeReportConfigInput) (NodeReportConfig, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
 		return NodeReportConfig{}, err
 	}
-	preview, err := previewNodeReportConfig(input.ScheduleCron, input.RunImmediately, time.Now().UTC())
+	preview, err := previewNodeReportConfig(input.ScheduleCron, input.Timezone, input.RunImmediately, time.Now().UTC())
 	if err != nil {
 		return NodeReportConfig{}, err
 	}
 	if err := db.Model(&node).Updates(map[string]any{
 		"reporter_schedule_cron":   preview.ScheduleCron,
+		"reporter_timezone":        preview.Timezone,
 		"reporter_run_immediately": preview.RunImmediately,
 	}).Error; err != nil {
 		return NodeReportConfig{}, err
@@ -141,6 +171,7 @@ func UpdateNodeReportConfig(db *gorm.DB, uuid string, input UpdateNodeReportConf
 		return NodeReportConfig{}, err
 	}
 	config.ScheduleCron = preview.ScheduleCron
+	config.Timezone = preview.Timezone
 	config.RunImmediately = preview.RunImmediately
 	config.NextRuns = preview.NextRuns
 	return config, nil

@@ -53,6 +53,26 @@ export function formatDateTime(value?: string) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+export function formatDateTimeInTimeZone(value: string | undefined, timeZone: string) {
+  if (!value) {
+    return "N/A";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  try {
+    return date.toLocaleString("zh-CN", {
+      hour12: false,
+      timeZone
+    });
+  } catch {
+    return formatDateTime(value);
+  }
+}
+
 export function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

@@ -6,6 +6,7 @@ SERVER_BASE_URL=""
 INSTALL_TOKEN=""
 REPORTER_TOKEN=""
 SCHEDULE_CRON="0 0 * * *"
+TIMEZONE="UTC"
 RUN_IMMEDIATELY="1"
 TARGET_IPS=()
 
@@ -39,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       SCHEDULE_CRON="${2:-}"
       shift 2
       ;;
+    --timezone)
+      TIMEZONE="${2:-}"
+      shift 2
+      ;;
     --run-immediately)
       RUN_IMMEDIATELY="${2:-}"
       shift 2
@@ -66,9 +71,13 @@ fi
 
 SERVER_BASE_URL="${SERVER_BASE_URL%/}"
 LEGACY_INLINE_MODE=0
+LOCAL_PROBE_URL=""
 if [[ "$SERVER_BASE_URL" == */api/v1/report/nodes/* ]]; then
   LEGACY_INLINE_MODE=1
   REPORT_ENDPOINT="$SERVER_BASE_URL"
+fi
+if [[ "$SERVER_BASE_URL" =~ ^https?://(localhost|127\.[0-9.]+|0\.0\.0\.0)(:[0-9]+)?$ ]]; then
+  LOCAL_PROBE_URL="${SERVER_BASE_URL}/api/v1/report/local-probe"
 fi
 
 if [[ "$LEGACY_INLINE_MODE" -eq 0 && -z "$INSTALL_TOKEN" && ( -z "$NODE_UUID" || -z "$REPORTER_TOKEN" ) ]]; then
@@ -157,18 +166,14 @@ if [[ "$LEGACY_INLINE_MODE" -eq 0 ]]; then
   REPORT_ENDPOINT="$(jq -er '.report_endpoint' "$CONFIG_FILE")"
   REPORTER_TOKEN="$(jq -er '.reporter_token' "$CONFIG_FILE")"
   SCHEDULE_CRON="$(jq -er '.schedule_cron' "$CONFIG_FILE")"
+  TIMEZONE="$(jq -er '.timezone // "UTC"' "$CONFIG_FILE")"
   if jq -e '.run_immediately == true' "$CONFIG_FILE" >/dev/null 2>&1; then
     RUN_IMMEDIATELY="1"
   else
     RUN_IMMEDIATELY="0"
   fi
-  mapfile -t TARGET_IPS < <(jq -er '.target_ips[]' "$CONFIG_FILE")
   if [[ -z "${REPORT_ENDPOINT:-}" ]]; then
     echo "Install config did not include report_endpoint." >&2
-    exit 1
-  fi
-  if [[ ${#TARGET_IPS[@]} -eq 0 ]]; then
-    echo "Install config did not include any target IPs." >&2
     exit 1
   fi
 fi
@@ -205,7 +210,9 @@ set -euo pipefail
 
 REPORT_ENDPOINT='${REPORT_ENDPOINT//\'/\'\"\'\"\'}'
 REPORTER_TOKEN='${REPORTER_TOKEN//\'/\'\"\'\"\'}'
-TARGET_IPS=(${target_ip_literals})
+PLAN_ENDPOINT="${REPORT_ENDPOINT}/plan"
+LOCAL_PROBE_URL='${LOCAL_PROBE_URL//\'/\'\"\'\"\'}'
+INITIAL_TARGET_IPS=(${target_ip_literals})
 
 WORKDIR=\$(mktemp -d)
 cleanup() {
@@ -213,14 +220,94 @@ cleanup() {
 }
 trap cleanup EXIT
 
+discover_candidate_ips() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -o addr show up scope global | awk '{print \$4}' | cut -d/ -f1 | while read -r ip; do
+      [ -z "\$ip" ] && continue
+      case "\$ip" in
+        127.*|::1|fe80:*) continue ;;
+      esac
+      printf '%s\n' "\$ip"
+    done
+    return
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n' | while read -r ip; do
+      [ -z "\$ip" ] && continue
+      case "\$ip" in
+        127.*|::1|fe80:*) continue ;;
+      esac
+      printf '%s\n' "\$ip"
+    done
+  fi
+}
+
+discover_interface_summary_json() {
+  if ! command -v ip >/dev/null 2>&1; then
+    printf '[]'
+    return
+  fi
+  ip -j addr show up scope global 2>/dev/null | jq -c '[.[] | {name: .ifname, ips: [(.addr_info // [])[] | select((.scope // "") == "global") | .local]} | select((.ips | length) > 0)]'
+}
+
+if [ "\${#INITIAL_TARGET_IPS[@]}" -gt 0 ]; then
+  CANDIDATE_IPS=("\${INITIAL_TARGET_IPS[@]}")
+else
+  mapfile -t CANDIDATE_IPS < <(discover_candidate_ips | awk '!seen[\$0]++')
+fi
+if [ "\${#CANDIDATE_IPS[@]}" -eq 0 ]; then
+  echo "No candidate IPs were discovered on this node." >&2
+fi
+
+HOSTNAME_VALUE=""
+if command -v hostname >/dev/null 2>&1; then
+  HOSTNAME_VALUE="\$(hostname 2>/dev/null || true)"
+fi
+INTERFACE_SUMMARY_JSON="\$(discover_interface_summary_json)"
+AGENT_VERSION="install-script-v2"
+CANDIDATE_IPS_JSON='[]'
+if [ "\${#CANDIDATE_IPS[@]}" -gt 0 ]; then
+  CANDIDATE_IPS_JSON="\$(printf '%s\n' "\${CANDIDATE_IPS[@]}" | jq -R . | jq -s .)"
+fi
+
+PLAN_FILE="\$WORKDIR/plan.json"
+if ! jq -n \
+  --argjson candidate_ips "\$CANDIDATE_IPS_JSON" \
+  --arg agent_version "\$AGENT_VERSION" \
+  --arg hostname "\$HOSTNAME_VALUE" \
+  --argjson interface_summary "\$INTERFACE_SUMMARY_JSON" \
+  '{candidate_ips: \$candidate_ips, agent_version: \$agent_version, hostname: \$hostname, interface_summary: \$interface_summary}' \
+  | curl -fsS -X POST \
+      -H 'Content-Type: application/json' \
+      -H "X-IPQ-Reporter-Token: \${REPORTER_TOKEN}" \
+      --data-binary @- \
+      "\$PLAN_ENDPOINT" -o "\$PLAN_FILE"; then
+  echo "Failed to fetch reporting plan." >&2
+  exit 1
+fi
+
+mapfile -t TARGET_IPS < <(jq -er '.approved_targets[].target_ip' "\$PLAN_FILE")
+if [ "\${#TARGET_IPS[@]}" -eq 0 ]; then
+  echo "No approved target IPs returned by the server. Nothing to probe."
+  exit 0
+fi
+
 for TARGET_IP in "\${TARGET_IPS[@]}"; do
   SAFE_NAME=\$(printf '%s' "\$TARGET_IP" | tr ':/' '__')
   RESULT_FILE="\$WORKDIR/\$SAFE_NAME.json"
   PROBE_LOG="\$WORKDIR/\$SAFE_NAME.log"
   PROBE_EXIT=0
   echo "Probing \$TARGET_IP..."
-  if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i "\$TARGET_IP" -o "\$RESULT_FILE" >"\$PROBE_LOG" 2>&1; then
-    PROBE_EXIT=\$?
+  if [ -n "\$LOCAL_PROBE_URL" ]; then
+    TARGET_IP_QUERY=\$(printf '%s' "\$TARGET_IP" | jq -sRr @uri)
+    if ! curl -fsS "\${LOCAL_PROBE_URL}?target_ip=\${TARGET_IP_QUERY}" -o "\$RESULT_FILE" >"\$PROBE_LOG" 2>&1; then
+      PROBE_EXIT=\$?
+    fi
+  else
+    if ! bash <(curl -fsSL https://IP.Check.Place) -j -y -i "\$TARGET_IP" -o "\$RESULT_FILE" >"\$PROBE_LOG" 2>&1; then
+      PROBE_EXIT=\$?
+    fi
   fi
   if [ ! -s "\$RESULT_FILE" ]; then
     echo "IPQuality probe failed or returned empty result: \$TARGET_IP" >&2
@@ -247,6 +334,7 @@ chmod +x "$SCRIPT_PATH"
 cat > "$CRON_PATH" <<EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CRON_TZ=${TIMEZONE}
 ${SCHEDULE_CRON} root ${SCRIPT_PATH}
 EOF
 
@@ -271,6 +359,7 @@ fi
 
 echo "Installed ${UNIT_NAME} with ${#TARGET_IPS[@]} target IP(s)."
 echo "Schedule: ${SCHEDULE_CRON}"
+echo "Timezone: ${TIMEZONE}"
 if [[ "$RUN_IMMEDIATELY" == "1" || "$RUN_IMMEDIATELY" == "true" ]]; then
   echo "Immediate execution: enabled"
 else

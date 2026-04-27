@@ -16,14 +16,25 @@ type EmbedHandler struct {
 	Cfg config.Config
 }
 
+func (h EmbedHandler) registerInput(c *gin.Context) (service.RegisterNodeInput, error) {
+	var req service.RegisterNodeInput
+	if c.Request.Method == http.MethodGet {
+		req.KomariNodeUUID = c.Query("uuid")
+		req.Name = c.Query("name")
+		return req, nil
+	}
+	err := c.ShouldBindJSON(&req)
+	return req, err
+}
+
 func (h EmbedHandler) Register(c *gin.Context) {
 	if _, ok := middleware.GetCurrentUser(c); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"login_required": true})
 		return
 	}
 
-	var req service.RegisterNodeInput
-	if err := c.ShouldBindJSON(&req); err != nil {
+	req, err := h.registerInput(c)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
 		return
 	}
@@ -43,6 +54,19 @@ func (h EmbedHandler) Register(c *gin.Context) {
 			"has_data":         node.HasData,
 		},
 	})
+}
+
+func (h EmbedHandler) RegisterBeacon(c *gin.Context) {
+	req, err := h.registerInput(c)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	if _, _, err := service.SyncKomariNode(h.DB, req); err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h EmbedHandler) Loader(c *gin.Context) {

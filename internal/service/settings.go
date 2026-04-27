@@ -65,7 +65,7 @@ func EffectivePublicBaseURL(cfgPublicBaseURL string, override string) string {
 func getBoolSetting(db *gorm.DB, key string, fallback bool) (bool, error) {
 	var setting models.AppSetting
 	if err := db.First(&setting, "key = ?", key).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == gorm.ErrRecordNotFound || isMissingTableErr(err) {
 			return fallback, nil
 		}
 		return fallback, err
@@ -80,6 +80,10 @@ func getBoolSetting(db *gorm.DB, key string, fallback bool) (bool, error) {
 	default:
 		return fallback, nil
 	}
+}
+
+func isMissingTableErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table")
 }
 
 func setBoolSetting(db *gorm.DB, key string, value bool) error {
@@ -103,7 +107,7 @@ func GetIntegrationSettings(db *gorm.DB, cfgPublicBaseURL string) (IntegrationSe
 
 	var setting models.AppSetting
 	if err := db.First(&setting, "key = ?", integrationBaseURLSettingKey).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if err == gorm.ErrRecordNotFound || isMissingTableErr(err) {
 			return IntegrationSettings{
 				PublicBaseURL:          "",
 				EffectivePublicBaseURL: EffectivePublicBaseURL(cfgPublicBaseURL, ""),

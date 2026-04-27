@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -25,6 +26,113 @@ func (h NodeHandler) List(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h NodeHandler) KomariBindingCandidates(c *gin.Context) {
+	items, err := service.ListKomariBindingCandidates(h.DB)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load komari binding candidates"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h NodeHandler) Create(c *gin.Context) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	node, err := service.CreateStandaloneNode(h.DB, req.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"id":                 node.ID,
+		"node_uuid":          node.NodeUUID,
+		"komari_node_uuid":   node.KomariNodeUUID,
+		"komari_node_name":   "",
+		"has_komari_binding": false,
+		"name":               node.Name,
+		"has_data":           node.HasData,
+		"updated_at":         node.CurrentResultUpdatedAt,
+		"created_at":         node.CreatedAt,
+	})
+}
+
+func (h NodeHandler) Update(c *gin.Context) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	node, err := service.UpdateNodeName(h.DB, c.Param("uuid"), req.Name)
+	if err != nil {
+		if err.Error() == "name is required" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	detail, detailErr := service.GetNodeDetail(h.DB, c.Param("uuid"), nil)
+	if detailErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"id":                 detail.ID,
+		"node_uuid":          detail.NodeUUID,
+		"komari_node_uuid":   detail.KomariNodeUUID,
+		"komari_node_name":   detail.KomariNodeName,
+		"has_komari_binding": detail.HasKomariBinding,
+		"name":               detail.Name,
+		"has_data":           detail.HasData,
+		"updated_at":         detail.UpdatedAt,
+		"created_at":         node.CreatedAt,
+	})
+}
+
+func (h NodeHandler) BindKomari(c *gin.Context) {
+	var req struct {
+		NodeID         uint   `json:"node_id"`
+		KomariNodeUUID string `json:"komari_node_uuid"`
+		KomariNodeName string `json:"komari_node_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	item, err := service.BindNodeToKomari(h.DB, req.NodeID, req.KomariNodeUUID, req.KomariNodeName)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+func (h NodeHandler) UnbindKomari(c *gin.Context) {
+	var req struct {
+		NodeID uint `json:"node_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	if err := service.UnbindNodeFromKomari(h.DB, req.NodeID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (h NodeHandler) Detail(c *gin.Context) {
@@ -133,6 +241,34 @@ func (h NodeHandler) DeleteTarget(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
 
+func (h NodeHandler) EnableTarget(c *gin.Context) {
+	targetIDValue, err := strconv.ParseUint(c.Param("targetID"), 10, 64)
+	if err != nil || targetIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid target id"})
+		return
+	}
+	item, enableErr := service.SetNodeTargetEnabled(h.DB, c.Param("uuid"), uint(targetIDValue), true)
+	if enableErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "target not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+func (h NodeHandler) DisableTarget(c *gin.Context) {
+	targetIDValue, err := strconv.ParseUint(c.Param("targetID"), 10, 64)
+	if err != nil || targetIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid target id"})
+		return
+	}
+	item, enableErr := service.SetNodeTargetEnabled(h.DB, c.Param("uuid"), uint(targetIDValue), false)
+	if enableErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "target not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
 func (h NodeHandler) ReorderTargets(c *gin.Context) {
 	var req service.ReorderNodeTargetsInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -169,9 +305,9 @@ func (h NodeHandler) PreviewReportConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid run_immediately"})
 		return
 	}
-	preview, previewErr := service.GetNodeReportConfigPreview(h.DB, c.Param("uuid"), c.Query("cron"), runImmediately)
+	preview, previewErr := service.GetNodeReportConfigPreview(h.DB, c.Param("uuid"), c.Query("cron"), c.Query("timezone"), runImmediately)
 	if previewErr != nil {
-		if previewErr.Error() == "invalid cron expression" {
+		if previewErr.Error() == "invalid cron expression" || previewErr.Error() == "invalid timezone" {
 			c.JSON(http.StatusBadRequest, gin.H{"message": previewErr.Error()})
 			return
 		}
@@ -189,7 +325,7 @@ func (h NodeHandler) UpdateReportConfig(c *gin.Context) {
 	}
 	config, updateErr := service.UpdateNodeReportConfig(h.DB, c.Param("uuid"), req)
 	if updateErr != nil {
-		if updateErr.Error() == "invalid cron expression" {
+		if updateErr.Error() == "invalid cron expression" || updateErr.Error() == "invalid timezone" {
 			c.JSON(http.StatusBadRequest, gin.H{"message": updateErr.Error()})
 			return
 		}

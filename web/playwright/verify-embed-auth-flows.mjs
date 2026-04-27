@@ -119,7 +119,7 @@ const createdNodeUUIDs = [];
 let setupContext;
 let guestOffContext;
 let guestOnContext;
-let adminReturnContext;
+let adminEmbedContext;
 
 try {
   setupContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -173,30 +173,35 @@ try {
 
   const adminReturnNode = await addKomariNode(komariPage, "Playwright Admin Return Node");
   createdNodeUUIDs.push(adminReturnNode.uuid);
-  adminReturnContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  const adminReturnPage = await adminReturnContext.newPage();
-  await loginKomari(adminReturnPage);
-  await adminReturnPage.goto(`${komariBaseURL}/instance/${adminReturnNode.uuid}`);
-  await adminReturnPage.waitForLoadState("networkidle");
-  await adminReturnPage.waitForTimeout(3000);
-  await clickIpqAction(adminReturnPage);
-  await adminReturnPage.waitForURL("**/#/login**", { timeout: 15000 });
-  await adminReturnPage.getByRole("textbox", { name: "用户名" }).fill("admin");
-  await adminReturnPage.getByLabel("密码").fill("admin");
-  await adminReturnPage.getByRole("button", { name: "登录" }).click();
-  await adminReturnPage.waitForURL(`${komariBaseURL}/instance/**`, { timeout: 25000 });
-  await adminReturnPage.waitForLoadState("domcontentloaded");
-  await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"] iframe').first().waitFor({ state: "visible", timeout: 15000 });
-  const adminReturnOverlay = await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
-  const adminReturnIframeSrc =
-    (await adminReturnPage.locator("#ipq-loader-overlay iframe").count()) > 0
-      ? await adminReturnPage.locator("#ipq-loader-overlay iframe").first().getAttribute("src")
+  adminEmbedContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const adminEmbedPage = await adminEmbedContext.newPage();
+  await loginKomari(adminEmbedPage);
+  await adminEmbedPage.goto(`${komariBaseURL}/instance/${adminReturnNode.uuid}`);
+  await adminEmbedPage.waitForLoadState("networkidle");
+  await adminEmbedPage.waitForTimeout(3000);
+  await clickIpqAction(adminEmbedPage);
+  await adminEmbedPage.locator('#ipq-loader-overlay[data-open="true"] iframe').first().waitFor({ state: "visible", timeout: 15000 });
+  await adminEmbedPage.waitForTimeout(1000);
+  const adminEmbedOverlay = await adminEmbedPage.locator('#ipq-loader-overlay[data-open="true"]').count();
+  const adminEmbedIframeSrc =
+    (await adminEmbedPage.locator("#ipq-loader-overlay iframe").count()) > 0
+      ? await adminEmbedPage.locator("#ipq-loader-overlay iframe").first().getAttribute("src")
       : "";
-  if (adminReturnOverlay !== 1 || !adminReturnIframeSrc?.includes(`/nodes/${adminReturnNode.uuid}`)) {
-    throw new Error("admin return scenario did not reopen the Komari popup detail");
+  const adminEmbedTopURL = adminEmbedPage.url();
+  const continueLinkCount = await adminEmbedPage
+    .frameLocator('#ipq-loader-overlay iframe')
+    .getByRole('link', { name: '在独立页面继续' })
+    .count();
+  if (
+    adminEmbedOverlay !== 1 ||
+    !adminEmbedIframeSrc?.includes(`/nodes/${adminReturnNode.uuid}`) ||
+    !adminEmbedTopURL.includes(`${komariBaseURL}/instance/${adminReturnNode.uuid}`) ||
+    continueLinkCount === 0
+  ) {
+    throw new Error("admin embed scenario should stay inside the Komari popup and show explicit standalone CTA");
   }
-  await adminReturnContext.close();
-  adminReturnContext = null;
+  await adminEmbedContext.close();
+  adminEmbedContext = null;
 
   writeFileSync(
     path.join(outputDir, "verify-embed-auth-flows.json"),
@@ -210,9 +215,10 @@ try {
           nodeUUID: registeredNode.uuid,
           iframeSrc: guestOnIframeSrc
         },
-        adminReturn: {
+        adminEmbed: {
           nodeUUID: adminReturnNode.uuid,
-          iframeSrc: adminReturnIframeSrc
+          iframeSrc: adminEmbedIframeSrc,
+          topURL: adminEmbedTopURL
         }
       },
       null,
@@ -224,7 +230,7 @@ try {
 } finally {
   if (guestOffContext) await guestOffContext.close().catch(() => {});
   if (guestOnContext) await guestOnContext.close().catch(() => {});
-  if (adminReturnContext) await adminReturnContext.close().catch(() => {});
+  if (adminEmbedContext) await adminEmbedContext.close().catch(() => {});
 
   if (setupContext) {
     const appCleanupPage = await setupContext.newPage();

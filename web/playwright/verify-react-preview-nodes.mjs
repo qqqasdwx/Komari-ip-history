@@ -1,8 +1,9 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 
 const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || 'http://localhost:8090').replace(/\/$/, '');
-const outputDir = '/workspace/web/playwright-output';
+const outputDir = path.resolve('playwright-output');
 mkdirSync(outputDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
@@ -41,6 +42,7 @@ if (headingCount === 0) {
 
 const rowLocator = page.locator('[data-node-row="true"]');
 const rowCount = await rowLocator.count();
+let compareSliderVerification = null;
 
 if (rowCount > 0) {
   const preferredNodeNames = ['开发种子-多IP历史', '开发种子-单IP历史', '通信样式测试'];
@@ -87,7 +89,7 @@ if (rowCount > 0) {
   if (installCommandCount === 0) {
     throw new Error('react node list modal missing install command');
   }
-  if (!configText.includes('当前命令会顺序探查以下 IP') && !configText.includes('请先添加目标 IP，添加后才会生成接入命令。')) {
+  if (!configText.includes('当前命令会优先探查服务端已记录且启用的目标 IP') && !configText.includes('当前还没有手动配置目标 IP')) {
     throw new Error('react detail page missing monitored IP hint');
   }
   if (configText.includes('上报地址') || configText.includes('Reporter Token')) {
@@ -96,10 +98,10 @@ if (rowCount > 0) {
   if (!configText.includes('Cron') || !configText.includes('最近 10 次执行时间')) {
     throw new Error('react detail page missing schedule controls');
   }
-  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh')) {
+  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh')) {
     throw new Error('react node list modal install command is not using GitHub raw install script');
   }
-  await page.getByRole('button', { name: '关闭' }).click();
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
 
   await page.locator(`[data-node-row="true"][data-node-uuid="${firstUUID}"]`).click({ position: { x: 24, y: 24 } });
   await page.waitForURL(`**/#/nodes/${firstUUID}`);
@@ -172,6 +174,29 @@ if (rowCount > 0) {
     await page.getByRole('link', { name: '快照对比' }).click();
     await page.waitForURL('**/#/nodes/**/compare**');
     await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    const leftCompareInput = page.locator('.compare-timeline-input-left');
+    const rightCompareInput = page.locator('.compare-timeline-input-right');
+    const leftStep = await leftCompareInput.getAttribute('step');
+    const rightStep = await rightCompareInput.getAttribute('step');
+    const minValue = Number(await leftCompareInput.getAttribute('min'));
+    const currentRightValue = Number(await rightCompareInput.inputValue());
+    const midpoint = Math.floor((minValue + currentRightValue) / 2);
+    await page.evaluate((value) => {
+      const input = document.querySelector('.compare-timeline-input-left');
+      if (!(input instanceof HTMLInputElement)) {
+        throw new Error('left compare input not found');
+      }
+      input.value = String(value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, midpoint);
+    const appliedLeftValue = Number(await leftCompareInput.inputValue());
+    if (leftStep !== '1' || rightStep !== '1') {
+      throw new Error(`compare timeline slider step should stay at 1, got left=${leftStep} right=${rightStep}`);
+    }
+    if (appliedLeftValue !== midpoint) {
+      throw new Error(`compare timeline slider snapped unexpectedly: expected ${midpoint}, got ${appliedLeftValue}`);
+    }
+    compareSliderVerification = { leftStep, rightStep, midpoint, appliedLeftValue };
     await page.goto(detailURL);
     await page.waitForLoadState('networkidle');
   }
@@ -201,7 +226,8 @@ writeFileSync(
   JSON.stringify(
     {
       url: page.url(),
-      rowCount
+      rowCount,
+      compareSliderVerification
     },
     null,
     2

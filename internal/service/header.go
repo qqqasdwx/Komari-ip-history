@@ -55,7 +55,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
   const ROUTE_HINT_RE = /(client|clients|node|nodes|server|servers)/i;
   const ACTION_HINT_RE = /(编辑|删除|终端|命令|执行|Edit|Delete|Terminal|Command|Run)/i;
-  const TITLE_BLACKLIST = /^(komari|dashboard|nodes|node|clients|client|服务器|节点)$/i;
+  const TITLE_BLACKLIST = /^(komari|komari monitor|dashboard|nodes|node|clients|client|服务器|节点|未命名节点)$/i;
   const state = {
     contextKey: "",
     resumeHandledKey: "",
@@ -64,6 +64,13 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     overlay: null,
     iframe: null,
     openLink: null,
+    authCache: null,
+    authCachePromise: null,
+    publicNodesCache: null,
+    publicNodesCachePromise: null,
+    komariNodeIndexCache: null,
+    komariNodeIndexPromise: null,
+    syncedNodeKeys: {},
     retryTimers: [],
     routeCycle: 0,
     busy: false,
@@ -556,8 +563,15 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ipq-loader-button";
-    button.addEventListener("click", function () {
-      handleAction();
+    button.addEventListener("pointerdown", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      triggerContextAction(event, detectContext(), button, "pointerdown");
+    });
+    button.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      triggerContextAction(event, detectContext(), button, "click");
     });
     state.button = button;
     return button;
@@ -623,15 +637,25 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   }
 
   function triggerContextAction(event, context, button, source) {
+    if (!context || !button) {
+      return;
+    }
+    if (button._ipqActionPending) {
+      debugLog("action_skipped_pending", { source: source, uuid: context.uuid });
+      return;
+    }
     const now = Date.now();
     const previous = Number(button._ipqLastActionAt || 0);
-    if (now - previous < 600) {
-      debugLog("action_skipped_duplicate", { source: source, uuid: context && context.uuid });
+    if (now - previous < 250) {
+      debugLog("action_skipped_duplicate", { source: source, uuid: context.uuid });
       return;
     }
     button._ipqLastActionAt = now;
-    debugLog("action_trigger", { source: source, uuid: context && context.uuid, title: button.getAttribute("title") || "" });
-    handleAction(context, button);
+    button._ipqActionPending = true;
+    debugLog("action_trigger", { source: source, uuid: context.uuid, title: button.getAttribute("title") || "" });
+    Promise.resolve(handleAction(context, button)).finally(function () {
+      button._ipqActionPending = false;
+    });
   }
 
   function ensureOverlay() {
@@ -694,6 +718,90 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   function closeModal() {
     if (!state.overlay) return;
     state.overlay.setAttribute("data-open", "false");
+    if (state.iframe) {
+      state.iframe.removeAttribute("src");
+      state.iframe.src = "about:blank";
+    }
+  }
+
+  function readCachedAuth() {
+    if (!state.authCache) return null;
+    if (Date.now() - Number(state.authCache.loadedAt || 0) > 15000) {
+      return null;
+    }
+    return state.authCache;
+  }
+
+  function readCachedPublicNodes() {
+    if (!state.publicNodesCache) return null;
+    if (Date.now() - Number(state.publicNodesCache.loadedAt || 0) > 15000) {
+      return null;
+    }
+    return state.publicNodesCache;
+  }
+
+  function prefetchAuthState() {
+    const cached = readCachedAuth();
+    if (cached) {
+      return Promise.resolve(cached);
+    }
+    if (state.authCachePromise) {
+      return state.authCachePromise;
+    }
+    state.authCachePromise = fetch(window.location.origin + "/api/me", { credentials: "include" })
+      .then(function (response) {
+        if (!response.ok) {
+          return { loggedIn: false, loadedAt: Date.now() };
+        }
+        return response.json().then(function (me) {
+          return {
+            loggedIn: !!(me && me.logged_in),
+            loadedAt: Date.now()
+          };
+        });
+      })
+      .catch(function () {
+        return { loggedIn: false, loadedAt: Date.now() };
+      })
+      .then(function (value) {
+        state.authCache = value;
+        state.authCachePromise = null;
+        return value;
+      });
+    return state.authCachePromise;
+  }
+
+  function prefetchPublicNodes() {
+    const cached = readCachedPublicNodes();
+    if (cached) {
+      return Promise.resolve(cached);
+    }
+    if (state.publicNodesCachePromise) {
+      return state.publicNodesCachePromise;
+    }
+    state.publicNodesCachePromise = fetch(window.location.origin + "/api/nodes", { credentials: "include" })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("failed to load Komari public nodes");
+        }
+        return response.json();
+      })
+      .then(function (payload) {
+        const items = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload && payload.data)
+            ? payload.data
+            : Object.values(payload || {});
+        const value = { items: items, loadedAt: Date.now() };
+        state.publicNodesCache = value;
+        state.publicNodesCachePromise = null;
+        return value;
+      })
+      .catch(function (error) {
+        state.publicNodesCachePromise = null;
+        throw error;
+      });
+    return state.publicNodesCachePromise;
   }
 
   function showToast(message) {
@@ -968,6 +1076,99 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       name: name,
       key: uuid + "|" + name
     };
+  }
+
+  function collectVisibleNodeContexts() {
+    const items = [];
+    const seen = {};
+    const current = detectContext();
+    if (current && !seen[current.uuid]) {
+      items.push(current);
+      seen[current.uuid] = true;
+    }
+    const anchors = document.querySelectorAll("a[href*='/instance/']");
+    for (const anchor of anchors) {
+      if (!isVisible(anchor)) continue;
+      const href = anchor.getAttribute("href") || "";
+      const uuid = extractUUIDFromValue(href);
+      if (!uuid || seen[uuid]) continue;
+      items.push({
+        uuid: uuid,
+        name: extractPurCarteName(anchor, uuid),
+        key: uuid + "|" + extractPurCarteName(anchor, uuid)
+      });
+      seen[uuid] = true;
+    }
+    return items;
+  }
+
+  function prefetchKomariNodeIndex() {
+    if (state.komariNodeIndexCache) {
+      return Promise.resolve(state.komariNodeIndexCache);
+    }
+    if (state.komariNodeIndexPromise) {
+      return state.komariNodeIndexPromise;
+    }
+    state.komariNodeIndexPromise = fetch(window.location.origin + "/api/admin/client/list", {
+      credentials: "include",
+      cache: "no-store"
+    })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("failed to load Komari node index");
+        }
+        return response.json();
+      })
+      .then(function (payload) {
+        const items = Array.isArray(payload) ? payload : [];
+        state.komariNodeIndexCache = items;
+        state.komariNodeIndexPromise = null;
+        return items;
+      })
+      .catch(function () {
+        state.komariNodeIndexPromise = null;
+        return [];
+      });
+    return state.komariNodeIndexPromise;
+  }
+
+  function syncVisibleKomariNodes() {
+    prefetchKomariNodeIndex().then(function (items) {
+      const contexts = collectVisibleNodeContexts();
+      const contextMap = {};
+      contexts.forEach(function (context) {
+        if (!context || !context.uuid) return;
+        contextMap[context.uuid] = context;
+      });
+      if (Array.isArray(items) && items.length > 0) {
+        items.forEach(function (item) {
+          if (!item) return;
+          const uuid = extractUUIDFromValue(item.uuid || "");
+          const name = normalizeName(item.name || "");
+          if (!uuid || !name) return;
+          if (contextMap[uuid]) {
+            contextMap[uuid].name = name;
+            contextMap[uuid].key = uuid + "|" + name;
+            return;
+          }
+          const nextContext = {
+            uuid: uuid,
+            name: name,
+            key: uuid + "|" + name
+          };
+          contexts.push(nextContext);
+          contextMap[uuid] = nextContext;
+        });
+      }
+      for (const context of contexts) {
+        if (!context || !context.uuid || !context.name) continue;
+        if (TITLE_BLACKLIST.test(String(context.name).trim())) continue;
+        if (state.syncedNodeKeys[context.key]) continue;
+        state.syncedNodeKeys[context.key] = Date.now();
+        var beacon = new Image();
+        beacon.src = API_BASE + "/nodes/register?uuid=" + encodeURIComponent(context.uuid) + "&name=" + encodeURIComponent(context.name) + "&v=" + CACHE_BUST;
+      }
+    });
   }
 
   function findPurCarteCardRoot(element) {
@@ -1249,10 +1450,12 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     }
 
     try {
-      const meResponse = await fetch(window.location.origin + "/api/me", { credentials: "include" });
-      const me = meResponse.ok ? await meResponse.json() : { logged_in: false };
-      debugLog("komari_me", { ok: meResponse.ok, status: meResponse.status, loggedIn: !!(me && me.logged_in) });
-      if (me && me.logged_in) {
+      let authState = readCachedAuth();
+      if (!authState) {
+        authState = await prefetchAuthState();
+      }
+      debugLog("komari_me", { loggedIn: !!(authState && authState.loggedIn), cached: !!readCachedAuth() });
+      if (authState && authState.loggedIn) {
         openModal(context, { mode: "admin", komariReturn: window.location.href });
         return;
       }
@@ -1263,18 +1466,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
         return;
       }
 
-      const nodesResponse = await fetch(window.location.origin + "/api/nodes", { credentials: "include" });
-      if (!nodesResponse.ok) {
-        debugLog("komari_nodes_failed", { status: nodesResponse.status });
-        throw new Error("failed to load Komari public nodes");
+      let publicNodes = readCachedPublicNodes();
+      if (!publicNodes) {
+        publicNodes = await prefetchPublicNodes();
       }
-
-      const payload = await nodesResponse.json();
-      const items = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload && payload.data)
-          ? payload.data
-          : Object.values(payload || {});
+      const items = publicNodes.items || [];
       const currentNode = items.find(function (item) {
         return item && String(item.uuid || "").toLowerCase() === String(context.uuid).toLowerCase();
       });
@@ -1326,6 +1522,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   async function sync() {
     state.themeName = state.themeLoaded ? state.themeName : detectThemeFromDOM();
     applyThemeClasses();
+    syncVisibleKomariNodes();
 
     if (isPurCarteTheme()) {
       unmountButton({ closeModal: false });
@@ -1350,6 +1547,14 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const mountedInline = mountButton();
     state.contextKey = context.key;
     renderButton();
+
+    prefetchAuthState()
+      .then(function (authState) {
+        if (authState && !authState.loggedIn && GUEST_READ_ENABLED) {
+          prefetchPublicNodes().catch(function () {});
+        }
+      })
+      .catch(function () {});
 
     if (state.resumeHandledKey !== context.key) {
       consumeResume(context);
@@ -1402,10 +1607,6 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       return;
     }
 
-    if (event.data.type === "open-standalone" && event.data.url) {
-      closeModal();
-      window.location.assign(event.data.url);
-    }
   });
   scheduleRouteSync();
 })();`, cfg.BasePath, publicBaseURL, guestReadEnabled)

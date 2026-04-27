@@ -42,7 +42,13 @@ public/index.html
 # Local data and build cache
 data/ipq/
 data/komari/
+data/ipq-default/
+data/ipq-purcarte/
+data/komari-default/
+data/komari-purcarte/
 data/*.db
+__pycache__/
+*.pyc
 .cache/
 tmp/
 .tmp/
@@ -54,5 +60,5 @@ references/
 *.db-shm
 *.db-wal
 .omx/
-.codex/
 AGENTS.md
+.codex/

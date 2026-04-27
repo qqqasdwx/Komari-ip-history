@@ -32,9 +32,17 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 		&models.Session{},
 		&models.Node{},
 		&models.NodeTarget{},
+		&models.KomariBinding{},
 		&models.NodeHistory{},
 		&models.NodeTargetHistory{},
 		&models.AppSetting{},
+		&models.NotificationChannel{},
+		&models.NotificationRule{},
+		&models.NotificationRuleNodeScope{},
+		&models.NotificationRuleTargetScope{},
+		&models.NotificationDelivery{},
+		&models.APIKey{},
+		&models.APIAccessLog{},
 	); err != nil {
 		return nil, err
 	}
@@ -48,10 +56,19 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	if err := ensureNodeInstallTokens(db); err != nil {
 		return nil, err
 	}
+	if err := ensureNodeUUIDs(db); err != nil {
+		return nil, err
+	}
+	if err := ensureKomariBindings(db); err != nil {
+		return nil, err
+	}
 	if err := migrateLegacyNodeTargets(db); err != nil {
 		return nil, err
 	}
 	if err := cleanupLegacyNodeHistory(db); err != nil {
+		return nil, err
+	}
+	if err := repairNotificationRuleScopes(db); err != nil {
 		return nil, err
 	}
 	if err := rebuildNodeAggregates(db); err != nil {
@@ -83,7 +100,7 @@ func ensureDefaultAdmin(db *gorm.DB, cfg config.Config) error {
 }
 
 func ensureSchemaColumns(db *gorm.DB) error {
-	nodeColumns := []string{"ReporterScheduleCron", "ReporterRunImmediately", "InstallToken"}
+	nodeColumns := []string{"NodeUUID", "ReporterScheduleCron", "ReporterTimezone", "ReporterRunImmediately", "InstallToken"}
 	for _, column := range nodeColumns {
 		if db.Migrator().HasColumn(&models.Node{}, column) {
 			continue
@@ -93,10 +110,40 @@ func ensureSchemaColumns(db *gorm.DB) error {
 		}
 	}
 
+	if err := db.Model(&models.Node{}).
+		Where("reporter_timezone = '' OR reporter_timezone IS NULL").
+		Update("reporter_timezone", "UTC").
+		Error; err != nil {
+		return err
+	}
+
 	if !db.Migrator().HasColumn(&models.NodeTargetHistory{}, "IsFavorite") {
 		if err := db.Migrator().AddColumn(&models.NodeTargetHistory{}, "IsFavorite"); err != nil {
 			return err
 		}
+	}
+
+	targetColumns := []string{"Source", "Enabled", "LastSeenAt"}
+	for _, column := range targetColumns {
+		if db.Migrator().HasColumn(&models.NodeTarget{}, column) {
+			continue
+		}
+		if err := db.Migrator().AddColumn(&models.NodeTarget{}, column); err != nil {
+			return err
+		}
+	}
+
+	if err := db.Model(&models.NodeTarget{}).
+		Where("source = '' OR source IS NULL").
+		Update("source", "manual").
+		Error; err != nil {
+		return err
+	}
+	if err := db.Model(&models.NodeTarget{}).
+		Where("enabled IS NULL").
+		Update("enabled", true).
+		Error; err != nil {
+		return err
 	}
 
 	return nil
@@ -119,6 +166,100 @@ func ensureNodeInstallTokens(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func ensureNodeUUIDs(db *gorm.DB) error {
+	var nodes []models.Node
+	if err := db.Where("node_uuid = '' OR node_uuid IS NULL").Find(&nodes).Error; err != nil {
+		return err
+	}
+
+	for _, node := range nodes {
+		token, err := auth.NewInstallToken()
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&models.Node{}).Where("id = ?", node.ID).Update("node_uuid", token).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureKomariBindings(db *gorm.DB) error {
+	var nodes []models.Node
+	if err := db.Find(&nodes).Error; err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if strings.TrimSpace(node.KomariNodeUUID) == "" {
+			continue
+		}
+		var count int64
+		if err := db.Model(&models.KomariBinding{}).Where("node_id = ? OR komari_node_uuid = ?", node.ID, node.KomariNodeUUID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		binding := models.KomariBinding{
+			NodeID:         node.ID,
+			KomariNodeUUID: node.KomariNodeUUID,
+			KomariNodeName: node.Name,
+			BindingSource:  "from_komari",
+		}
+		if err := db.Create(&binding).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func repairNotificationRuleScopes(db *gorm.DB) error {
+	if db == nil {
+		return errors.New("nil database")
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+DELETE FROM notification_rule_target_scopes
+WHERE target_id NOT IN (SELECT id FROM node_targets)
+`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+DELETE FROM notification_rule_node_scopes
+WHERE node_id NOT IN (SELECT id FROM nodes)
+`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+DELETE FROM notification_rule_node_scopes
+WHERE rule_id NOT IN (SELECT id FROM notification_rules)
+`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+DELETE FROM notification_rule_target_scopes
+WHERE rule_node_id NOT IN (SELECT id FROM notification_rule_node_scopes)
+`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+DELETE FROM notification_rule_node_scopes
+WHERE all_targets = false
+  AND id NOT IN (SELECT DISTINCT rule_node_id FROM notification_rule_target_scopes)
+`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+DELETE FROM notification_rules
+WHERE all_nodes = false
+  AND id NOT IN (SELECT DISTINCT rule_id FROM notification_rule_node_scopes)
+`).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func CleanupExpiredSessions(db *gorm.DB) error {

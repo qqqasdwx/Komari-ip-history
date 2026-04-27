@@ -7,7 +7,6 @@ services:
       - ./deploy/dev/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
       - komari
-      - workspace
 
   komari:
     image: ghcr.io/komari-monitor/komari:latest

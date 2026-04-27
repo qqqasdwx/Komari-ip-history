@@ -146,3 +146,142 @@ func TestAutoMigrateCreatesHistoryCompositeIndexes(t *testing.T) {
 		t.Fatalf("expected composite index idx_node_target_history_favorite_recorded")
 	}
 }
+
+func TestEnsureNodeUUIDsBackfillsLegacyNodes(t *testing.T) {
+	db := openTestDB(t, "file:node_uuid_backfill?mode=memory&cache=shared")
+
+	node := models.Node{
+		KomariNodeUUID: "legacy-node-uuid-backfill",
+		Name:           "legacy-node-uuid-backfill",
+		ReporterToken:  "token",
+		NodeUUID:       "",
+	}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := db.Model(&models.Node{}).Where("id = ?", node.ID).Update("node_uuid", "").Error; err != nil {
+		t.Fatalf("clear node_uuid: %v", err)
+	}
+
+	if err := ensureNodeUUIDs(db); err != nil {
+		t.Fatalf("ensure node uuids: %v", err)
+	}
+
+	var reloaded models.Node
+	if err := db.First(&reloaded, "id = ?", node.ID).Error; err != nil {
+		t.Fatalf("reload node: %v", err)
+	}
+	if reloaded.NodeUUID == "" {
+		t.Fatal("expected node_uuid to be backfilled")
+	}
+}
+
+func TestRepairNotificationRuleScopesRemovesOrphansAndInvalidRules(t *testing.T) {
+	db := openTestDB(t, "file:repair_notification_rule_scopes?mode=memory&cache=shared")
+	if err := db.AutoMigrate(
+		&models.NotificationRule{},
+		&models.NotificationRuleNodeScope{},
+		&models.NotificationRuleTargetScope{},
+	); err != nil {
+		t.Fatalf("migrate notification tables: %v", err)
+	}
+
+	node := models.Node{KomariNodeUUID: "notify-repair-node", Name: "notify-repair-node", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", Source: "manual", Enabled: true}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	rule := models.NotificationRule{FieldID: "score.ipqs", AllNodes: false, Enabled: true}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	scope := models.NotificationRuleNodeScope{RuleID: rule.ID, NodeID: node.ID, AllTargets: false}
+	if err := db.Create(&scope).Error; err != nil {
+		t.Fatalf("create node scope: %v", err)
+	}
+	if err := db.Create(&models.NotificationRuleTargetScope{RuleNodeID: scope.ID, TargetID: target.ID}).Error; err != nil {
+		t.Fatalf("create target scope: %v", err)
+	}
+	if err := db.Delete(&models.NodeTarget{}, "id = ?", target.ID).Error; err != nil {
+		t.Fatalf("delete target without cleanup: %v", err)
+	}
+
+	if err := repairNotificationRuleScopes(db); err != nil {
+		t.Fatalf("repair notification rule scopes: %v", err)
+	}
+
+	var targetScopeCount int64
+	if err := db.Model(&models.NotificationRuleTargetScope{}).Count(&targetScopeCount).Error; err != nil {
+		t.Fatalf("count target scopes: %v", err)
+	}
+	if targetScopeCount != 0 {
+		t.Fatalf("expected orphan target scope removed, got %d", targetScopeCount)
+	}
+	var nodeScopeCount int64
+	if err := db.Model(&models.NotificationRuleNodeScope{}).Count(&nodeScopeCount).Error; err != nil {
+		t.Fatalf("count node scopes: %v", err)
+	}
+	if nodeScopeCount != 0 {
+		t.Fatalf("expected empty node scope removed, got %d", nodeScopeCount)
+	}
+	var ruleCount int64
+	if err := db.Model(&models.NotificationRule{}).Where("id = ?", rule.ID).Count(&ruleCount).Error; err != nil {
+		t.Fatalf("count rules: %v", err)
+	}
+	if ruleCount != 0 {
+		t.Fatalf("expected invalid non-AllNodes rule removed, got %d", ruleCount)
+	}
+}
+
+func TestRepairNotificationRuleScopesRemovesTargetScopesAfterParentScopePrune(t *testing.T) {
+	db := openTestDB(t, "file:repair_notification_rule_scopes_parent_prune?mode=memory&cache=shared")
+	if err := db.AutoMigrate(
+		&models.NotificationRule{},
+		&models.NotificationRuleNodeScope{},
+		&models.NotificationRuleTargetScope{},
+	); err != nil {
+		t.Fatalf("migrate notification tables: %v", err)
+	}
+
+	node := models.Node{KomariNodeUUID: "notify-repair-valid-node", Name: "notify-repair-valid-node", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", Source: "manual", Enabled: true}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	rule := models.NotificationRule{FieldID: "score.ipqs", AllNodes: false, Enabled: true}
+	if err := db.Create(&rule).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	scope := models.NotificationRuleNodeScope{RuleID: rule.ID, NodeID: node.ID + 9999, AllTargets: false}
+	if err := db.Create(&scope).Error; err != nil {
+		t.Fatalf("create orphan node scope: %v", err)
+	}
+	if err := db.Create(&models.NotificationRuleTargetScope{RuleNodeID: scope.ID, TargetID: target.ID}).Error; err != nil {
+		t.Fatalf("create valid-target child scope: %v", err)
+	}
+
+	if err := repairNotificationRuleScopes(db); err != nil {
+		t.Fatalf("repair notification rule scopes: %v", err)
+	}
+
+	var targetScopeCount int64
+	if err := db.Model(&models.NotificationRuleTargetScope{}).Count(&targetScopeCount).Error; err != nil {
+		t.Fatalf("count target scopes: %v", err)
+	}
+	if targetScopeCount != 0 {
+		t.Fatalf("expected target scope to be removed after parent node scope prune, got %d", targetScopeCount)
+	}
+	var nodeScopeCount int64
+	if err := db.Model(&models.NotificationRuleNodeScope{}).Count(&nodeScopeCount).Error; err != nil {
+		t.Fatalf("count node scopes: %v", err)
+	}
+	if nodeScopeCount != 0 {
+		t.Fatalf("expected orphan node scope removed, got %d", nodeScopeCount)
+	}
+}

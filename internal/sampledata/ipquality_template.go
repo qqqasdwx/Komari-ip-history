@@ -3,7 +3,9 @@ package sampledata
 import (
 	_ "embed"
 	"encoding/json"
+	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -31,4 +33,23 @@ func IPQualityTemplateResult() (map[string]any, error) {
 		return nil, err
 	}
 	return cloned, nil
+}
+
+func LocalProbeResult(targetIP string) (map[string]any, error) {
+	result, err := IPQualityTemplateResult()
+	if err != nil {
+		return nil, err
+	}
+
+	head, _ := result["Head"].(map[string]any)
+	if head == nil {
+		head = map[string]any{}
+		result["Head"] = head
+	}
+	head["IP"] = strings.TrimSpace(targetIP)
+	head["Time"] = time.Now().UTC().Format("2006-01-02 15:04:05 MST")
+	head["Command"] = "local-development-probe"
+	head["Version"] = "dev-local-probe"
+
+	return result, nil
 }

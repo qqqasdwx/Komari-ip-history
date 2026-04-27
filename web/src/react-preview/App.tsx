@@ -13,6 +13,7 @@ import {
   type FormEvent,
   type ReactNode,
   useEffect,
+  useMemo,
   useRef,
   useState
 } from "react";
@@ -29,13 +30,24 @@ import {
 } from "react-router-dom";
 import { apiRequest, RequestError, UnauthorizedError } from "./lib/api";
 import { renderDisplayValueBadge } from "./lib/display-fields";
-import { formatDateTime } from "./lib/format";
+import { formatDateTime, formatDateTimeInTimeZone } from "./lib/format";
 import { buildHistoryCompareRows, mapDisplayPathToReportPaths } from "./lib/history";
+import { NotificationChannelSettingsPage, NotificationDeliveriesPage, NotificationHomePage } from "./lib/notification-pages";
 import { CurrentReportView } from "./lib/report";
+import { IANA_TIME_ZONES } from "./lib/timezones";
 import type {
+  APIAccessLog,
+  APIKeyCreateResult,
+  APIKeyDetail,
   HistoryRetentionSettings,
   IntegrationSettings,
+  KomariBindingCandidate,
   MeResponse,
+  NotificationChannelDetail,
+  NotificationDelivery,
+  NotificationSettings,
+  NotificationProviderDefinition,
+  NotificationRule,
   NodeDetail,
   NodeReportConfigPreview,
   NodeHistoryChangeEventPage,
@@ -55,7 +67,7 @@ type NavItem = {
 };
 
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
-const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
+const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/main/deploy/install.sh";
 
 type ToastTone = "success" | "error";
 
@@ -92,6 +104,8 @@ const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <R
 
 const settingsNavItems: NavItem[] = [
   { to: "/settings/integration", label: "接入配置", icon: <GearIcon /> },
+  { to: "/settings/notification", label: "通知", icon: <GearIcon /> },
+  { to: "/settings/api-keys", label: "API", icon: <GearIcon /> },
   { to: "/settings/history-retention", label: "历史保留", icon: <GearIcon /> },
   { to: "/settings/user", label: "用户", icon: <GearIcon /> }
 ];
@@ -271,6 +285,18 @@ function routeLabel(pathname: string) {
   if (pathname === "/settings/history-retention") {
     return "历史保留";
   }
+  if (pathname === "/settings/notification") {
+    return "通知";
+  }
+  if (pathname === "/settings/notification/channel") {
+    return "通道设置";
+  }
+  if (pathname === "/settings/notification/deliveries") {
+    return "最近投递记录";
+  }
+  if (pathname === "/settings/api-keys") {
+    return "API";
+  }
   if (pathname === "/settings/user" || pathname === "/settings/admin") {
     return "用户";
   }
@@ -328,7 +354,8 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
       }
 
       const currentDetail = detailRef.current;
-      const refreshInPlace = currentDetail !== null && currentDetail.komari_node_uuid === uuid;
+      const refreshInPlace =
+        currentDetail !== null && (currentDetail.node_uuid === uuid || currentDetail.komari_node_uuid === uuid);
       if (refreshInPlace) {
         setRefreshing(true);
       } else {
@@ -362,7 +389,7 @@ function useNodePageData(uuid: string, targetID: number | null, onUnauthorized: 
           setErrorStatus(loadError.status);
         }
         const activeDetail = detailRef.current;
-        if (!activeDetail || activeDetail.komari_node_uuid !== uuid) {
+        if (!activeDetail || (activeDetail.node_uuid !== uuid && activeDetail.komari_node_uuid !== uuid)) {
           setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
         }
       } finally {
@@ -755,11 +782,24 @@ function toStandaloneAppURL(path: string) {
   return `${standaloneAppBase}/#${normalizedPath}`;
 }
 
-function postEmbedAction(type: string, payload: Record<string, string>) {
-  if (window.parent === window) {
-    return;
+function getBrowserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone?.trim() || "UTC";
+  } catch {
+    return "UTC";
   }
-  window.parent.postMessage({ source: "ipq-embed", type, ...payload }, "*");
+}
+
+function resolveNodeRouteUUID(node: { node_uuid?: string | null; komari_node_uuid: string }) {
+  return node.node_uuid?.trim() || node.komari_node_uuid;
+}
+
+function resolveDefaultExecutionTimezone(configuredTimezone: string | undefined, browserTimeZone: string) {
+  const normalized = (configuredTimezone || "").trim();
+  if (!normalized || normalized === "UTC") {
+    return browserTimeZone;
+  }
+  return normalized;
 }
 
 function getEmbedTheme(searchParams: URLSearchParams) {
@@ -1001,6 +1041,7 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
   const isEmbed = searchParams.get("embed") === "1";
   const returnTo = searchParams.get("return_to")?.trim() || "";
   const resumePopup = searchParams.get("resume") === "popup";
+  const reportConfigPath = buildReportConfigListPath(uuid);
 
   useEffect(() => {
     let cancelled = false;
@@ -1022,12 +1063,26 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
           return;
         }
 
-        if (returnTo) {
-          window.location.replace(buildKomariResumeURL(returnTo, uuid, name));
+        let hasTargets = false;
+        try {
+          const detail = await apiRequest<NodeDetail>(`/nodes/${uuid}`);
+          hasTargets = (detail.targets ?? []).length > 0;
+        } catch (detailError) {
+          if (detailError instanceof UnauthorizedError) {
+            throw detailError;
+          }
+        }
+
+        if (cancelled) {
           return;
         }
 
-        navigate(`/nodes/${uuid}${isEmbed ? "?embed=1" : ""}`, { replace: true });
+        if (returnTo) {
+          navigate(hasTargets ? `/nodes/${uuid}` : reportConfigPath, { replace: true });
+          return;
+        }
+
+        navigate(hasTargets ? `/nodes/${uuid}` : `/nodes/${uuid}${isEmbed ? "?embed=1" : ""}`, { replace: true });
       } catch (connectError) {
         if (cancelled) {
           return;
@@ -1047,14 +1102,14 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, returnTo, resumePopup, uuid]);
+  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, reportConfigPath, returnTo, resumePopup, uuid]);
 
   if (loading) {
     return (
       <section className="space-y-6">
         <PageHeader
           title="接入节点"
-          subtitle={returnTo && resumePopup ? "正在完成登录并返回 Komari 弹窗。" : "正在为当前节点创建或恢复 IP 质量视图。"}
+          subtitle={returnTo && resumePopup ? "正在为当前节点创建自动绑定节点，并打开独立配置页面。" : "正在为当前节点创建自动绑定节点。"}
           backTo={isEmbed ? undefined : "/nodes"}
         />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -1078,16 +1133,22 @@ function ConnectPage(props: { onUnauthorized: () => void }) {
   );
 }
 
-function EmbedBridgePage(props: { title: string; description: string; actionURL: string }) {
-  useEffect(() => {
-    postEmbedAction("open-standalone", { url: toStandaloneAppURL(props.actionURL) });
-  }, [props.actionURL]);
-
+function EmbedStandaloneNoticePage(props: { title: string; description: string; actionURL: string; actionLabel?: string }) {
+  const standaloneURL = toStandaloneAppURL(props.actionURL);
   return (
     <section className="space-y-6">
       <PageHeader title={props.title} subtitle={props.description} />
       <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm leading-6 text-slate-500">正在打开独立页面继续处理。</p>
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-500">
+            当前内容会保留在 Komari 页内弹窗中；如果需要继续配置，请手动打开独立页面。
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <a className="button" href={standaloneURL} target="_blank" rel="noreferrer">
+              {props.actionLabel ?? "在独立页面继续"}
+            </a>
+          </div>
+        </div>
       </section>
     </section>
   );
@@ -1147,6 +1208,53 @@ function SearchBox(props: {
   );
 }
 
+function CreateNodeDialog(props: {
+  open: boolean;
+  name: string;
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onNameChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  if (!props.open) {
+    return null;
+  }
+
+  return (
+    <div className="field-modal-backdrop" onClick={props.onClose}>
+      <section className="field-modal report-config-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="field-modal-head">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">新建独立节点</h2>
+            <p className="text-sm text-slate-500">创建一个不依赖 Komari 的独立节点，创建后会直接打开它的上报设置。</p>
+          </div>
+          <button className="button ghost" onClick={props.onClose} type="button">
+            关闭
+          </button>
+        </div>
+        <div className="field-modal-body space-y-4">
+          <label className="grid gap-2 text-sm text-slate-700">
+            <span>节点名称</span>
+            <input
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              value={props.name}
+              onChange={(event) => props.onNameChange(event.target.value)}
+              placeholder="例如 香港边缘节点"
+            />
+          </label>
+          {props.error ? <p className="text-sm text-rose-600">{props.error}</p> : null}
+          <div>
+            <button className="button" disabled={props.saving || !props.name.trim()} onClick={props.onSubmit} type="button">
+              {props.saving ? "创建中..." : "创建并配置"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function StatusPill(props: { hasData: boolean }) {
   return (
     <span
@@ -1172,6 +1280,10 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [reportConfigNodeUUID, setReportConfigNodeUUID] = useState("");
+  const [creatingNode, setCreatingNode] = useState(false);
+  const [createNodeOpen, setCreateNodeOpen] = useState(false);
+  const [createNodeName, setCreateNodeName] = useState("");
+  const [createNodeError, setCreateNodeError] = useState("");
 
   useEffect(() => {
     const requestedUUID = searchParams.get("report_config")?.trim() || "";
@@ -1191,6 +1303,30 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
     const query = nextParams.toString();
     navigate(`/nodes${query ? `?${query}` : ""}`, { replace: true });
     setReportConfigNodeUUID("");
+  }
+
+  async function handleCreateStandaloneNode() {
+    setCreatingNode(true);
+    setCreateNodeError("");
+    try {
+      const created = await apiRequest<NodeListItem>("/nodes", {
+        method: "POST",
+        body: JSON.stringify({ name: createNodeName.trim() })
+      });
+      setNodes((current) => [created, ...current]);
+      setCreateNodeOpen(false);
+      setCreateNodeName("");
+      openReportConfig(resolveNodeRouteUUID(created));
+      pushToast("独立节点已创建。");
+    } catch (createError) {
+      if (createError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setCreateNodeError(createError instanceof Error ? createError.message : "创建独立节点失败");
+    } finally {
+      setCreatingNode(false);
+    }
   }
 
   useEffect(() => {
@@ -1234,6 +1370,18 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
 
   return (
     <section className="space-y-6">
+      <CreateNodeDialog
+        open={createNodeOpen}
+        name={createNodeName}
+        saving={creatingNode}
+        error={createNodeError}
+        onClose={() => {
+          setCreateNodeOpen(false);
+          setCreateNodeError("");
+        }}
+        onNameChange={setCreateNodeName}
+        onSubmit={() => void handleCreateStandaloneNode()}
+      />
       {reportConfigNodeUUID ? (
         <NodeReportConfigDialog
           me={props.me}
@@ -1246,9 +1394,14 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         title="节点列表"
         subtitle={`${nodes.length} 个已接入节点`}
         actions={
-          showSearch ? (
-            <SearchBox value={searchInput} onChange={setSearchInput} onSubmit={() => setSearchQuery(searchInput.trim())} />
-          ) : undefined
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+            {showSearch ? (
+              <SearchBox value={searchInput} onChange={setSearchInput} onSubmit={() => setSearchQuery(searchInput.trim())} />
+            ) : null}
+            <button className="button" disabled={creatingNode} onClick={() => setCreateNodeOpen(true)} type="button">
+              新建节点
+            </button>
+          </div>
         }
       />
 
@@ -1310,17 +1463,17 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
             <div className="react-node-list-body">
               {nodes.map((item) => (
                 <div
-                  key={item.komari_node_uuid}
+                  key={item.node_uuid || item.komari_node_uuid}
                   className="react-node-list-row cursor-pointer border-t border-slate-200 px-4 py-4 text-sm text-slate-700 transition hover:bg-slate-50 first:border-t-0"
                   data-node-row="true"
-                  data-node-uuid={item.komari_node_uuid}
+                  data-node-uuid={resolveNodeRouteUUID(item)}
                   role="link"
                   tabIndex={0}
-                  onClick={() => navigate(`/nodes/${item.komari_node_uuid}`)}
+                  onClick={() => navigate(`/nodes/${resolveNodeRouteUUID(item)}`)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(`/nodes/${item.komari_node_uuid}`);
+                      navigate(`/nodes/${resolveNodeRouteUUID(item)}`);
                     }
                   }}
                 >
@@ -1328,6 +1481,12 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
                     <strong className="block truncate text-sm font-semibold text-slate-900" data-node-name="true">
                       {item.name}
                     </strong>
+                    <span className="mt-1 block truncate text-xs text-slate-400">
+                      {item.has_komari_binding ? `Komari 已绑定 · ${item.komari_node_uuid}` : `独立节点 · ${item.komari_node_uuid}`}
+                    </span>
+                    {item.komari_node_name && item.has_komari_binding ? (
+                      <span className="mt-1 block truncate text-xs text-slate-400">Komari 名称 · {item.komari_node_name}</span>
+                    ) : null}
                   </div>
                   <div className="flex min-w-0 justify-center">
                     <StatusPill hasData={item.has_data} />
@@ -1340,7 +1499,7 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
                       data-node-report-settings="true"
                       onClick={(event) => {
                         event.stopPropagation();
-                        openReportConfig(item.komari_node_uuid);
+                        openReportConfig(resolveNodeRouteUUID(item));
                       }}
                       type="button"
                     >
@@ -1385,9 +1544,13 @@ function buildInstallCommand(
   publicBaseURL: string,
   installToken: string
 ) {
-  const args = ["-e", publicBaseURL, "-t", installToken];
-  const argString = args.map(shellQuote).join(" ");
-  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${argString}; }`;
+  const args = [
+    "--server",
+    publicBaseURL.replace(/\/+$/, ""),
+    "--install-token",
+    installToken
+  ];
+  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${args.map(shellQuote).join(" ")}; }`;
 }
 
 function ReportConfigSection(props: {
@@ -1401,15 +1564,33 @@ function ReportConfigSection(props: {
   targetSaving: boolean;
   onTargetInputChange: (value: string) => void;
   onAddTarget: (event: FormEvent<HTMLFormElement>) => void;
+  nodeName: string;
+  nodeNameSaving: boolean;
+  nodeNameError: string;
+  onNodeNameChange: (value: string) => void;
+  onSaveNodeName: () => void;
   onDeleteCurrentTarget: (targetID: number) => void;
   onSelectTarget: (targetID: number) => void;
   onReorderTargets: (sourceID: number, destinationID: number) => void;
+  onToggleTargetEnabled: (targetID: number, enabled: boolean) => void;
+  bindKomariUUID: string;
+  bindKomariName: string;
+  bindCandidates: KomariBindingCandidate[];
+  bindSaving: boolean;
+  bindingEnabled: boolean;
+  onBindingEnabledChange: (enabled: boolean) => void;
+  onBindKomariUUIDChange: (value: string) => void;
 }) {
   const publicBaseURL = resolvePublicBaseURL(props.me);
+  const browserTimeZone = getBrowserTimeZone();
+  const routeNodeUUID = props.detail.node_uuid || props.detail.komari_node_uuid;
+  const detailTimezone = resolveDefaultExecutionTimezone(props.detail.report_config.timezone, browserTimeZone);
   const [scheduleCron, setScheduleCron] = useState(props.detail.report_config.schedule_cron);
+  const [timezone, setTimezone] = useState(detailTimezone);
   const [runImmediately, setRunImmediately] = useState(props.detail.report_config.run_immediately);
   const [preview, setPreview] = useState<NodeReportConfigPreview>({
     schedule_cron: props.detail.report_config.schedule_cron,
+    timezone: detailTimezone,
     run_immediately: props.detail.report_config.run_immediately,
     next_runs: props.detail.report_config.next_runs
   });
@@ -1418,28 +1599,107 @@ function ReportConfigSection(props: {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [persistedConfig, setPersistedConfig] = useState({
     scheduleCron: props.detail.report_config.schedule_cron,
+    timezone: detailTimezone,
     runImmediately: props.detail.report_config.run_immediately
   });
   const installCommand = buildInstallCommand(
     publicBaseURL,
     props.detail.report_config.install_token
   );
+  const timezoneOptions = useMemo(() => {
+    if (!browserTimeZone || IANA_TIME_ZONES.includes(browserTimeZone)) {
+      return IANA_TIME_ZONES;
+    }
+    return [browserTimeZone, ...IANA_TIME_ZONES];
+  }, [browserTimeZone]);
+  const currentBindingOption =
+    props.bindKomariUUID.trim() && !props.bindCandidates.some((candidate) => candidate.komari_node_uuid === props.bindKomariUUID)
+      ? {
+          node_id: props.detail.id,
+          node_name: props.detail.name,
+          komari_node_uuid: props.bindKomariUUID,
+          komari_node_name: props.bindKomariName || props.detail.komari_node_name || "当前绑定节点",
+          has_existing_binding: true
+        }
+      : null;
+  const bindOptions = currentBindingOption ? [currentBindingOption, ...props.bindCandidates] : props.bindCandidates;
+  const selectedBinding = bindOptions.find((candidate) => candidate.komari_node_uuid === props.bindKomariUUID);
+  const bindingDisplayName = selectedBinding?.komari_node_name || props.bindKomariName || props.detail.komari_node_name || "未绑定";
+  const [bindSearch, setBindSearch] = useState("");
+  const [bindMenuOpen, setBindMenuOpen] = useState(false);
+  const [bindTooltipUUID, setBindTooltipUUID] = useState<string | null>(null);
+  const bindPickerRef = useRef<HTMLDivElement | null>(null);
+  const filteredBindOptions = useMemo(() => {
+    const keyword = bindSearch.trim().toLowerCase();
+    if (!keyword) {
+      return bindOptions;
+    }
+    return bindOptions.filter((candidate) => candidate.komari_node_name.trim().toLowerCase().includes(keyword));
+  }, [bindOptions, bindSearch]);
+  const [timezoneSearch, setTimezoneSearch] = useState("");
+  const [timezoneMenuOpen, setTimezoneMenuOpen] = useState(false);
+  const timezonePickerRef = useRef<HTMLDivElement | null>(null);
+  const filteredTimezoneOptions = useMemo(() => {
+    const keyword = timezoneSearch.trim().toLowerCase();
+    if (!keyword) {
+      return timezoneOptions;
+    }
+    return timezoneOptions.filter((item) => item.toLowerCase().includes(keyword));
+  }, [timezoneOptions, timezoneSearch]);
+
+  useEffect(() => {
+    if (!bindMenuOpen) {
+      return undefined;
+    }
+    function handlePointerDown(event: MouseEvent) {
+      if (bindPickerRef.current && !bindPickerRef.current.contains(event.target as Node)) {
+        setBindMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [bindMenuOpen]);
+
+  useEffect(() => {
+    if (!timezoneMenuOpen) {
+      return undefined;
+    }
+    function handlePointerDown(event: MouseEvent) {
+      if (timezonePickerRef.current && !timezonePickerRef.current.contains(event.target as Node)) {
+        setTimezoneMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [timezoneMenuOpen]);
 
   useEffect(() => {
     if (!props.open) {
       return;
     }
     setScheduleCron(props.detail.report_config.schedule_cron);
+    setTimezone(detailTimezone);
     setRunImmediately(props.detail.report_config.run_immediately);
     setPreview({
       schedule_cron: props.detail.report_config.schedule_cron,
+      timezone: detailTimezone,
       run_immediately: props.detail.report_config.run_immediately,
       next_runs: props.detail.report_config.next_runs
     });
     setPersistedConfig({
       scheduleCron: props.detail.report_config.schedule_cron,
+      timezone: detailTimezone,
       runImmediately: props.detail.report_config.run_immediately
     });
+    setBindSearch("");
+    setBindMenuOpen(false);
+    setBindTooltipUUID(null);
+    setTimezoneSearch("");
+    setTimezoneMenuOpen(false);
     setPreviewError("");
     setSaveError("");
     setSaveState("idle");
@@ -1447,7 +1707,10 @@ function ReportConfigSection(props: {
     props.open,
     props.detail.report_config.next_runs,
     props.detail.report_config.run_immediately,
-    props.detail.report_config.schedule_cron
+    props.detail.report_config.schedule_cron,
+    props.detail.report_config.timezone,
+    detailTimezone,
+    browserTimeZone
   ]);
 
   useEffect(() => {
@@ -1457,10 +1720,12 @@ function ReportConfigSection(props: {
     const controller = new AbortController();
     const timeoutID = window.setTimeout(async () => {
       try {
+        const nextTimezone = timezone.trim() || browserTimeZone;
         const search = new URLSearchParams();
         search.set("cron", scheduleCron);
+        search.set("timezone", nextTimezone);
         search.set("run_immediately", runImmediately ? "1" : "0");
-        const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${props.detail.komari_node_uuid}/report-config/preview?${search.toString()}`, {
+        const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${routeNodeUUID}/report-config/preview?${search.toString()}`, {
           signal: controller.signal
         });
         setPreview(data);
@@ -1480,15 +1745,17 @@ function ReportConfigSection(props: {
       controller.abort();
       window.clearTimeout(timeoutID);
     };
-  }, [props.detail.komari_node_uuid, props.open, runImmediately, scheduleCron]);
+  }, [browserTimeZone, props.open, routeNodeUUID, runImmediately, scheduleCron, timezone]);
 
   useEffect(() => {
     if (!props.open || previewError) {
       return undefined;
     }
     const normalizedCron = preview.schedule_cron.trim();
+    const normalizedTimezone = preview.timezone.trim() || browserTimeZone;
     if (
       normalizedCron === persistedConfig.scheduleCron &&
+      normalizedTimezone === persistedConfig.timezone &&
       runImmediately === persistedConfig.runImmediately
     ) {
       return undefined;
@@ -1499,10 +1766,11 @@ function ReportConfigSection(props: {
       setSaveState("saving");
       setSaveError("");
       try {
-        const config = await apiRequest<NodeDetail["report_config"]>(`/nodes/${props.detail.komari_node_uuid}/report-config`, {
+        const config = await apiRequest<NodeDetail["report_config"]>(`/nodes/${routeNodeUUID}/report-config`, {
           method: "PUT",
           body: JSON.stringify({
             schedule_cron: normalizedCron,
+            timezone: normalizedTimezone,
             run_immediately: runImmediately
           })
         });
@@ -1511,12 +1779,15 @@ function ReportConfigSection(props: {
         }
         setPersistedConfig({
           scheduleCron: config.schedule_cron,
+          timezone: config.timezone,
           runImmediately: config.run_immediately
         });
         setScheduleCron(config.schedule_cron);
+        setTimezone(config.timezone);
         setRunImmediately(config.run_immediately);
         setPreview({
           schedule_cron: config.schedule_cron,
+          timezone: config.timezone,
           run_immediately: config.run_immediately,
           next_runs: config.next_runs
         });
@@ -1540,14 +1811,18 @@ function ReportConfigSection(props: {
       window.clearTimeout(timeoutID);
     };
   }, [
+    browserTimeZone,
     persistedConfig.runImmediately,
     persistedConfig.scheduleCron,
+    persistedConfig.timezone,
     preview.schedule_cron,
+    preview.timezone,
     previewError,
-    props.detail.komari_node_uuid,
     props.onSaved,
     props.open,
-    runImmediately
+    routeNodeUUID,
+    runImmediately,
+    timezone
   ]);
 
   async function handleCopy(value: string, successText: string) {
@@ -1580,11 +1855,165 @@ function ReportConfigSection(props: {
           </button>
         </div>
         <div className="field-modal-body">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+          <div className="space-y-3 border-b border-slate-200 pb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-medium text-slate-900">节点名称</div>
+              <span className="text-xs text-slate-500">{props.nodeNameSaving ? "保存中…" : "失焦或回车后自动保存"}</span>
+            </div>
+            <div className="grid gap-3">
+              <input
+                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                value={props.nodeName}
+                onChange={(event) => props.onNodeNameChange(event.target.value)}
+                onBlur={props.onSaveNodeName}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") {
+                    return;
+                  }
+                  event.preventDefault();
+                  props.onSaveNodeName();
+                }}
+                placeholder="节点名称"
+              />
+            </div>
+            {props.nodeNameError ? <p className="text-sm text-rose-600">{props.nodeNameError}</p> : null}
+          </div>
+          <div className="pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="font-medium text-slate-900">Komari 节点绑定</div>
+            <span
+              className={[
+                "inline-flex rounded-full px-3 py-1 text-xs font-medium",
+                props.detail.has_komari_binding ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
+              ].join(" ")}
+            >
+              {props.detail.has_komari_binding ? "已绑定" : "未绑定"}
+            </span>
+          </div>
+          <div className="mt-1 text-sm text-slate-500">
+            {props.detail.has_komari_binding ? `当前绑定：${bindingDisplayName}` : "当前节点还没有绑定 Komari 节点。"}
+          </div>
+          <label className="mt-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+            <input
+              checked={props.bindingEnabled}
+              disabled={props.bindSaving}
+              onChange={(event) => props.onBindingEnabledChange(event.target.checked)}
+              type="checkbox"
+            />
+            <span>启用 Komari 节点绑定</span>
+          </label>
+          <div className="mt-3 grid gap-3">
+            <div className="relative" ref={bindPickerRef}>
+              <button
+                className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm outline-none transition hover:border-indigo-300 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                disabled={props.bindSaving || !props.bindingEnabled}
+                onClick={() => setBindMenuOpen((value) => !value)}
+                type="button"
+              >
+                <span className="truncate">
+                  {!props.bindingEnabled ? "请先打开 Komari 绑定开关" : props.bindKomariUUID ? bindingDisplayName : "请选择 Komari 节点"}
+                </span>
+                <span className="ml-3 shrink-0 text-slate-400">{bindMenuOpen ? "收起" : "展开"}</span>
+              </button>
+              {bindMenuOpen && props.bindingEnabled ? (
+                <div className="absolute left-0 top-full z-30 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                  <div className="space-y-3">
+                    <input
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      onChange={(event) => setBindSearch(event.target.value)}
+                      placeholder="搜索 Komari 节点"
+                      value={bindSearch}
+                    />
+                    <div className="max-h-64 space-y-2 overflow-y-auto">
+                      {filteredBindOptions.map((candidate) => {
+                        const isCurrent = candidate.komari_node_uuid === props.bindKomariUUID;
+                        const isBoundElsewhere = candidate.has_existing_binding && candidate.node_id !== props.detail.id;
+                        const statusLabel = isCurrent
+                          ? "当前绑定"
+                          : isBoundElsewhere
+                            ? "已绑定"
+                            : "未绑定";
+                        const statusClass =
+                          statusLabel === "当前绑定"
+                            ? "bg-indigo-100 text-indigo-700"
+                            : isBoundElsewhere
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-emerald-100 text-emerald-700";
+                        return (
+                          <div key={candidate.komari_node_uuid} className="relative">
+                            <button
+                              aria-disabled={isBoundElsewhere}
+                              className={[
+                                "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm transition",
+                                isCurrent
+                                  ? "border-indigo-300 bg-indigo-50"
+                                  : isBoundElsewhere
+                                    ? "border-slate-200 bg-slate-50 text-slate-400"
+                                    : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50"
+                              ].join(" ")}
+                              onBlur={() => {
+                                if (bindTooltipUUID === candidate.komari_node_uuid) {
+                                  setBindTooltipUUID(null);
+                                }
+                              }}
+                              onClick={() => {
+                                if (isBoundElsewhere) {
+                                  return;
+                                }
+                                setBindMenuOpen(false);
+                                setBindSearch("");
+                                setBindTooltipUUID(null);
+                                void props.onBindKomariUUIDChange(candidate.komari_node_uuid);
+                              }}
+                              onFocus={() => {
+                                if (isBoundElsewhere) {
+                                  setBindTooltipUUID(candidate.komari_node_uuid);
+                                }
+                              }}
+                              onMouseEnter={() => {
+                                if (isBoundElsewhere) {
+                                  setBindTooltipUUID(candidate.komari_node_uuid);
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if (bindTooltipUUID === candidate.komari_node_uuid) {
+                                  setBindTooltipUUID(null);
+                                }
+                              }}
+                              type="button"
+                            >
+                              <span className="truncate">{candidate.komari_node_name}</span>
+                              <span className={`inline-flex shrink-0 rounded-full px-2 py-1 text-xs font-medium ${statusClass}`}>
+                                {statusLabel}
+                              </span>
+                            </button>
+                            {isBoundElsewhere && bindTooltipUUID === candidate.komari_node_uuid ? (
+                              <div className="pointer-events-none absolute left-0 top-full z-40 mt-2 max-w-full rounded-xl border border-slate-200 bg-slate-900 px-3 py-2 text-xs text-white shadow-xl">
+                                已绑定到：{candidate.node_name}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                      {filteredBindOptions.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+                          没有匹配的 Komari 节点
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+          </div>
+        </div>
         <div className="space-y-1">
           {props.detail.report_config.target_ips.length > 0 ? (
-            <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
+            <p className="text-sm text-slate-500">当前命令会优先探查服务端已记录且启用的目标 IP，并结合节点自动发现结果逐个上报。</p>
           ) : (
-            <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
+            <p className="text-sm text-slate-500">当前还没有手动配置目标 IP。接入命令仍可使用，节点会先自动发现候选 IP，再向服务端获取本次探查计划。</p>
           )}
         </div>
         <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
@@ -1607,6 +2036,28 @@ function ReportConfigSection(props: {
               当前节点还没有目标 IP，请先添加。
             </div>
           )}
+          {props.detail.current_target ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[20px] border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700">
+              <div className="space-y-1">
+                <div className="font-medium text-slate-900">{props.detail.current_target.ip}</div>
+                <div className="text-xs text-slate-500">
+                  来源 {props.detail.current_target.source === "discovered" ? "自动发现" : "手动添加"} · 当前{props.detail.current_target.enabled ? "启用" : "停用"}上报
+                </div>
+                {props.detail.current_target.last_seen_at ? (
+                  <div className="text-xs text-slate-500">
+                    最近发现：{formatDateTime(props.detail.current_target.last_seen_at)}
+                  </div>
+                ) : null}
+              </div>
+              <button
+                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                onClick={() => props.onToggleTargetEnabled(props.detail.current_target!.id, !props.detail.current_target!.enabled)}
+                type="button"
+              >
+                {props.detail.current_target.enabled ? "关闭上报" : "启用上报"}
+              </button>
+            </div>
+          ) : null}
           <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_48px]" onSubmit={props.onAddTarget}>
             <label className="grid min-w-0 gap-2 text-sm text-slate-700">
               <input
@@ -1647,41 +2098,110 @@ function ReportConfigSection(props: {
             </span>
           </label>
         </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+          <div className="font-medium text-slate-900">执行时区</div>
+          <div className="relative mt-3" ref={timezonePickerRef}>
+            <button
+              className="flex h-11 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 text-left text-sm outline-none transition hover:border-indigo-300 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              onClick={() => setTimezoneMenuOpen((value) => !value)}
+              type="button"
+            >
+              <span className="truncate">{timezone}</span>
+              <span className="ml-3 shrink-0 text-slate-400">{timezoneMenuOpen ? "收起" : "展开"}</span>
+            </button>
+            {timezoneMenuOpen ? (
+              <div className="absolute left-0 top-full z-30 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                <div className="space-y-3">
+                  <input
+                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                    onChange={(event) => setTimezoneSearch(event.target.value)}
+                    placeholder="搜索时区"
+                    value={timezoneSearch}
+                  />
+                  <div className="max-h-64 space-y-2 overflow-y-auto">
+                    {filteredTimezoneOptions.map((item) => (
+                      <button
+                        key={item}
+                        className={[
+                          "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-sm transition",
+                          item === timezone
+                            ? "border-indigo-300 bg-indigo-50"
+                            : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50"
+                        ].join(" ")}
+                        onClick={() => {
+                          setTimezone(item);
+                          setTimezoneSearch("");
+                          setTimezoneMenuOpen(false);
+                        }}
+                        type="button"
+                      >
+                        <span className="truncate">{item}</span>
+                        {item === browserTimeZone ? (
+                          <span className="inline-flex shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">
+                            浏览器默认
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                    {filteredTimezoneOptions.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-slate-500">
+                        没有匹配的时区
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-2 text-xs text-slate-500">
+            默认使用当前浏览器时区。你看到的执行时间会按这里的时区计算，节点本地时区不会影响执行时间。
+          </div>
+        </div>
         {previewError ? <p className="text-sm font-medium text-rose-600">{previewError}</p> : null}
         {!previewError && saveError ? <p className="text-sm font-medium text-rose-600">{saveError}</p> : null}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">
             <strong className="text-sm text-slate-900">最近 10 次执行时间</strong>
             <span className="text-xs text-slate-500">
-              {previewError ? "请先修正 Cron" : saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已自动保存" : "自动保存"}
+              {previewError
+                ? "请先修正 Cron"
+                : saveState === "saving"
+                  ? "正在保存…"
+                  : saveState === "saved"
+                    ? props.detail.has_komari_binding
+                      ? "配置完成，请返回 Komari 重新查看"
+                      : "已自动保存"
+                    : "自动保存"}
             </span>
           </div>
+          <p className="text-xs text-slate-500">当前规则按 {preview.timezone || browserTimeZone} 执行，以下时间也按这个时区显示。</p>
           <div className="report-config-next-runs">
             {preview.next_runs.map((value) => (
               <div key={value} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                {formatDateTime(value)}
+                {formatDateTimeInTimeZone(value, preview.timezone || browserTimeZone)}
               </div>
             ))}
           </div>
-        </div>
-        {props.detail.report_config.target_ips.length > 0 ? (
-          <>
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>接入命令</strong>
-                <button
-                  className="button ghost"
-                  disabled={previewError !== ""}
-                  onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
-                  type="button"
-                >
-                  复制
-                </button>
-              </div>
-              <pre className="code-block report-config-command">{installCommand}</pre>
+          {saveState === "saved" && props.detail.has_komari_binding ? (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-700">
+              配置完成，请返回 Komari 重新查看。
             </div>
-          </>
-        ) : null}
+          ) : null}
+        </div>
+        <div className="summary-section">
+          <div className="summary-head">
+            <strong>接入命令</strong>
+            <button
+              className="button ghost"
+              disabled={previewError !== ""}
+              onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
+              type="button"
+            >
+              复制
+            </button>
+          </div>
+          <pre className="code-block report-config-command">{installCommand}</pre>
+        </div>
         </div>
       </section>
     </div>
@@ -1698,6 +2218,14 @@ function NodeReportConfigDialog(props: {
   const [targetInput, setTargetInput] = useState("");
   const [targetError, setTargetError] = useState("");
   const [targetSaving, setTargetSaving] = useState(false);
+  const [nodeName, setNodeName] = useState("");
+  const [nodeNameError, setNodeNameError] = useState("");
+  const [nodeNameSaving, setNodeNameSaving] = useState(false);
+  const [bindKomariUUID, setBindKomariUUID] = useState("");
+  const [bindKomariName, setBindKomariName] = useState("");
+  const [bindingEnabled, setBindingEnabled] = useState(false);
+  const [bindSaving, setBindSaving] = useState(false);
+  const [bindCandidates, setBindCandidates] = useState<KomariBindingCandidate[]>([]);
   const { loading, error, detail, reload } = useNodePageData(props.nodeUUID, selectedTargetID, props.onUnauthorized);
   const [localDetail, setLocalDetail] = useState<NodeDetail | null>(null);
 
@@ -1709,7 +2237,59 @@ function NodeReportConfigDialog(props: {
 
   useEffect(() => {
     setLocalDetail(detail);
+    setNodeName(detail?.name ?? "");
+    setNodeNameError("");
+    setBindKomariUUID(detail?.komari_node_uuid ?? "");
+    setBindKomariName(detail?.komari_node_name ?? "");
+    setBindingEnabled(!!detail?.has_komari_binding);
   }, [detail]);
+
+  useEffect(() => {
+    if (!bindKomariUUID.trim()) {
+      return;
+    }
+    const matchedByUUID = bindCandidates.find((candidate) => candidate.komari_node_uuid === bindKomariUUID);
+    if (!matchedByUUID || matchedByUUID.komari_node_name === bindKomariName) {
+      return;
+    }
+    setBindKomariName(matchedByUUID.komari_node_name);
+    setLocalDetail((current) =>
+      current
+        ? {
+            ...current,
+            komari_node_name: matchedByUUID.komari_node_name
+          }
+        : current
+    );
+  }, [bindCandidates, bindKomariName, bindKomariUUID]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCandidates() {
+      try {
+        const response = await apiRequest<{ items: KomariBindingCandidate[] }>("/nodes/komari-binding/candidates");
+        if (cancelled) {
+          return;
+        }
+        setBindCandidates(response.items ?? []);
+      } catch (loadError) {
+        if (cancelled) {
+          return;
+        }
+        if (loadError instanceof UnauthorizedError) {
+          props.onUnauthorized();
+          return;
+        }
+        setBindCandidates([]);
+      }
+    }
+
+    void loadCandidates();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.onUnauthorized]);
 
   async function handleAddTarget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1846,6 +2426,200 @@ function NodeReportConfigDialog(props: {
     }
   }
 
+  async function handleToggleTargetEnabled(targetID: number, enabled: boolean) {
+    const previousDetail = localDetail;
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      setLocalDetail((current) => {
+        if (!current) {
+          return current;
+        }
+        const nextTargets = current.targets.map((item) =>
+          item.id === targetID
+            ? {
+                ...item,
+                enabled
+              }
+            : item
+        );
+        const nextCurrentTarget =
+          current.current_target?.id === targetID
+            ? {
+                ...current.current_target,
+                enabled
+              }
+            : current.current_target;
+        return {
+          ...current,
+          targets: nextTargets,
+          current_target: nextCurrentTarget
+        };
+      });
+      await apiRequest<NodeTargetListItem>(`/nodes/${props.nodeUUID}/targets/${targetID}/${enabled ? "enable" : "disable"}`, {
+        method: "POST"
+      });
+      reload();
+    } catch (toggleError) {
+      setLocalDetail(previousDetail);
+      if (toggleError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(toggleError instanceof Error ? toggleError.message : "更新目标 IP 上报状态失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleBindKomari(nextUUID: string, nextName: string) {
+    if (!localDetail) {
+      return;
+    }
+    setBindSaving(true);
+    setTargetError("");
+    try {
+      await apiRequest("/nodes/komari-binding", {
+        method: "POST",
+        body: JSON.stringify({
+          node_id: localDetail.id,
+          komari_node_uuid: nextUUID.trim(),
+          komari_node_name: nextName.trim()
+        })
+      });
+      setLocalDetail((current) =>
+        current
+          ? {
+              ...current,
+              komari_node_uuid: nextUUID.trim(),
+              komari_node_name: nextName.trim(),
+              has_komari_binding: true
+            }
+          : current
+      );
+      reload();
+      pushToast("Komari 绑定已保存。");
+    } catch (bindError) {
+      if (bindError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(bindError instanceof Error ? bindError.message : "绑定 Komari 失败");
+    } finally {
+      setBindSaving(false);
+    }
+  }
+
+  async function handleUnbindKomari() {
+    if (!localDetail) {
+      return;
+    }
+    setBindSaving(true);
+    setTargetError("");
+    try {
+      await apiRequest("/nodes/komari-binding", {
+        method: "DELETE",
+        body: JSON.stringify({
+          node_id: localDetail.id
+        })
+      });
+      setLocalDetail((current) =>
+        current
+          ? {
+              ...current,
+              has_komari_binding: false,
+              komari_node_name: "",
+              komari_node_uuid: current.node_uuid || current.komari_node_uuid
+            }
+          : current
+      );
+      reload();
+      pushToast("Komari 绑定已解除。");
+    } catch (bindError) {
+      if (bindError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(bindError instanceof Error ? bindError.message : "解除 Komari 绑定失败");
+    } finally {
+      setBindSaving(false);
+    }
+  }
+
+  async function handleSaveNodeName() {
+    if (!nodeName.trim()) {
+      setNodeNameError("节点名称不能为空");
+      return;
+    }
+    if (nodeNameSaving || !localDetail || nodeName.trim() === localDetail.name.trim()) {
+      return;
+    }
+    setNodeNameSaving(true);
+    setNodeNameError("");
+    try {
+      await apiRequest(`/nodes/${props.nodeUUID}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: nodeName.trim() })
+      });
+      setLocalDetail((current) => (current ? { ...current, name: nodeName.trim() } : current));
+      reload();
+      pushToast("节点名称已保存。");
+    } catch (saveError) {
+      if (saveError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setNodeNameError(saveError instanceof Error ? saveError.message : "保存节点名称失败");
+    } finally {
+      setNodeNameSaving(false);
+    }
+  }
+
+  async function handleSelectKomariBinding(nextUUID: string) {
+    if (!localDetail || bindSaving) {
+      return;
+    }
+
+    const trimmedUUID = nextUUID.trim();
+    const currentUUID = localDetail.has_komari_binding ? (bindKomariUUID || localDetail.komari_node_uuid || "").trim() : "";
+    if (trimmedUUID === currentUUID) {
+      return;
+    }
+
+    setBindKomariUUID(trimmedUUID);
+    if (!trimmedUUID) {
+      setBindKomariName("");
+      await handleUnbindKomari();
+      return;
+    }
+
+    const matched = bindCandidates.find((candidate) => candidate.komari_node_uuid === trimmedUUID);
+    if (!matched) {
+      setTargetError("无法获取当前 Komari 节点名称，请刷新后重试。");
+      return;
+    }
+    setBindKomariName(matched.komari_node_name);
+    await handleBindKomari(trimmedUUID, matched.komari_node_name);
+  }
+
+  async function handleBindingEnabledChange(enabled: boolean) {
+    if (!localDetail || bindSaving) {
+      return;
+    }
+    setBindingEnabled(enabled);
+    if (!enabled) {
+      setBindKomariUUID("");
+      setBindKomariName("");
+      if (localDetail.has_komari_binding) {
+        await handleUnbindKomari();
+      }
+      return;
+    }
+    if (localDetail.has_komari_binding && bindKomariUUID.trim()) {
+      return;
+    }
+  }
+
   if (loading && !localDetail) {
     return (
       <div className="field-modal-backdrop" onClick={props.onClose}>
@@ -1909,7 +2683,20 @@ function NodeReportConfigDialog(props: {
       onDeleteCurrentTarget={(targetID) => void handleDeleteTarget(targetID)}
       onReorderTargets={(sourceID, destinationID) => void handleReorderTargets(sourceID, destinationID)}
       onSelectTarget={(targetID) => setSelectedTargetID(targetID)}
+      onToggleTargetEnabled={(targetID, enabled) => void handleToggleTargetEnabled(targetID, enabled)}
+      bindKomariUUID={bindKomariUUID}
+      bindKomariName={bindKomariName}
+      bindCandidates={bindCandidates}
+      bindSaving={bindSaving}
+      bindingEnabled={bindingEnabled}
+      onBindingEnabledChange={(enabled) => void handleBindingEnabledChange(enabled)}
+      onBindKomariUUIDChange={(value) => void handleSelectKomariBinding(value)}
       onTargetInputChange={setTargetInput}
+      nodeName={nodeName}
+      nodeNameError={nodeNameError}
+      nodeNameSaving={nodeNameSaving}
+      onNodeNameChange={setNodeName}
+      onSaveNodeName={() => void handleSaveNodeName()}
       open={true}
       targetError={targetError}
       targetInput={targetInput}
@@ -2430,18 +3217,18 @@ function CompareTimeline(props: {
               type="range"
               min={min}
               max={max}
-              step={1000}
+              step={1}
               value={props.leftTimestamp}
-              onChange={(event) => props.onLeftChange(clampCompareTimestamp(Number(event.target.value), min, props.rightTimestamp))}
+              onInput={(event) => props.onLeftChange(clampCompareTimestamp(Number((event.target as HTMLInputElement).value), min, props.rightTimestamp))}
             />
             <input
               className="compare-timeline-input compare-timeline-input-right"
               type="range"
               min={min}
               max={max}
-              step={1000}
+              step={1}
               value={props.rightTimestamp}
-              onChange={(event) => props.onRightChange(clampCompareTimestamp(Number(event.target.value), props.leftTimestamp, max))}
+              onInput={(event) => props.onRightChange(clampCompareTimestamp(Number((event.target as HTMLInputElement).value), props.leftTimestamp, max))}
             />
           </div>
           <div className="compare-timeline-ends">
@@ -2604,7 +3391,7 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   function goToReportConfig() {
     const path = buildReportConfigListPath(uuid);
     if (isEmbed) {
-      window.location.assign(toStandaloneAppURL(path));
+      window.open(toStandaloneAppURL(path), "_blank", "noopener,noreferrer");
       return;
     }
     navigate(path);
@@ -2616,10 +3403,11 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
 
   if (isEmbed && errorStatus === 404 && komariReturn) {
     return (
-      <EmbedBridgePage
-        title="接入节点"
-        description="当前节点尚未接入，正在打开独立页面继续。"
+      <EmbedStandaloneNoticePage
+        title="IP 质量"
+        description="当前节点尚未接入 IPQ，请先完成接入。"
         actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+        actionLabel="去接入"
       />
     );
   }
@@ -2632,6 +3420,32 @@ function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         backTo="/nodes"
         error={error || "节点不存在。"}
         onRetry={reload}
+      />
+    );
+  }
+
+  if (isEmbed && detail.needs_connect) {
+    return (
+      <EmbedStandaloneNoticePage
+        title="IP 质量"
+        description="当前节点尚未接入 IPQ，请先完成接入。"
+        actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+        actionLabel="去接入"
+      />
+    );
+  }
+
+  if (isEmbed && !detail.has_data) {
+    return (
+      <EmbedStandaloneNoticePage
+        title="IP 质量"
+        description={
+          detail.targets.length === 0
+            ? "当前节点还没有配置目标 IP，请在独立页面继续配置。"
+            : "当前节点还没有 IP 质量数据，请在独立页面继续查看或调整配置。"
+        }
+        actionURL={buildReportConfigListPath(uuid)}
+        actionLabel="在独立页面继续"
       />
     );
   }
@@ -3514,6 +4328,225 @@ function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => void }) 
   );
 }
 
+function NotificationPage(_props: { onUnauthorized: () => void }) {
+  return null;
+}
+
+function APIKeysPage(props: { onUnauthorized: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<APIKeyDetail[]>([]);
+  const [logs, setLogs] = useState<APIAccessLog[]>([]);
+  const [selectedLogKeyID, setSelectedLogKeyID] = useState<number | null>(null);
+  const [name, setName] = useState("");
+  const [createdKey, setCreatedKey] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function loadKeys() {
+    setLoading(true);
+    setError("");
+    try {
+      const [keysResponse, logsResponse] = await Promise.all([
+        apiRequest<{ items: APIKeyDetail[] }>("/admin/api-keys"),
+        apiRequest<{ items: APIAccessLog[] }>("/admin/api-access-logs")
+      ]);
+      setItems(keysResponse.items ?? []);
+      setLogs(logsResponse.items ?? []);
+    } catch (loadError) {
+      if (loadError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : "加载 API Key 失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadLogs(apiKeyID?: number | null) {
+    const query = apiKeyID && apiKeyID > 0 ? `?api_key_id=${apiKeyID}` : "";
+    const logsResponse = await apiRequest<{ items: APIAccessLog[] }>(`/admin/api-access-logs${query}`);
+    setLogs(logsResponse.items ?? []);
+  }
+
+  useEffect(() => {
+    void loadKeys();
+  }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+    void loadLogs(selectedLogKeyID);
+  }, [selectedLogKeyID]);
+
+  async function handleCreate() {
+    setSaving(true);
+    setError("");
+    try {
+      const response = await apiRequest<APIKeyCreateResult>("/admin/api-keys", {
+        method: "POST",
+        body: JSON.stringify({ name })
+      });
+      setCreatedKey(response.key);
+      setName("");
+      await loadKeys();
+      pushToast("API Key 已创建。");
+    } catch (saveError) {
+      if (saveError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(saveError instanceof Error ? saveError.message : "创建 API Key 失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleAPIKey(id: number, enabled: boolean) {
+    try {
+      await apiRequest(`/admin/api-keys/${id}/${enabled ? "enable" : "disable"}`, { method: "POST" });
+      await loadKeys();
+    } catch (toggleError) {
+      if (toggleError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(toggleError instanceof Error ? toggleError.message : "更新 API Key 状态失败");
+    }
+  }
+
+  async function deleteAPIKey(id: number) {
+    try {
+      await apiRequest(`/admin/api-keys/${id}`, { method: "DELETE" });
+      await loadKeys();
+    } catch (deleteError) {
+      if (deleteError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(deleteError instanceof Error ? deleteError.message : "删除 API Key 失败");
+    }
+  }
+
+  return (
+    <section className="space-y-6">
+      <PageHeader title="API Key" subtitle="用于未来只读 API 的访问认证。创建后明文只显示一次。" />
+      {error ? <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">{error}</div> : null}
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">创建 API Key</h2>
+            <p className="text-sm text-slate-500">建议为不同调用方分别创建独立的只读 Key。</p>
+          </div>
+          <label className="grid gap-2 text-sm text-slate-700">
+            <span>名称</span>
+            <input className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div>
+            <button className="button" disabled={saving || !name.trim()} onClick={() => void handleCreate()} type="button">
+              {saving ? "创建中..." : "创建 API Key"}
+            </button>
+          </div>
+          {createdKey ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+              <div className="font-medium text-amber-900">请立即保存明文 Key</div>
+              <pre className="mt-2 overflow-x-auto rounded-xl bg-white px-3 py-3 text-xs text-slate-700">{createdKey}</pre>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">现有 Key</h2>
+            <p className="text-sm text-slate-500">当前只支持只读场景，明文不会再次显示。</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+            使用方式：
+            <pre className="mt-2 overflow-x-auto rounded-xl bg-white px-3 py-3 text-xs text-slate-700">curl -H "X-IPQ-API-Key: &lt;your-key&gt;" {`${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/public/v1/nodes`}</pre>
+          </div>
+          {loading ? (
+            <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+          ) : items.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">还没有 API Key。</div>
+          ) : (
+            <div className="grid gap-3">
+              {items.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="font-medium text-slate-900">{item.name}</div>
+                      <div className="text-xs text-slate-500">状态：{item.enabled ? "启用" : "停用"} · 最近使用：{item.last_used_at ? formatDateTime(item.last_used_at) : "从未使用"}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button className="button ghost" onClick={() => void toggleAPIKey(item.id, !item.enabled)} type="button">
+                        {item.enabled ? "停用" : "启用"}
+                      </button>
+                      <button className="button ghost" onClick={() => void deleteAPIKey(item.id)} type="button">
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">最近 API 访问记录</h2>
+            <p className="text-sm text-slate-500">帮助你查看 public API 最近被哪个 Key 调用、命中了什么路径、返回了什么状态。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+              value={selectedLogKeyID ?? ""}
+              onChange={(event) => setSelectedLogKeyID(event.target.value ? Number(event.target.value) : null)}
+            >
+              <option value="">全部 Key</option>
+              {items.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+            <button className="button ghost" onClick={() => void loadLogs(selectedLogKeyID)} type="button">
+              刷新
+            </button>
+          </div>
+          {logs.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">还没有 API 访问记录。</div>
+          ) : (
+            <div className="grid gap-3">
+              {logs.map((log) => (
+                <div key={log.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-slate-900">
+                        Key #{log.api_key_id} · {log.method} {log.path}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {formatDateTime(log.created_at)} · 状态 {log.status_code}
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {log.remote_addr || "unknown"}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -3752,9 +4785,9 @@ function EmbedAdminAccessBridge() {
   }
 
   return (
-    <EmbedBridgePage
+    <EmbedStandaloneNoticePage
       title="需要登录"
-      description="当前管理员链路需要先在独立页面登录。"
+      description="当前管理员链路需要先登录，再继续后续配置。"
       actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
     />
   );
@@ -3802,6 +4835,10 @@ function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>; onUnau
       <Route path="/nodes/:uuid/compare" element={<NodeHistoryComparePage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/nodes/:uuid/changes" element={<Navigate to="../history" relative="path" replace />} />
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notification" element={<NotificationHomePage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notification/channel" element={<NotificationChannelSettingsPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notification/deliveries" element={<NotificationDeliveriesPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/api-keys" element={<APIKeysPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/history-retention" element={<HistoryRetentionPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />
       <Route path="/settings/admin" element={<Navigate to="/settings/user" replace />} />

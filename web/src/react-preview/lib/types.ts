@@ -21,6 +21,95 @@ export type IntegrationSettings = {
   guest_read_enabled: boolean;
 };
 
+export type NotificationProviderField = {
+  name: string;
+  type: string;
+  required?: boolean;
+  default?: string;
+  options?: string[];
+  help?: string;
+};
+
+export type NotificationProviderDefinition = {
+  type: string;
+  fields: NotificationProviderField[];
+};
+
+export type NotificationSettings = {
+  enabled?: boolean;
+  active_channel_id?: number | null;
+  title_template: string;
+  message_template: string;
+};
+
+export type NotificationChannelDetail = {
+  id: number;
+  name: string;
+  type: string;
+  enabled: boolean;
+  is_active?: boolean;
+  config: Record<string, unknown>;
+};
+
+export type NotificationRuleTargetScope = {
+  target_id: number;
+  target_ip: string;
+};
+
+export type NotificationRuleNodeScope = {
+  id: number;
+  node_id: number;
+  node_name: string;
+  all_targets: boolean;
+  targets: NotificationRuleTargetScope[];
+};
+
+export type NotificationRule = {
+  id: number;
+  node_id?: number;
+  target_id?: number;
+  field_id: string;
+  channel_id?: number;
+  all_nodes: boolean;
+  enabled: boolean;
+  node_scopes: NotificationRuleNodeScope[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type NotificationDelivery = {
+  id: number;
+  rule_id: number;
+  history_entry_id: number;
+  status: string;
+  response_summary: string;
+  created_at: string;
+};
+
+export type APIKeyDetail = {
+  id: number;
+  name: string;
+  enabled: boolean;
+  last_used_at?: string | null;
+};
+
+export type APIKeyCreateResult = {
+  id: number;
+  name: string;
+  key: string;
+  enabled: boolean;
+};
+
+export type APIAccessLog = {
+  id: number;
+  api_key_id: number;
+  method: string;
+  path: string;
+  status_code: number;
+  remote_addr: string;
+  created_at: string;
+};
+
 export type HistoryRetentionSettings = {
   retention_days: number;
   history_bytes: number;
@@ -30,31 +119,54 @@ export type HistoryRetentionSettings = {
 };
 
 export type NodeListItem = {
+  id: number;
+  node_uuid?: string;
   komari_node_uuid: string;
+  komari_node_name?: string;
+  has_komari_binding?: boolean;
   name: string;
   has_data: boolean;
   updated_at?: string | null;
   created_at?: string;
 };
 
+export type KomariBindingCandidate = {
+  node_id: number;
+  node_name: string;
+  komari_node_uuid: string;
+  komari_node_name: string;
+  has_existing_binding: boolean;
+};
+
 export type NodeTargetListItem = {
   id: number;
   ip: string;
+  source: string;
+  enabled: boolean;
   has_data: boolean;
   updated_at?: string | null;
+  last_seen_at?: string | null;
   sort_order: number;
 };
 
 export type NodeTargetDetail = {
   id: number;
   ip: string;
+  source: string;
+  enabled: boolean;
   has_data: boolean;
   updated_at?: string | null;
+  last_seen_at?: string | null;
   current_result: Record<string, unknown>;
 };
 
 export type NodeDetail = {
+  id: number;
+  node_uuid?: string;
   komari_node_uuid: string;
+  komari_node_name?: string;
+  has_komari_binding?: boolean;
+  needs_connect?: boolean;
   name: string;
   has_data: boolean;
   updated_at?: string | null;
@@ -68,6 +180,7 @@ export type NodeDetail = {
     install_token: string;
     target_ips: string[];
     schedule_cron: string;
+    timezone: string;
     run_immediately: boolean;
     next_runs: string[];
   };
@@ -75,6 +188,7 @@ export type NodeDetail = {
 
 export type NodeReportConfigPreview = {
   schedule_cron: string;
+  timezone: string;
   run_immediately: boolean;
   next_runs: string[];
 };
@@ -96,6 +210,7 @@ export type PublicTargetDetail = {
 };
 
 export type PublicNodeDetail = {
+  node_uuid?: string;
   has_data: boolean;
   targets: PublicTargetListItem[];
   selected_target_id?: number | null;

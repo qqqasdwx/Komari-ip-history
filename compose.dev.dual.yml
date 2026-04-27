@@ -1,0 +1,20 @@
+services:
+  komari-default:
+    image: ghcr.io/komari-monitor/komari:latest
+    environment:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+    ports:
+      - "8080:25774"
+    volumes:
+      - ./data/komari-default:/app/data
+
+  komari-purcarte:
+    image: ghcr.io/komari-monitor/komari:latest
+    environment:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+    ports:
+      - "8081:25774"
+    volumes:
+      - ./data/komari-purcarte:/app/data
