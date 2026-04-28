@@ -1,5 +1,4 @@
 import {
-  ArrowLeftIcon,
   Cross2Icon,
   ExitIcon,
   GearIcon,
@@ -8,17 +7,14 @@ import {
   RowsIcon
 } from "@radix-ui/react-icons";
 import {
-  type CSSProperties,
   type DragEvent,
   type FormEvent,
-  type ReactNode,
   useEffect,
   useRef,
   useState
 } from "react";
 import {
   Link,
-  NavLink,
   Navigate,
   Route,
   Routes,
@@ -47,46 +43,19 @@ import type {
   PublicNodeDetail,
   RuntimeResponse
 } from "./lib/types";
-
-type NavItem = {
-  to: string;
-  label: string;
-  icon: ReactNode;
-};
+import { AppLoading } from "./components/layout/app-loading";
+import {
+  EmbedFrameShell,
+  getEmbedAppearance,
+  getEmbedGlassStyle,
+  getEmbedTheme
+} from "./components/layout/embed-frame-shell";
+import { PageHeader } from "./components/layout/page-header";
+import { SidebarSection, type NavItem } from "./components/layout/sidebar-section";
+import { pushToast, ToastViewport } from "./components/toast";
 
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
 const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
-
-type ToastTone = "success" | "error";
-
-type ToastItem = {
-  id: number;
-  message: string;
-  tone: ToastTone;
-};
-
-let toastSeed = 0;
-let toastState: ToastItem[] = [];
-const toastListeners = new Set<(items: ToastItem[]) => void>();
-
-function emitToasts() {
-  const snapshot = [...toastState];
-  for (const listener of toastListeners) {
-    listener(snapshot);
-  }
-}
-
-function dismissToast(id: number) {
-  toastState = toastState.filter((item) => item.id !== id);
-  emitToasts();
-}
-
-function pushToast(message: string, tone: ToastTone = "success") {
-  const id = ++toastSeed;
-  toastState = [...toastState, { id, message, tone }];
-  emitToasts();
-  window.setTimeout(() => dismissToast(id), 2600);
-}
 
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <RowsIcon /> }];
 
@@ -762,155 +731,6 @@ function postEmbedAction(type: string, payload: Record<string, string>) {
   window.parent.postMessage({ source: "ipq-embed", type, ...payload }, "*");
 }
 
-function getEmbedTheme(searchParams: URLSearchParams) {
-  const theme = (searchParams.get("komari_theme") || "").trim().toLowerCase();
-  if (theme.includes("purcarte")) {
-    return "purcarte";
-  }
-  return "default";
-}
-
-function getEmbedAppearance(searchParams: URLSearchParams) {
-  const appearance = (searchParams.get("komari_appearance") || "").trim().toLowerCase();
-  return appearance === "dark" ? "dark" : "light";
-}
-
-function sanitizeEmbedCSSValue(value: string | null) {
-  const text = (value || "").trim();
-  if (!text || /[;{}]/.test(text) || /url\s*\(/i.test(text)) {
-    return "";
-  }
-  return text;
-}
-
-function getEmbedGlassStyle(searchParams: URLSearchParams): CSSProperties | undefined {
-  if (getEmbedTheme(searchParams) !== "purcarte") {
-    return undefined;
-  }
-
-  const style = {} as CSSProperties & Record<string, string>;
-  const blurParam = (searchParams.get("komari_blur") || "").trim();
-  const blurValue = Number(blurParam.replace(/px$/i, ""));
-  if (Number.isFinite(blurValue)) {
-    style["--ipq-purcarte-blur"] = `${Math.max(0, Math.min(40, blurValue))}px`;
-  }
-
-  const card = sanitizeEmbedCSSValue(searchParams.get("komari_card"));
-  if (card) {
-    style["--ipq-purcarte-card"] = card;
-  }
-
-  return style;
-}
-
-function AppLoading() {
-  return (
-    <div className="grid min-h-screen place-items-center bg-slate-50 px-6">
-      <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="space-y-3">
-          <p className="text-3xl font-medium tracking-tight text-slate-950">Komari IP Quality</p>
-          <p className="text-sm text-slate-500">正在载入后台工作区...</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EmbedFrameShell(props: { children: ReactNode }) {
-  const [searchParams] = useSearchParams();
-  const isEmbed = searchParams.get("embed") === "1";
-  const embedTheme = getEmbedTheme(searchParams);
-  const embedAppearance = getEmbedAppearance(searchParams);
-  const embedGlassStyle = getEmbedGlassStyle(searchParams);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    if (!isEmbed) {
-      delete root.dataset.ipqEmbedTheme;
-      delete body.dataset.ipqEmbedTheme;
-      delete root.dataset.ipqEmbedAppearance;
-      delete body.dataset.ipqEmbedAppearance;
-      return;
-    }
-
-    root.dataset.ipqEmbedTheme = embedTheme;
-    body.dataset.ipqEmbedTheme = embedTheme;
-    root.dataset.ipqEmbedAppearance = embedAppearance;
-    body.dataset.ipqEmbedAppearance = embedAppearance;
-
-    return () => {
-      delete root.dataset.ipqEmbedTheme;
-      delete body.dataset.ipqEmbedTheme;
-      delete root.dataset.ipqEmbedAppearance;
-      delete body.dataset.ipqEmbedAppearance;
-    };
-  }, [embedAppearance, embedTheme, isEmbed]);
-
-  if (!isEmbed) {
-    return <>{props.children}</>;
-  }
-
-  return (
-    <div
-      className={`embed-shell embed-theme-${embedTheme} embed-appearance-${embedAppearance} bg-slate-50 text-slate-900`}
-      style={embedGlassStyle}
-    >
-      <div className="embed-panel mx-auto max-w-[1120px] space-y-6">{props.children}</div>
-    </div>
-  );
-}
-
-function ToastViewport() {
-  const [items, setItems] = useState<ToastItem[]>(toastState);
-
-  useEffect(() => {
-    toastListeners.add(setItems);
-    return () => {
-      toastListeners.delete(setItems);
-    };
-  }, []);
-
-  if (items.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="toast-viewport" aria-live="polite" aria-atomic="true">
-      {items.map((item) => (
-        <div key={item.id} className={`toast-item toast-item-${item.tone}`}>
-          {item.message}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SidebarSection(props: { title: string; items: NavItem[] }) {
-  return (
-    <div className="space-y-2">
-      <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{props.title}</p>
-      <div className="space-y-1">
-        {props.items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              [
-                "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-medium transition",
-                isActive ? "bg-indigo-50 text-indigo-600" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              ].join(" ")
-            }
-          >
-            <span className="text-base">{item.icon}</span>
-            <span>{item.label}</span>
-          </NavLink>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function LoginPage(props: { me: MeResponse | null; onAuthenticated: (me: MeResponse) => void }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1090,34 +910,6 @@ function EmbedBridgePage(props: { title: string; description: string; actionURL:
         <p className="text-sm leading-6 text-slate-500">正在打开独立页面继续处理。</p>
       </section>
     </section>
-  );
-}
-
-function PageHeader(props: {
-  title: string;
-  subtitle?: string;
-  backTo?: string;
-  actions?: React.ReactNode;
-}) {
-  return (
-    <header className="flex flex-wrap items-start justify-between gap-4">
-      <div className="space-y-2">
-        {props.backTo ? (
-          <Link
-            className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-            to={props.backTo}
-          >
-            <ArrowLeftIcon />
-            <span>返回</span>
-          </Link>
-        ) : null}
-        <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{props.title}</h1>
-          {props.subtitle ? <p className="text-sm text-slate-500">{props.subtitle}</p> : null}
-        </div>
-      </div>
-      {props.actions ? <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">{props.actions}</div> : null}
-    </header>
   );
 }
 
