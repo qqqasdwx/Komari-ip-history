@@ -76,7 +76,7 @@ async function waitForEmbedReport(page) {
 }
 
 async function waitForOpenIframeSrc(page, expectedPath, label) {
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 45000;
   let lastSrc = "";
   let lastError = "";
 

@@ -64,6 +64,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     overlay: null,
     iframe: null,
     openLink: null,
+    modalSource: "",
     retryTimers: [],
     routeCycle: 0,
     busy: false,
@@ -693,7 +694,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
 
   function closeModal() {
     if (!state.overlay) return;
+    const wasOpen = state.overlay.getAttribute("data-open") === "true";
     state.overlay.setAttribute("data-open", "false");
+    if (wasOpen) {
+      scheduleRouteSync();
+    }
   }
 
   function isModalOpen() {
@@ -752,6 +757,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const overlay = ensureOverlay();
     applyThemeClasses();
     const urls = buildURLs(context, options || { mode: "admin" });
+    state.modalSource = options && options.resume ? "resume" : "action";
     debugLog("open_modal", { uuid: context && context.uuid, mode: options && options.mode, embedURL: urls.embedURL });
     const title = state.overlay && state.overlay.querySelector(".ipq-loader-dialog-title strong");
     if (title) {
@@ -1327,12 +1333,15 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const cleanURL = currentURL.toString();
     history.replaceState(history.state, "", cleanURL);
     state.resumeHandledKey = context.key;
-    openModal({ uuid: context.uuid, name: resumeName }, { mode: "admin", komariReturn: cleanURL });
+    openModal({ uuid: context.uuid, name: resumeName }, { mode: "admin", komariReturn: cleanURL, resume: true });
   }
 
   async function sync() {
     state.themeName = state.themeLoaded ? state.themeName : detectThemeFromDOM();
     applyThemeClasses();
+    if (isModalOpen()) {
+      return;
+    }
 
     if (isPurCarteTheme()) {
       unmountButton({ closeModal: false });
@@ -1414,6 +1423,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     }
 
     if (event.data.type === "open-standalone" && event.data.url) {
+      if (state.modalSource === "resume") {
+        debugLog("ignore_standalone_after_resume", { url: event.data.url });
+        return;
+      }
       closeModal();
       window.location.assign(event.data.url);
     }
