@@ -26,9 +26,7 @@ import { renderDisplayValueBadge } from "./lib/display-fields";
 import { formatByteSize, formatRetentionDays } from "./lib/display-format";
 import {
   buildConnectPath,
-  buildKomariResumeURL,
   buildReportConfigListPath,
-  postEmbedAction,
   toStandaloneAppURL
 } from "./lib/embed-navigation";
 import { formatDateTime } from "./lib/format";
@@ -74,6 +72,10 @@ import { NodeDetailLoading } from "./components/node/node-detail-loading";
 import { NodePageError } from "./components/node/node-page-error";
 import { StatusPill } from "./components/node/status-pill";
 import { TargetTabs } from "./components/node/target-tabs";
+import { ConnectPage } from "./pages/connect-page";
+import { EmbedAdminAccessBridge } from "./pages/embed-admin-access-bridge";
+import { EmbedBridgePage } from "./pages/embed-bridge-page";
+import { LoginPage } from "./pages/login-page";
 import { pushToast, ToastViewport } from "./components/toast";
 
 const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
@@ -110,188 +112,6 @@ async function copyText(value: string) {
   } finally {
     document.body.removeChild(textarea);
   }
-}
-
-function LoginPage(props: { me: MeResponse | null; onAuthenticated: (me: MeResponse) => void }) {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-  const redirectTarget = searchParams.get("redirect") || "/nodes";
-
-  useEffect(() => {
-    if (props.me) {
-      navigate(redirectTarget, { replace: true });
-    }
-  }, [navigate, props.me, redirectTarget]);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError("");
-    try {
-      await apiRequest("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username: username.trim(), password })
-      });
-      const me = await apiRequest<MeResponse>("/auth/me");
-      props.onAuthenticated(me);
-      navigate(redirectTarget, { replace: true });
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "登录失败");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (props.me) {
-    return <AppLoading />;
-  }
-
-  return (
-    <div className="grid min-h-screen place-items-center bg-slate-50 px-6">
-      <div className="w-full max-w-md rounded-[24px] border border-slate-200 bg-white p-8 shadow-sm">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-medium tracking-tight text-slate-950">Komari IP Quality</h1>
-          <p className="text-sm text-slate-500">登录后直接进入后台工作区。</p>
-        </div>
-        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span>用户名</span>
-            <input
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-              name="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-2 text-sm text-slate-700">
-            <span>密码</span>
-            <input
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-          <button
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl bg-indigo-500 px-4 text-sm font-medium text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
-            type="submit"
-            disabled={submitting}
-          >
-            {submitting ? "登录中..." : "登录"}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ConnectPage(props: { onUnauthorized: () => void }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const uuid = searchParams.get("uuid")?.trim() || "";
-  const name = searchParams.get("name")?.trim() || "未命名节点";
-  const isEmbed = searchParams.get("embed") === "1";
-  const returnTo = searchParams.get("return_to")?.trim() || "";
-  const resumePopup = searchParams.get("resume") === "popup";
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function connectNode() {
-      if (!uuid) {
-        setError("缺少节点 UUID，无法继续接入。");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        await apiRequest("/embed/nodes/register", {
-          method: "POST",
-          body: JSON.stringify({ uuid, name })
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        if (returnTo) {
-          window.location.replace(buildKomariResumeURL(returnTo, uuid, name));
-          return;
-        }
-
-        navigate(`/nodes/${uuid}${isEmbed ? "?embed=1" : ""}`, { replace: true });
-      } catch (connectError) {
-        if (cancelled) {
-          return;
-        }
-        if (connectError instanceof UnauthorizedError) {
-          props.onUnauthorized();
-          navigate(`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`, { replace: true });
-          return;
-        }
-        setError(connectError instanceof Error ? connectError.message : "节点接入失败");
-        setLoading(false);
-      }
-    }
-
-    void connectNode();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, returnTo, resumePopup, uuid]);
-
-  if (loading) {
-    return (
-      <section className="space-y-6">
-        <PageHeader
-          title="接入节点"
-          subtitle={returnTo && resumePopup ? "正在完成登录并返回 Komari 弹窗。" : "正在为当前节点创建或恢复 IP 质量视图。"}
-          backTo={isEmbed ? undefined : "/nodes"}
-        />
-        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="space-y-3">
-            <div className="h-6 w-40 animate-pulse rounded-xl bg-slate-100" />
-            <div className="h-4 w-64 animate-pulse rounded-xl bg-slate-100" />
-          </div>
-        </section>
-      </section>
-    );
-  }
-
-  return (
-    <NodePageError
-      title="接入节点"
-      subtitle={name}
-      backTo="/nodes"
-      error={error || "节点接入失败。"}
-      onRetry={() => window.location.reload()}
-    />
-  );
-}
-
-function EmbedBridgePage(props: { title: string; description: string; actionURL: string }) {
-  useEffect(() => {
-    postEmbedAction("open-standalone", { url: toStandaloneAppURL(props.actionURL) });
-  }, [props.actionURL]);
-
-  return (
-    <section className="space-y-6">
-      <PageHeader title={props.title} subtitle={props.description} />
-      <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm leading-6 text-slate-500">正在打开独立页面继续处理。</p>
-      </section>
-    </section>
-  );
 }
 
 function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
@@ -2644,34 +2464,6 @@ function AdminPage(props: { me: MeResponse; onUnauthorized: () => void }) {
         </form>
       </section>
     </section>
-  );
-}
-
-function EmbedAdminAccessBridge() {
-  const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const match = location.pathname.match(/^\/nodes\/([^/]+)$/);
-  const uuid = match?.[1] ?? "";
-  const nodeName = searchParams.get("node_name")?.trim() || "未命名节点";
-  const komariReturn = searchParams.get("komari_return")?.trim() || "";
-
-  if (!uuid || !komariReturn) {
-    return (
-      <section className="space-y-6">
-        <PageHeader title="需要登录" subtitle="请在独立页面继续。" />
-        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm leading-6 text-slate-500">当前页面无法直接完成管理员登录。</p>
-        </section>
-      </section>
-    );
-  }
-
-  return (
-    <EmbedBridgePage
-      title="需要登录"
-      description="当前管理员链路需要先在独立页面登录。"
-      actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
-    />
   );
 }
 
