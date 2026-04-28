@@ -26,11 +26,15 @@ This repository contains a Go backend with a Vite/React frontend built as static
 
 Use `gofmt` for Go code. Keep package names short, lowercase, and aligned with their directory purpose. Go tests live beside covered code and use `*_test.go`.
 
-Frontend code is TypeScript with React 19, Vite, React Router, Tailwind CSS v4, and Radix icons. Use PascalCase for components, camelCase for functions and variables, and kebab-case for route paths. Prefer small modules over expanding `App.tsx`.
+Frontend code is TypeScript with React 19, Vite, React Router, Tailwind CSS v4, shadcn/ui primitives, and `lucide-react` icons. Use PascalCase for components, camelCase for functions and variables, and kebab-case for route paths. Prefer small modules over expanding `App.tsx`.
+
+Use shadcn/ui for common accessible interactions such as buttons, inputs, dialogs, tabs, dropdowns, tooltips, toasts, and selects. Use Tailwind for layout, spacing, responsive behavior, typography, page composition, and custom business visuals. Do not introduce Ant Design, MUI, Bootstrap, Chakra, or another UI framework unless explicitly requested.
 
 ## Testing Guidelines
 
-Add or update Go tests when backend behavior changes, especially in `internal/service`, `internal/httpx/handlers`, and `internal/database`. For frontend or integration changes, run relevant Playwright scripts in `web/playwright/` or the dev-container `run-e2e.sh` wrapper.
+Add or update Go tests when backend behavior changes, especially in `internal/service`, `internal/httpx/handlers`, and `internal/database`. For frontend or integration changes, use Playwright as the primary acceptance path via `web/playwright/` or the dev-container `run-e2e.sh` wrapper.
+
+For UI refactors, capture Playwright screenshots before and after changes, inspect them manually, and update the relevant acceptance document. Do not accept loading, blank, error, or skeleton screens as valid screenshots. Test data must cover empty, populated, multi-target, multi-history, multi-snapshot, public-access, embedded, and error states.
 
 ## Commit & Pull Request Guidelines
 
