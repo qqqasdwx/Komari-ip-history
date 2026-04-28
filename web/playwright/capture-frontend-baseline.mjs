@@ -77,6 +77,11 @@ async function capture(page, route, fileName, wait) {
   await page.goto(`${appBaseURL}/#${route}`);
   await page.waitForLoadState("networkidle");
   await wait();
+  const viewport = page.viewportSize();
+  if (viewport) {
+    await page.mouse.move(Math.max(viewport.width - 4, 0), Math.max(viewport.height - 4, 0));
+    await page.waitForTimeout(100);
+  }
   await page.screenshot({ path: path.join(outputDir, fileName), fullPage: true });
 }
 
@@ -135,6 +140,18 @@ try {
     await page.getByText("Header", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 });
   });
   screenshots.push("settings-integration-desktop.png");
+
+  await capture(page, "/settings/history-retention", "settings-history-retention-desktop.png", async () => {
+    await page.getByRole("heading", { name: "历史保留" }).first().waitFor({ state: "visible", timeout: 10000 });
+    await page.getByText("历史保留天数", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  });
+  screenshots.push("settings-history-retention-desktop.png");
+
+  await capture(page, "/settings/user", "settings-user-desktop.png", async () => {
+    await page.getByRole("heading", { name: "用户" }).waitFor({ state: "visible", timeout: 10000 });
+    await page.getByText("当前用户", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  });
+  screenshots.push("settings-user-desktop.png");
 
   writeFileSync(
     path.join(outputDir, "summary.json"),
