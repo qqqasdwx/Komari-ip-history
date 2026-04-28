@@ -60,6 +60,23 @@ async function fetchNodeDetail(page, uuid) {
   return parseJSON(await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${uuid}`), `load node ${uuid}`);
 }
 
+async function fetchIntegrationSettings(page) {
+  return parseJSON(await jsonFetch(page, `${appBaseURL}/api/v1/admin/integration`), "load integration settings");
+}
+
+async function updateIntegrationSettings(page, settings) {
+  parseJSON(
+    await jsonFetch(page, `${appBaseURL}/api/v1/admin/integration`, {
+      method: "PUT",
+      body: JSON.stringify({
+        public_base_url: settings.public_base_url || "",
+        guest_read_enabled: Boolean(settings.guest_read_enabled)
+      })
+    }),
+    "update integration settings"
+  );
+}
+
 async function waitForNodesPage(page) {
   await page.getByRole("heading", { name: "节点列表" }).waitFor({ state: "visible", timeout: 10000 });
   const rows = page.locator('[data-node-row="true"]');
@@ -89,9 +106,11 @@ const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
 const page = await context.newPage();
 const screenshots = [];
+let initialIntegrationSettings = null;
 
 try {
   await login(page);
+  initialIntegrationSettings = await fetchIntegrationSettings(page);
   screenshots.push("login-desktop.png");
 
   const nodes = await fetchNodes(page);
@@ -123,6 +142,26 @@ try {
   screenshots.push("node-detail-multi-ip-desktop.png");
 
   const multiIPDetail = await fetchNodeDetail(page, multiIPNode.komari_node_uuid);
+  await updateIntegrationSettings(page, {
+    public_base_url: initialIntegrationSettings?.public_base_url || "",
+    guest_read_enabled: true
+  });
+  const publicQuery = new URLSearchParams();
+  if (multiIPDetail.current_target?.ip) {
+    publicQuery.set("display_ip", multiIPDetail.current_target.ip);
+  }
+  await capture(
+    page,
+    `/public/nodes/${multiIPNode.komari_node_uuid}${publicQuery.size > 0 ? `?${publicQuery.toString()}` : ""}`,
+    "public-node-detail-multi-ip-desktop.png",
+    async () => {
+      await page.getByRole("heading", { name: "IP质量体检报告" }).waitFor({ state: "visible", timeout: 10000 });
+      await page.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 10000 });
+    }
+  );
+  screenshots.push("public-node-detail-multi-ip-desktop.png");
+  await updateIntegrationSettings(page, initialIntegrationSettings);
+
   const multiIPTargetID = multiIPDetail.current_target?.id;
   const historyQuery = multiIPTargetID ? `?target_id=${multiIPTargetID}` : "";
   await capture(page, `/nodes/${multiIPNode.komari_node_uuid}/history${historyQuery}`, "history-multi-ip-desktop.png", async () => {
@@ -184,5 +223,8 @@ try {
 
   console.log(`frontend baseline screenshots captured: ${outputDir}`);
 } finally {
+  if (initialIntegrationSettings) {
+    await updateIntegrationSettings(page, initialIntegrationSettings).catch(() => {});
+  }
   await browser.close().catch(() => {});
 }
