@@ -111,6 +111,12 @@ try {
   screenshots.push("nodes-mobile.png");
 
   await page.setViewportSize({ width: 1440, height: 1200 });
+  await capture(page, `/nodes?report_config=${multiIPNode.komari_node_uuid}`, "nodes-report-config-desktop.png", async () => {
+    await page.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
+    await page.getByText("接入命令", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  });
+  screenshots.push("nodes-report-config-desktop.png");
+
   await capture(page, `/nodes/${multiIPNode.komari_node_uuid}`, "node-detail-multi-ip-desktop.png", async () => {
     await page.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 10000 });
   });
