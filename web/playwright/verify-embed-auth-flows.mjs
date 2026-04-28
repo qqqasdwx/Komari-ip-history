@@ -8,8 +8,12 @@ const integrationPublicBaseURL = (process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL ||
 const restoreIntegrationPublicBaseURL = (
   process.env.IPQ_INTEGRATION_PUBLIC_BASE_URL_RESTORE || "http://127.0.0.1:8090"
 ).replace(/\/$/, "");
+const themeScenario = (process.env.KOMARI_THEME_SCENARIO || "default").replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
+const expectedKomariTheme = (process.env.EXPECTED_KOMARI_THEME || "").trim().toLowerCase();
 const outputDir = path.resolve("playwright-output");
+const scenarioOutputDir = path.join(outputDir, `embed-${themeScenario}`);
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(scenarioOutputDir, { recursive: true });
 
 async function jsonFetch(page, url, options) {
   return page.evaluate(
@@ -41,9 +45,59 @@ function expectOK(result, label) {
 }
 
 async function clickIpqAction(page) {
-  const button = page.locator("button").filter({ hasText: /IP 质量/ }).first();
-  await button.waitFor({ state: "visible", timeout: 15000 });
-  await button.click();
+  const accessibleButton = page.getByRole("button", { name: /IP 质量/ }).first();
+  if ((await accessibleButton.count()) > 0) {
+    await accessibleButton.waitFor({ state: "visible", timeout: 15000 });
+    await accessibleButton.click();
+    return;
+  }
+  const textButton = page.locator("button").filter({ hasText: /IP 质量/ }).first();
+  await textButton.waitFor({ state: "visible", timeout: 15000 });
+  await textButton.click();
+}
+
+function assertThemeParam(iframeSrc, label) {
+  if (!expectedKomariTheme) {
+    return;
+  }
+  const url = new URL(iframeSrc);
+  const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+  const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
+  const params = new URLSearchParams(query);
+  const actual = (params.get("komari_theme") || "").toLowerCase();
+  if (!actual.includes(expectedKomariTheme)) {
+    throw new Error(`${label} expected komari_theme=${expectedKomariTheme}, got ${params.get("komari_theme") || "<empty>"}`);
+  }
+}
+
+async function waitForEmbedReport(page) {
+  const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await frame.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 15000 });
+}
+
+async function waitForOpenIframeSrc(page, expectedPath, label) {
+  const deadline = Date.now() + 20000;
+  let lastSrc = "";
+  let lastError = "";
+
+  while (Date.now() < deadline) {
+    try {
+      const iframe = page.locator('#ipq-loader-overlay[data-open="true"] iframe').first();
+      await iframe.waitFor({ state: "visible", timeout: 1000 });
+      const src = await iframe.evaluate((frame) => frame.getAttribute("src") || frame.src || "");
+      lastSrc = src || lastSrc;
+      if (src.includes(expectedPath)) {
+        return src;
+      }
+    } catch (error) {
+      lastError = error && error.message ? error.message : String(error || "");
+    }
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(
+    `${label} iframe did not point to ${expectedPath}: ${lastSrc || "<empty>"}${lastError ? ` (${lastError})` : ""}`
+  );
 }
 
 async function loginApp(page) {
@@ -151,6 +205,13 @@ try {
   if (guestOffOverlay !== 0 || !guestOffToastText.includes("管理员未开放")) {
     throw new Error("guest-disabled scenario did not show the expected toast");
   }
+  if (expectedKomariTheme === "purcarte") {
+    const purcarteButtons = await guestOffPage.locator('[data-ipq-purcarte-button="true"]').count();
+    if (purcarteButtons === 0) {
+      throw new Error("purcarte scenario did not render the PurCarte icon button");
+    }
+  }
+  await guestOffPage.screenshot({ path: path.join(scenarioOutputDir, "guest-blocked.png"), fullPage: true });
   await guestOffContext.close();
   guestOffContext = null;
 
@@ -163,16 +224,27 @@ try {
   await guestOnPage.waitForTimeout(3000);
   await clickIpqAction(guestOnPage);
   await guestOnPage.waitForTimeout(1500);
+  const guestOnIframeSrc = await waitForOpenIframeSrc(guestOnPage, "/public/nodes/", "guest-enabled");
   const guestOnOverlay = await guestOnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
-  const guestOnIframeSrc = await guestOnPage.locator("#ipq-loader-overlay iframe").first().getAttribute("src");
-  if (guestOnOverlay !== 1 || !guestOnIframeSrc?.includes("/public/nodes/")) {
+  if (guestOnOverlay !== 1) {
     throw new Error("guest-enabled scenario did not open the anonymous public popup");
   }
+  assertThemeParam(guestOnIframeSrc, "guest-enabled iframe");
+  if (expectedKomariTheme === "purcarte") {
+    const overlayClass = (await guestOnPage.locator("#ipq-loader-overlay").first().getAttribute("class")) || "";
+    if (!overlayClass.includes("ipq-loader-theme-purcarte")) {
+      throw new Error("purcarte guest overlay is missing the PurCarte theme class");
+    }
+  }
+  await waitForEmbedReport(guestOnPage);
+  await guestOnPage.screenshot({ path: path.join(scenarioOutputDir, "guest-allowed.png"), fullPage: true });
   await guestOnContext.close();
   guestOnContext = null;
 
   const adminReturnNode = await addKomariNode(komariPage, "Playwright Admin Return Node");
   createdNodeUUIDs.push(adminReturnNode.uuid);
+  await registerIpqNode(appPage, adminReturnNode.uuid, "Playwright Admin Return Node");
+  await addIpqTarget(appPage, adminReturnNode.uuid, "198.51.100.20");
   adminReturnContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const adminReturnPage = await adminReturnContext.newPage();
   await loginKomari(adminReturnPage);
@@ -186,22 +258,31 @@ try {
   await adminReturnPage.getByRole("button", { name: "登录" }).click();
   await adminReturnPage.waitForURL(`${komariBaseURL}/instance/**`, { timeout: 25000 });
   await adminReturnPage.waitForLoadState("domcontentloaded");
-  await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"] iframe').first().waitFor({ state: "visible", timeout: 15000 });
+  const adminReturnIframeSrc = await waitForOpenIframeSrc(
+    adminReturnPage,
+    `/nodes/${adminReturnNode.uuid}`,
+    "admin-return"
+  );
   const adminReturnOverlay = await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
-  const adminReturnIframeSrc =
-    (await adminReturnPage.locator("#ipq-loader-overlay iframe").count()) > 0
-      ? await adminReturnPage.locator("#ipq-loader-overlay iframe").first().getAttribute("src")
-      : "";
-  if (adminReturnOverlay !== 1 || !adminReturnIframeSrc?.includes(`/nodes/${adminReturnNode.uuid}`)) {
-    throw new Error("admin return scenario did not reopen the Komari popup detail");
+  if (adminReturnOverlay !== 1) {
+    throw new Error(`admin return scenario did not reopen the Komari popup detail: overlay=${adminReturnOverlay} iframe=${adminReturnIframeSrc || "<empty>"}`);
+  }
+  assertThemeParam(adminReturnIframeSrc, "admin-return iframe");
+  if (expectedKomariTheme === "purcarte") {
+    const overlayClass = (await adminReturnPage.locator("#ipq-loader-overlay").first().getAttribute("class")) || "";
+    if (!overlayClass.includes("ipq-loader-theme-purcarte")) {
+      throw new Error("purcarte admin overlay is missing the PurCarte theme class");
+    }
   }
   await adminReturnContext.close();
   adminReturnContext = null;
 
   writeFileSync(
-    path.join(outputDir, "verify-embed-auth-flows.json"),
+    path.join(outputDir, `verify-embed-auth-flows-${themeScenario}.json`),
     JSON.stringify(
       {
+        scenario: themeScenario,
+        expectedTheme: expectedKomariTheme || null,
         guestOff: {
           nodeUUID: registeredNode.uuid,
           toastText: guestOffToastText
@@ -220,7 +301,7 @@ try {
     )
   );
 
-  console.log("verify-embed-auth-flows: ok");
+  console.log(`verify-embed-auth-flows (${themeScenario}): ok`);
 } finally {
   if (guestOffContext) await guestOffContext.close().catch(() => {});
   if (guestOnContext) await guestOnContext.close().catch(() => {});

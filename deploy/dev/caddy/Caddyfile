@@ -1,5 +1,11 @@
 :8080 {
 	handle {
-		reverse_proxy komari:25774
+		reverse_proxy komari-default:25774
+	}
+}
+
+:8081 {
+	handle {
+		reverse_proxy komari-purcarte:25774
 	}
 }

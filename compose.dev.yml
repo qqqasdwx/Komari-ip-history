@@ -3,19 +3,29 @@ services:
     image: caddy:2.10-alpine
     ports:
       - "8080:8080"
+      - "8081:8081"
     volumes:
       - ./deploy/dev/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
-      - komari
+      - komari-default
+      - komari-purcarte
       - workspace
 
-  komari:
+  komari-default:
     image: ghcr.io/komari-monitor/komari:latest
     environment:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: admin
     volumes:
       - ./data/komari:/app/data
+
+  komari-purcarte:
+    image: ghcr.io/komari-monitor/komari:latest
+    environment:
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: admin
+    volumes:
+      - ./data/komari-purcarte:/app/data
 
   workspace:
     container_name: ipq-workspace-dev

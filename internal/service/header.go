@@ -696,6 +696,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     state.overlay.setAttribute("data-open", "false");
   }
 
+  function isModalOpen() {
+    return !!(state.overlay && state.overlay.getAttribute("data-open") === "true");
+  }
+
   function showToast(message) {
     debugLog("toast", { message: message });
     const toast = ensureToast();
@@ -1307,6 +1311,9 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     if (currentURL.searchParams.get("ipq_resume") !== "1") {
       return;
     }
+    if (!state.themeLoaded) {
+      return;
+    }
 
     const resumeUUID = currentURL.searchParams.get("ipq_uuid") || "";
     if (!resumeUUID || resumeUUID.toLowerCase() !== String(context.uuid).toLowerCase()) {
@@ -1342,6 +1349,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     if (!context) {
       state.contextKey = "";
       state.resumeHandledKey = "";
+      if (isModalOpen()) {
+        unmountButton({ closeModal: false });
+        return;
+      }
       clearRetryTimers();
       unmountButton();
       return;
