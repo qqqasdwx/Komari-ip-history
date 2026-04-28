@@ -1,5 +1,4 @@
 import {
-  Cross2Icon,
   ExitIcon,
   GearIcon,
   PlusIcon,
@@ -7,7 +6,6 @@ import {
   RowsIcon
 } from "@radix-ui/react-icons";
 import {
-  type DragEvent,
   type FormEvent,
   useEffect,
   useRef,
@@ -44,6 +42,7 @@ import type {
   RuntimeResponse
 } from "./lib/types";
 import { AppLoading } from "./components/layout/app-loading";
+import { HistoryPagination } from "./components/history/history-pagination";
 import {
   EmbedFrameShell,
   getEmbedAppearance,
@@ -52,6 +51,11 @@ import {
 } from "./components/layout/embed-frame-shell";
 import { PageHeader } from "./components/layout/page-header";
 import { SidebarSection, type NavItem } from "./components/layout/sidebar-section";
+import { SearchBox } from "./components/common/search-box";
+import { NodeDetailLoading } from "./components/node/node-detail-loading";
+import { NodePageError } from "./components/node/node-page-error";
+import { StatusPill } from "./components/node/status-pill";
+import { TargetTabs } from "./components/node/target-tabs";
 import { pushToast, ToastViewport } from "./components/toast";
 
 const standaloneAppBase = `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
@@ -913,47 +917,6 @@ function EmbedBridgePage(props: { title: string; description: string; actionURL:
   );
 }
 
-function SearchBox(props: {
-  value: string;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <form
-      className="w-full sm:w-auto"
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onSubmit();
-      }}
-    >
-      <input
-        className="h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 sm:min-w-[320px]"
-        placeholder="搜索节点名称"
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
-      <button className="sr-only" type="submit">
-        搜索
-      </button>
-    </form>
-  );
-}
-
-function StatusPill(props: { hasData: boolean }) {
-  return (
-    <span
-      className={[
-        "inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium",
-        props.hasData
-          ? "border-indigo-100 bg-indigo-50 text-indigo-600"
-          : "border-amber-200 bg-amber-50 text-amber-700"
-      ].join(" ")}
-    >
-      {props.hasData ? "有数据" : "无数据"}
-    </span>
-  );
-}
-
 function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -1146,20 +1109,6 @@ function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
           </div>
         )}
       </section>
-    </section>
-  );
-}
-
-function NodeDetailLoading() {
-  return (
-    <section className="space-y-6">
-      <div className="space-y-3">
-        <div className="h-9 w-28 animate-pulse rounded-full bg-slate-100" />
-        <div className="h-9 w-64 animate-pulse rounded-2xl bg-slate-100" />
-        <div className="h-5 w-80 animate-pulse rounded-xl bg-slate-100" />
-      </div>
-      <div className="h-80 animate-pulse rounded-[24px] bg-slate-100" />
-      <div className="h-40 animate-pulse rounded-[24px] bg-slate-100" />
     </section>
   );
 }
@@ -1962,99 +1911,6 @@ function HistoryChangeList(props: {
   );
 }
 
-function HistoryPagination(props: {
-  page: number;
-  totalPages: number;
-  total: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
-}) {
-  const [jumpValue, setJumpValue] = useState(String(props.page));
-
-  useEffect(() => {
-    setJumpValue(String(props.page));
-  }, [props.page]);
-
-  if (props.totalPages <= 1) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-slate-500">共 {props.total} 条变化记录。</p>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-500">每页</span>
-          <select
-            className="h-9 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-            value={props.pageSize}
-            onChange={(event) => props.onPageSizeChange(Number(event.target.value))}
-          >
-            {[10, 20, 50, 100].map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm text-slate-500">
-        第 {props.page} / {props.totalPages} 页，共 {props.total} 条变化记录，每页 {props.pageSize} 条。
-      </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-500">每页</span>
-        <select
-          className="h-9 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-          value={props.pageSize}
-          onChange={(event) => props.onPageSizeChange(Number(event.target.value))}
-        >
-          {[10, 20, 50, 100].map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-        <button
-          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => props.onPageChange(props.page - 1)}
-          type="button"
-          disabled={props.page <= 1}
-        >
-          上一页
-        </button>
-        <button
-          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
-          onClick={() => props.onPageChange(props.page + 1)}
-          type="button"
-          disabled={props.page >= props.totalPages}
-        >
-          下一页
-        </button>
-        <input
-          className="h-9 w-20 rounded-full border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
-          value={jumpValue}
-          onChange={(event) => setJumpValue(event.target.value.replace(/[^\d]/g, ""))}
-          inputMode="numeric"
-        />
-        <button
-          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-          onClick={() => {
-            const nextPage = Number.parseInt(jumpValue, 10);
-            if (!Number.isNaN(nextPage) && nextPage >= 1 && nextPage <= props.totalPages) {
-              props.onPageChange(nextPage);
-            }
-          }}
-          type="button"
-        >
-          跳转
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function reportPathMatchesHighlight(nodePath: string, highlightPath: string) {
   return nodePath === highlightPath;
 }
@@ -2245,116 +2101,6 @@ function CompareTimeline(props: {
     </section>
   );
 }
-
-function TargetTabs(props: {
-  items: Array<{ id: number; label: string; has_data: boolean }>;
-  selectedId: number | null;
-  onSelect: (targetID: number) => void;
-  onReorder?: (sourceID: number, destinationID: number) => void;
-  onDelete?: (targetID: number) => void;
-  variant?: "default" | "attached";
-}) {
-  const [draggingTargetID, setDraggingTargetID] = useState<number | null>(null);
-  const isAttached = props.variant === "attached";
-
-  function handleDrop(destinationID: number) {
-    if (!props.onReorder || draggingTargetID === null || draggingTargetID === destinationID) {
-      setDraggingTargetID(null);
-      return;
-    }
-    props.onReorder(draggingTargetID, destinationID);
-    setDraggingTargetID(null);
-  }
-
-  return (
-    <div className={isAttached ? "target-tabs target-tabs-attached" : "flex flex-wrap items-center gap-2"}>
-      {props.items.map((item) => (
-        <div key={item.id} className={isAttached ? "group relative target-tab-shell" : "group relative"}>
-          <button
-            className={[
-              isAttached
-                ? "target-tab-button target-tab-button-attached"
-                : "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition",
-              props.onDelete ? "pr-10" : "",
-              props.selectedId === item.id
-                ? isAttached
-                  ? "is-active"
-                  : "border-indigo-200 bg-indigo-50 text-indigo-600"
-                : isAttached
-                  ? ""
-                  : "border-slate-200 bg-white text-slate-700 hover:border-indigo-200 hover:text-indigo-600"
-            ].join(" ")}
-            draggable={Boolean(props.onReorder)}
-            onClick={() => props.onSelect(item.id)}
-            onDragOver={(event: DragEvent<HTMLButtonElement>) => {
-              if (props.onReorder) {
-                event.preventDefault();
-              }
-            }}
-            onDragStart={() => setDraggingTargetID(item.id)}
-            onDrop={() => handleDrop(item.id)}
-            onDragEnd={() => setDraggingTargetID(null)}
-            type="button"
-          >
-            <span
-              className={[
-                "inline-block h-2.5 w-2.5 rounded-full",
-                item.has_data ? "bg-emerald-500" : "bg-slate-300"
-              ].join(" ")}
-            />
-            <span>{item.label}</span>
-          </button>
-          {props.onDelete ? (
-            <button
-              aria-label={`删除 ${item.label}`}
-              className={[
-                "absolute inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600",
-                isAttached ? "right-2 top-[18px]" : "right-2 top-1/2 -translate-y-1/2"
-              ].join(" ")}
-              onClick={(event) => {
-                event.stopPropagation();
-                void props.onDelete?.(item.id);
-              }}
-              type="button"
-            >
-              <Cross2Icon />
-            </button>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function NodePageError(props: {
-  title: string;
-  subtitle: string;
-  backTo: string;
-  error: string;
-  onRetry: () => void;
-}) {
-  return (
-    <section className="space-y-6">
-      <PageHeader title={props.title} subtitle={props.subtitle} backTo={props.backTo} />
-      <section className="rounded-[24px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">
-        <div className="space-y-4">
-          <p>{props.error}</p>
-          <div>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
-              onClick={props.onRetry}
-              type="button"
-            >
-              <ReloadIcon />
-              <span>重试</span>
-            </button>
-          </div>
-        </div>
-      </section>
-    </section>
-  );
-}
-
 
 function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const { uuid = "" } = useParams();
