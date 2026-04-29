@@ -1032,6 +1032,7 @@ textarea {
   --ipq-purcarte-blur: 10px;
   --ipq-purcarte-card: rgba(255, 255, 255, 0.5);
   --ipq-purcarte-panel: var(--ipq-purcarte-card);
+  --ipq-purcarte-modal-tint: rgba(59, 79, 101, 0.42);
   --ipq-purcarte-inner-card: rgba(255, 255, 255, 0.18);
   --ipq-purcarte-inner-border: rgba(255, 255, 255, 0.3);
   --ipq-purcarte-inner-shadow: rgba(23, 23, 23, 0.07);
@@ -1058,7 +1059,9 @@ textarea {
   padding: 14px 16px;
   border-radius: 10px;
   border: 1px solid var(--ipq-purcarte-inner-border);
-  background: var(--ipq-purcarte-inner-card);
+  background:
+    linear-gradient(0deg, var(--ipq-purcarte-modal-tint), var(--ipq-purcarte-modal-tint)),
+    var(--ipq-purcarte-inner-card);
   box-shadow: 0 2px 6px var(--ipq-purcarte-inner-shadow);
   backdrop-filter: blur(var(--ipq-purcarte-blur)) saturate(1.08);
 }
@@ -1145,9 +1148,34 @@ textarea {
   border-top-color: rgba(255, 255, 255, 0.3);
 }
 
+.embed-theme-purcarte .embed-bridge-card {
+  border-color: var(--ipq-purcarte-inner-border) !important;
+  background:
+    linear-gradient(0deg, var(--ipq-purcarte-modal-tint), var(--ipq-purcarte-modal-tint)),
+    var(--ipq-purcarte-inner-card) !important;
+  box-shadow: 0 2px 6px var(--ipq-purcarte-inner-shadow) !important;
+  backdrop-filter: blur(var(--ipq-purcarte-blur)) saturate(1.08);
+}
+
+.embed-theme-purcarte .embed-bridge-card p {
+  color: var(--ipq-purcarte-muted) !important;
+}
+
+.embed-theme-purcarte .embed-bridge-action {
+  border-radius: 10px;
+  background: var(--ipq-purcarte-accent-soft) !important;
+  color: var(--ipq-purcarte-accent) !important;
+  box-shadow: none;
+}
+
+.embed-theme-purcarte .embed-bridge-action:hover {
+  background: var(--ipq-purcarte-accent-soft-hover) !important;
+}
+
 .embed-theme-purcarte.embed-appearance-dark {
   --ipq-purcarte-card: rgba(0, 0, 0, 0.5);
   --ipq-purcarte-panel: var(--ipq-purcarte-card);
+  --ipq-purcarte-modal-tint: rgba(0, 0, 0, 0.34);
   --ipq-purcarte-inner-card: rgba(255, 255, 255, 0.04);
   --ipq-purcarte-inner-border: rgba(255, 255, 255, 0.12);
   --ipq-purcarte-inner-shadow: rgba(0, 0, 0, 0.08);

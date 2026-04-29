@@ -21,6 +21,16 @@ type RegisterNodeInput struct {
 	Name           string `json:"name"`
 }
 
+type KomariNodeEntryState struct {
+	NodeUUID       string `json:"node_uuid"`
+	KomariNodeUUID string `json:"komari_node_uuid"`
+	Name           string `json:"name"`
+	Exists         bool   `json:"exists"`
+	HasData        bool   `json:"has_data"`
+	TargetCount    int64  `json:"target_count"`
+	Connected      bool   `json:"connected"`
+}
+
 type AddNodeTargetInput struct {
 	IP string `json:"ip"`
 }
@@ -198,6 +208,56 @@ func RegisterNode(db *gorm.DB, _ config.Config, input RegisterNodeInput) (*model
 		return nil, false, err
 	}
 	return &node, false, nil
+}
+
+func SyncKomariNode(db *gorm.DB, input RegisterNodeInput) (*models.Node, bool, error) {
+	return RegisterNode(db, config.Config{}, input)
+}
+
+func GetKomariNodeEntryState(db *gorm.DB, input RegisterNodeInput) (KomariNodeEntryState, error) {
+	if strings.TrimSpace(input.KomariNodeUUID) == "" || strings.TrimSpace(input.Name) == "" {
+		return KomariNodeEntryState{}, errors.New("uuid and name are required")
+	}
+
+	var node models.Node
+	err := db.First(&node, "komari_node_uuid = ?", input.KomariNodeUUID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return KomariNodeEntryState{
+			KomariNodeUUID: input.KomariNodeUUID,
+			Name:           input.Name,
+			Exists:         false,
+		}, nil
+	}
+	if err != nil {
+		return KomariNodeEntryState{}, err
+	}
+
+	return buildKomariNodeEntryState(db, node)
+}
+
+func SyncKomariNodeEntryState(db *gorm.DB, input RegisterNodeInput) (KomariNodeEntryState, error) {
+	node, _, err := SyncKomariNode(db, input)
+	if err != nil {
+		return KomariNodeEntryState{}, err
+	}
+	return buildKomariNodeEntryState(db, *node)
+}
+
+func buildKomariNodeEntryState(db *gorm.DB, node models.Node) (KomariNodeEntryState, error) {
+	var targetCount int64
+	if err := db.Model(&models.NodeTarget{}).Where("node_id = ?", node.ID).Count(&targetCount).Error; err != nil {
+		return KomariNodeEntryState{}, err
+	}
+
+	return KomariNodeEntryState{
+		NodeUUID:       node.NodeUUID,
+		KomariNodeUUID: node.KomariNodeUUID,
+		Name:           node.Name,
+		Exists:         true,
+		HasData:        node.HasData,
+		TargetCount:    targetCount,
+		Connected:      targetCount > 0,
+	}, nil
 }
 
 func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {

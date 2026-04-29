@@ -7,7 +7,6 @@ import {
   useSearchParams
 } from "react-router-dom";
 import {
-  buildConnectPath,
   buildReportConfigListPath,
   toStandaloneAppURL
 } from "../lib/embed-navigation";
@@ -57,7 +56,6 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
   const currentTargetID = detail?.selected_target_id ?? detail?.current_target?.id ?? selectedTargetID ?? null;
   const targetQuery = currentTargetID ? `?target_id=${currentTargetID}` : "";
   const historyPath = `/nodes/${uuid}/history${targetQuery}`;
-  const comparePath = `/nodes/${uuid}/compare${targetQuery}`;
 
   function goToReportConfig() {
     const path = buildReportConfigListPath(uuid);
@@ -76,8 +74,9 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
     return (
       <EmbedBridgePage
         title="接入节点"
-        description="当前节点尚未接入，正在打开独立页面继续。"
-        actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+        description="当前节点尚未配置，正在打开独立页面继续。"
+        actionURL={buildReportConfigListPath(uuid, { fromKomari: true, nodeName })}
+        actionLabel="去接入"
       />
     );
   }
@@ -101,34 +100,13 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
         backTo={isEmbed ? undefined : "/nodes"}
         actions={
-          detail.current_target ? (
-            isEmbed ? (
-              <>
-                <Button
-                  asChild
-                  className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
-                >
-                  <a href={toStandaloneAppURL(historyPath)} rel="noreferrer" target="_blank">
-                    历史记录
-                  </a>
-                </Button>
-                <Button
-                  asChild
-                  className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
-                >
-                  <a href={toStandaloneAppURL(comparePath)} rel="noreferrer" target="_blank">
-                    快照对比
-                  </a>
-                </Button>
-              </>
-            ) : (
-              <Button
-                asChild
-                className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
-              >
-                <Link to={historyPath}>查看历史记录</Link>
-              </Button>
-            )
+          detail.current_target && !isEmbed ? (
+            <Button
+              asChild
+              className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
+            >
+              <Link to={historyPath}>查看历史记录</Link>
+            </Button>
           ) : undefined
         }
       />
@@ -145,9 +123,11 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>当前节点还没有目标 IP。</span>
-              <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
-                去接入
-              </Button>
+              {!isEmbed ? (
+                <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
+                  去接入
+                </Button>
+              ) : null}
             </div>
           )}
         </div>

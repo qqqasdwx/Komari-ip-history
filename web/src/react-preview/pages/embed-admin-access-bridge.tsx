@@ -1,6 +1,5 @@
 import { useLocation, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/layout/page-header";
-import { buildConnectPath } from "../lib/embed-navigation";
 import { EmbedBridgePage } from "./embed-bridge-page";
 
 export function EmbedAdminAccessBridge() {
@@ -25,8 +24,9 @@ export function EmbedAdminAccessBridge() {
   return (
     <EmbedBridgePage
       title="需要登录"
-      description="当前管理员链路需要先在独立页面登录。"
-      actionURL={buildConnectPath(uuid, nodeName, { returnTo: komariReturn, resumePopup: true })}
+      description="当前查看需要先在独立页面登录 IPQ。"
+      actionURL={`/nodes/${encodeURIComponent(uuid)}?node_name=${encodeURIComponent(nodeName)}`}
+      actionLabel="登录 IPQ 后查看"
     />
   );
 }

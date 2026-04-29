@@ -58,16 +58,18 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   const TITLE_BLACKLIST = /^(komari|dashboard|nodes|node|clients|client|服务器|节点)$/i;
   const state = {
     contextKey: "",
-    resumeHandledKey: "",
     button: null,
     portal: null,
     overlay: null,
     iframe: null,
     openLink: null,
-    modalSource: "",
+    connectContext: null,
+    connectButton: null,
     retryTimers: [],
     routeCycle: 0,
     busy: false,
+    entryStateCache: {},
+    entryStatePromises: {},
     themeName: "default",
     themeSettings: {},
     themeLoaded: false
@@ -162,6 +164,16 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  transform: translateY(-1px);",
       "  box-shadow: 0 16px 34px rgba(15, 118, 110, 0.32);",
       "}",
+      ".ipq-loader-button[data-ipq-entry-state=\"pending\"]:not(.ipq-node-icon-button),",
+      ".ipq-loader-button[data-ipq-entry-state=\"unknown\"]:not(.ipq-node-icon-button) {",
+      "  color: #334155;",
+      "  background: #e2e8f0;",
+      "  box-shadow: 0 10px 24px rgba(100, 116, 139, 0.16);",
+      "}",
+      ".ipq-loader-button[data-ipq-entry-state=\"pending\"]:not(.ipq-node-icon-button):hover,",
+      ".ipq-loader-button[data-ipq-entry-state=\"unknown\"]:not(.ipq-node-icon-button):hover {",
+      "  box-shadow: 0 14px 30px rgba(100, 116, 139, 0.2);",
+      "}",
       ".ipq-loader-button:disabled {",
       "  cursor: wait;",
       "  opacity: 0.72;",
@@ -250,6 +262,56 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  width: 18px;",
       "  height: 18px;",
       "}",
+      ".ipq-loader-connect-panel {",
+      "  display: none;",
+      "  height: 100%%;",
+      "  align-items: center;",
+      "  justify-content: center;",
+      "  padding: 24px;",
+      "  background: #f8fafc;",
+      "}",
+      ".ipq-loader-overlay[data-connect-open=\"true\"] .ipq-loader-connect-panel {",
+      "  display: flex;",
+      "}",
+      ".ipq-loader-overlay[data-connect-open=\"true\"] .ipq-loader-frame {",
+      "  display: none;",
+      "}",
+      ".ipq-loader-overlay[data-connect-open=\"true\"] .ipq-loader-link {",
+      "  display: none;",
+      "}",
+      ".ipq-loader-connect-card {",
+      "  width: min(420px, 100%%);",
+      "  display: grid;",
+      "  gap: 14px;",
+      "  padding: 24px;",
+      "  border: 1px solid rgba(148, 163, 184, 0.28);",
+      "  border-radius: 18px;",
+      "  background: #fff;",
+      "  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);",
+      "}",
+      ".ipq-loader-connect-card strong {",
+      "  font: 700 18px/1.3 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
+      "  color: #0f172a;",
+      "}",
+      ".ipq-loader-connect-card span {",
+      "  font: 14px/1.6 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
+      "  color: #475569;",
+      "}",
+      ".ipq-loader-connect-action {",
+      "  justify-self: flex-start;",
+      "  appearance: none;",
+      "  border: 0;",
+      "  border-radius: 12px;",
+      "  padding: 10px 14px;",
+      "  font: 700 14px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
+      "  color: #fff;",
+      "  background: #4f46e5;",
+      "  cursor: pointer;",
+      "}",
+      ".ipq-loader-connect-action:disabled {",
+      "  cursor: wait;",
+      "  opacity: 0.72;",
+      "}",
       ".ipq-loader-frame {",
       "  width: 100%%;",
       "  height: 100%%;",
@@ -278,7 +340,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  opacity: 1;",
       "  transform: translateY(0);",
       "}",
-      ".ipq-loader-button.ipq-purcarte-button {",
+      ".ipq-loader-button.ipq-node-icon-button {",
       "  width: 36px;",
       "  height: 36px;",
       "  min-width: 0;",
@@ -297,14 +359,58 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  box-shadow: none;",
       "  backdrop-filter: none;",
       "}",
-      ".ipq-loader-button.ipq-purcarte-button:hover {",
+      ".ipq-loader-button.ipq-node-icon-button[data-ipq-entry-state=\"connected\"] {",
+      "  color: var(--accent-11, var(--primary, #5b4bc4));",
+      "}",
+      ".ipq-loader-button.ipq-node-icon-button[data-ipq-entry-state=\"pending\"],",
+      ".ipq-loader-button.ipq-node-icon-button[data-ipq-entry-state=\"unknown\"] {",
+      "  color: #94a3b8;",
+      "}",
+      ".ipq-loader-button.ipq-node-icon-button:hover {",
       "  color: var(--accent-11, #4f46e5);",
       "  background: var(--accent-a4, rgba(145, 119, 230, 0.16));",
       "  box-shadow: none;",
       "}",
-      ".ipq-loader-button.ipq-purcarte-button svg {",
+      ".ipq-loader-button.ipq-node-icon-button[data-ipq-entry-state=\"pending\"]:hover,",
+      ".ipq-loader-button.ipq-node-icon-button[data-ipq-entry-state=\"unknown\"]:hover {",
+      "  color: #64748b;",
+      "  background: rgba(148, 163, 184, 0.16);",
+      "}",
+      ".ipq-loader-button.ipq-node-icon-button svg {",
       "  width: 18px;",
       "  height: 18px;",
+      "}",
+      ".ipq-loader-default-home-slot {",
+      "  display: inline-flex;",
+      "  align-items: center;",
+      "  justify-content: center;",
+      "  flex: 0 0 auto;",
+      "  margin: 0;",
+      "}",
+      ".ipq-loader-button.ipq-default-home-button {",
+      "  width: 23px;",
+      "  height: 23px;",
+      "  color: var(--accent-11, #3b82f6);",
+      "  border-radius: var(--radius-2, 6px);",
+      "}",
+      ".ipq-loader-button.ipq-default-home-button[data-ipq-entry-state=\"pending\"],",
+      ".ipq-loader-button.ipq-default-home-button[data-ipq-entry-state=\"unknown\"] {",
+      "  color: var(--gray-9, #8b8d98);",
+      "}",
+      ".ipq-loader-button.ipq-default-home-button:hover {",
+      "  transform: none;",
+      "  color: var(--accent-11, #2563eb);",
+      "  background: var(--gray-a3, rgba(148, 163, 184, 0.14));",
+      "  box-shadow: none;",
+      "}",
+      ".ipq-loader-button.ipq-default-home-button[data-ipq-entry-state=\"pending\"]:hover,",
+      ".ipq-loader-button.ipq-default-home-button[data-ipq-entry-state=\"unknown\"]:hover {",
+      "  color: var(--gray-11, #60646c);",
+      "  background: var(--gray-a3, rgba(148, 163, 184, 0.14));",
+      "}",
+      ".ipq-loader-button.ipq-default-home-button svg {",
+      "  width: 14px;",
+      "  height: 14px;",
       "}",
       ".ipq-loader-purcarte-slot {",
       "  display: inline-flex;",
@@ -317,14 +423,14 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  margin-right: 6px;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte {",
-      "  background: transparent;",
-      "  backdrop-filter: none;",
+      "  background: var(--ipq-purcarte-overlay-tint, rgba(22, 34, 49, 0.18));",
+      "  backdrop-filter: blur(2px) saturate(0.96);",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-dialog {",
       "  width: min(960px, calc(100vw - 56px));",
       "  height: min(80vh, calc(100vh - 56px));",
       "  padding: 20px;",
-      "  background: var(--ipq-purcarte-shell, var(--ipq-purcarte-card, rgba(255, 255, 255, 0.5)));",
+      "  background: linear-gradient(0deg, var(--ipq-purcarte-modal-tint, rgba(59, 79, 101, 0.42)), var(--ipq-purcarte-modal-tint, rgba(59, 79, 101, 0.42))), var(--ipq-purcarte-shell, var(--ipq-purcarte-card, rgba(255, 255, 255, 0.5)));",
       "  border: 1px solid var(--ipq-purcarte-theme-border, rgba(23, 23, 23, 0.28));",
       "  border-radius: 10px;",
       "  box-shadow: 0 2px 8px rgba(23, 23, 23, 0.24);",
@@ -383,8 +489,32 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  background: var(--accent-a4, rgba(145, 119, 230, 0.16));",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-frame {",
-      "  background: var(--ipq-purcarte-shell, rgba(255, 255, 255, 0.08));",
+      "  background: transparent;",
       "  border-radius: 10px;",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-panel {",
+      "  background: transparent;",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-card {",
+      "  border-color: var(--ipq-purcarte-inner-border, rgba(255, 255, 255, 0.3));",
+      "  border-radius: 10px;",
+      "  background: var(--ipq-purcarte-inner-card, rgba(255, 255, 255, 0.18));",
+      "  box-shadow: 0 2px 6px var(--ipq-purcarte-inner-shadow, rgba(23, 23, 23, 0.07));",
+      "  backdrop-filter: blur(var(--ipq-purcarte-blur, 10px)) saturate(1.08);",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-card strong {",
+      "  color: var(--ipq-purcarte-text, var(--foreground, #171717));",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-card span {",
+      "  color: var(--ipq-purcarte-muted, rgba(49, 49, 49, 0.72));",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-action {",
+      "  border-radius: 10px;",
+      "  background: var(--accent-a6, rgba(145, 119, 230, 0.32));",
+      "  color: var(--accent-11, #5b4bc4);",
+      "}",
+      ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-action:hover {",
+      "  background: var(--accent-a5, rgba(145, 119, 230, 0.24));",
       "}",
       "@media (max-width: 720px) {",
       "  #ipq-loader-portal {",
@@ -500,6 +630,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       cardHover: appearance === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(255, 255, 255, 0.68)",
       border: appearance === "dark" ? "rgba(255, 255, 255, 0.16)" : "rgba(255, 255, 255, 0.5)",
       themeBorder: appearance === "dark" ? "rgba(250, 250, 250, 0.5)" : "rgba(23, 23, 23, 0.5)",
+      overlayTint: appearance === "dark" ? "rgba(0, 0, 0, 0.26)" : "rgba(22, 34, 49, 0.18)",
+      modalTint: appearance === "dark" ? "rgba(0, 0, 0, 0.34)" : "rgba(59, 79, 101, 0.42)",
+      innerCard: appearance === "dark" ? "rgba(255, 255, 255, 0.04)" : "rgba(255, 255, 255, 0.18)",
+      innerBorder: appearance === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(255, 255, 255, 0.3)",
+      innerShadow: appearance === "dark" ? "rgba(0, 0, 0, 0.08)" : "rgba(23, 23, 23, 0.07)",
       text: appearance === "dark" ? "rgba(250, 250, 250, 0.96)" : "rgba(23, 23, 23, 0.96)",
       muted: appearance === "dark" ? "rgba(250, 250, 250, 0.68)" : "rgba(49, 49, 49, 0.72)",
       shell: shell,
@@ -520,6 +655,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
           "--ipq-purcarte-card-hover",
           "--ipq-purcarte-border",
           "--ipq-purcarte-theme-border",
+          "--ipq-purcarte-overlay-tint",
+          "--ipq-purcarte-modal-tint",
+          "--ipq-purcarte-inner-card",
+          "--ipq-purcarte-inner-border",
+          "--ipq-purcarte-inner-shadow",
           "--ipq-purcarte-text",
           "--ipq-purcarte-muted",
           "--ipq-purcarte-shell",
@@ -538,6 +678,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       element.style.setProperty("--ipq-purcarte-card-hover", glass.cardHover);
       element.style.setProperty("--ipq-purcarte-border", glass.border);
       element.style.setProperty("--ipq-purcarte-theme-border", glass.themeBorder);
+      element.style.setProperty("--ipq-purcarte-overlay-tint", glass.overlayTint);
+      element.style.setProperty("--ipq-purcarte-modal-tint", glass.modalTint);
+      element.style.setProperty("--ipq-purcarte-inner-card", glass.innerCard);
+      element.style.setProperty("--ipq-purcarte-inner-border", glass.innerBorder);
+      element.style.setProperty("--ipq-purcarte-inner-shadow", glass.innerShadow);
       element.style.setProperty("--ipq-purcarte-text", glass.text);
       element.style.setProperty("--ipq-purcarte-muted", glass.muted);
       element.style.setProperty("--ipq-purcarte-shell", glass.shell);
@@ -566,24 +711,51 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
 
   function ipqIconSVG() {
     return [
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">',
+      '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check" aria-hidden="true">',
       '  <path d="M12 3l7 3v5c0 4.2-2.7 8-7 10-4.3-2-7-5.8-7-10V6l7-3z"></path>',
       '  <path d="M9 12l2 2 4-5"></path>',
       '</svg>'
     ].join("");
   }
 
+  function entryStateCacheKey(context) {
+    return String(context && context.uuid || "").trim().toLowerCase();
+  }
+
+  function entryStateName(entryState) {
+    if (!entryState) return "unknown";
+    return entryState.connected ? "connected" : "pending";
+  }
+
+  function buttonEntryState(button) {
+    return button && button.getAttribute("data-ipq-entry-state") || "unknown";
+  }
+
+  function setButtonEntryState(button, entryState) {
+    if (!button) return;
+    button._ipqEntryState = entryState || null;
+    button.setAttribute("data-ipq-entry-state", entryStateName(entryState));
+  }
+
+  function entryActionLabel(status) {
+    if (status === "pending") return "开启 IP 质量检测";
+    if (status === "unknown") return "检测接入状态";
+    return "查看 IP 质量";
+  }
+
   function renderContextButton(button, busy) {
     if (!button) return;
     const iconMode = button.getAttribute("data-ipq-icon-button") === "true";
+    const status = buttonEntryState(button);
+    const label = entryActionLabel(status);
     button.disabled = !!busy;
     if (iconMode) {
       button.innerHTML = ipqIconSVG();
-      button.setAttribute("aria-label", busy ? "正在打开 IP 质量" : "查看 IP 质量");
-      button.setAttribute("title", busy ? "正在打开 IP 质量" : "查看 IP 质量");
+      button.setAttribute("aria-label", busy ? "正在打开..." : label);
+      button.setAttribute("title", busy ? "正在打开..." : label);
       return;
     }
-    button.textContent = busy ? "处理中..." : "打开 IP 质量";
+    button.textContent = busy ? "处理中..." : label;
   }
 
   function findButtonByContext(slot, uuid) {
@@ -601,10 +773,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     if (!button) {
       button = document.createElement("button");
       button.type = "button";
-      button.className = "ipq-loader-button ipq-purcarte-button";
+      button.className = "ipq-loader-button ipq-node-icon-button ipq-purcarte-button";
       button.setAttribute("data-ipq-purcarte-button", "true");
       button.setAttribute("data-ipq-icon-button", "true");
       button.setAttribute("data-ipq-uuid", context.uuid);
+      button.setAttribute("data-ipq-entry-state", "unknown");
       slot.appendChild(button);
       button.addEventListener("pointerdown", function (event) {
         event.preventDefault();
@@ -618,7 +791,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       });
     }
     button._ipqContext = context;
-    renderContextButton(button, false);
+    refreshContextButtonState(button, context);
     applyThemeVariables();
     return button;
   }
@@ -653,6 +826,13 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       '      <button type="button" class="ipq-loader-close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>',
       '    </div>',
       '  </div>',
+      '  <div class="ipq-loader-connect-panel">',
+      '    <div class="ipq-loader-connect-card">',
+      '      <strong>当前节点尚未开启 IP 质量检测</strong>',
+      '      <span>接入后会打开管理页面，用来配置检测目标、上报计划和接入命令。</span>',
+      '      <button type="button" class="ipq-loader-connect-action">去接入</button>',
+      '    </div>',
+      '  </div>',
       '  <iframe class="ipq-loader-frame" referrerpolicy="same-origin" allowtransparency="true"></iframe>',
       '</div>'
     ].join("");
@@ -666,6 +846,36 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const closeButton = overlay.querySelector(".ipq-loader-close");
     if (closeButton) {
       closeButton.addEventListener("click", closeModal);
+    }
+
+    state.connectButton = overlay.querySelector(".ipq-loader-connect-action");
+    if (state.connectButton) {
+      state.connectButton.addEventListener("click", function () {
+        const context = state.connectContext;
+        if (!context || state.connectButton.disabled) {
+          return;
+        }
+        const targetWindow = window.open("about:blank", "_blank");
+        if (targetWindow) {
+          targetWindow.opener = null;
+        }
+        state.connectButton.disabled = true;
+        state.connectButton.textContent = "正在打开...";
+        connectNodeEntryState(context).then(function (entryState) {
+          const nodeUUID = entryState && (entryState.node_uuid || entryState.komari_node_uuid) || context.uuid;
+          closeModal();
+          openStandalone(buildReportConfigURL(context, nodeUUID), targetWindow);
+        }).catch(function (error) {
+          if (targetWindow && !targetWindow.closed) {
+            targetWindow.close();
+          }
+          debugLog("connect_node_failed", { message: error && error.message ? error.message : String(error || "") });
+          showToast("打开接入页面失败，请稍后重试");
+        }).finally(function () {
+          state.connectButton.disabled = false;
+          state.connectButton.textContent = "去接入";
+        });
+      });
     }
 
     document.addEventListener("keydown", function (event) {
@@ -696,6 +906,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     if (!state.overlay) return;
     const wasOpen = state.overlay.getAttribute("data-open") === "true";
     state.overlay.setAttribute("data-open", "false");
+    state.overlay.setAttribute("data-connect-open", "false");
+    state.connectContext = null;
     if (wasOpen) {
       scheduleRouteSync();
     }
@@ -716,9 +928,146 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     }, 2800);
   }
 
+  async function loadKomariPublicNode(context) {
+    const nodesResponse = await fetch(window.location.origin + "/api/nodes", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (!nodesResponse.ok) {
+      debugLog("komari_nodes_failed", { status: nodesResponse.status });
+      throw new Error("failed to load Komari public nodes");
+    }
+
+    const payload = await nodesResponse.json();
+    const items = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload && payload.data)
+        ? payload.data
+        : Object.values(payload || {});
+    return items.find(function (item) {
+      return item && String(item.uuid || "").toLowerCase() === String(context.uuid).toLowerCase();
+    }) || null;
+  }
+
+  function displayIPFromKomariNode(node) {
+    return String(node && (node.ipv4 || node.ipv6) || "").trim();
+  }
+
+  function buildReportConfigURL(context, nodeUUID) {
+    const params = new URLSearchParams();
+    params.set("report_config", nodeUUID || context.uuid);
+    params.set("from_komari", "1");
+    if (context.name) {
+      params.set("node_name", context.name);
+    }
+    return APP_BASE + "/?v=" + CACHE_BUST + "#/nodes?" + params.toString();
+  }
+
+  function openStandalone(url, targetWindow) {
+    if (targetWindow && !targetWindow.closed) {
+      targetWindow.location.href = url;
+      return;
+    }
+    const opened = window.open(url, "_blank", "noopener");
+    if (!opened) {
+      window.location.assign(url);
+    }
+  }
+
+  async function fetchNodeEntryState(context) {
+    const params = new URLSearchParams();
+    params.set("uuid", context.uuid);
+    params.set("name", context.name || "未命名节点");
+    params.set("v", Date.now().toString(36));
+    const response = await fetch(API_BASE + "/nodes/status?" + params.toString(), {
+      credentials: "omit",
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      throw new Error("failed to sync IPQ node");
+    }
+    return await response.json();
+  }
+
+  function cacheNodeEntryState(context, entryState) {
+    const key = entryStateCacheKey(context);
+    if (!key || !entryState) return;
+    state.entryStateCache[key] = {
+      value: entryState,
+      expiresAt: Date.now() + 5000
+    };
+  }
+
+  function clearEntryStateCache() {
+    state.entryStateCache = {};
+    state.entryStatePromises = {};
+  }
+
+  async function loadNodeEntryState(context) {
+    try {
+      const entryState = await fetchNodeEntryState(context);
+      cacheNodeEntryState(context, entryState);
+      return entryState;
+    } catch (error) {
+      debugLog("load_node_state_failed", { message: error && error.message ? error.message : String(error || "") });
+      return null;
+    }
+  }
+
+  async function loadCachedNodeEntryState(context) {
+    const key = entryStateCacheKey(context);
+    if (!key) return null;
+    const cached = state.entryStateCache[key];
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    if (!state.entryStatePromises[key]) {
+      state.entryStatePromises[key] = fetchNodeEntryState(context).then(function (entryState) {
+        cacheNodeEntryState(context, entryState);
+        return entryState;
+      }).catch(function (error) {
+        debugLog("cached_node_state_failed", { uuid: context && context.uuid, message: error && error.message ? error.message : String(error || "") });
+        return null;
+      }).finally(function () {
+        delete state.entryStatePromises[key];
+      });
+    }
+    return state.entryStatePromises[key];
+  }
+
+  function refreshContextButtonState(button, context) {
+    if (!button || !context || !context.uuid) return;
+    if (!button.getAttribute("data-ipq-entry-state")) {
+      button.setAttribute("data-ipq-entry-state", "unknown");
+    }
+    renderContextButton(button, button.disabled);
+    loadCachedNodeEntryState(context).then(function (entryState) {
+      if (!entryState) return;
+      if (button._ipqContext && button._ipqContext.uuid !== context.uuid) return;
+      setButtonEntryState(button, entryState);
+      renderContextButton(button, button.disabled);
+    });
+  }
+
+  async function connectNodeEntryState(context) {
+    const params = new URLSearchParams();
+    params.set("uuid", context.uuid);
+    params.set("name", context.name || "未命名节点");
+    params.set("v", Date.now().toString(36));
+    const response = await fetch(API_BASE + "/nodes/connect?" + params.toString(), {
+      credentials: "omit",
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      throw new Error("failed to connect IPQ node");
+    }
+    const entryState = await response.json();
+    cacheNodeEntryState(context, entryState);
+    return entryState;
+  }
+
   function buildURLs(context, options) {
     const safeUUID = encodeURIComponent(context.uuid);
-    const safeName = encodeURIComponent(context.name || "未命名节点");
     if (options.mode === "public") {
       const params = new URLSearchParams();
       if (options.displayIP) {
@@ -757,7 +1106,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const overlay = ensureOverlay();
     applyThemeClasses();
     const urls = buildURLs(context, options || { mode: "admin" });
-    state.modalSource = options && options.resume ? "resume" : "action";
+    overlay.setAttribute("data-connect-open", "false");
+    state.connectContext = null;
     debugLog("open_modal", { uuid: context && context.uuid, mode: options && options.mode, embedURL: urls.embedURL });
     const title = state.overlay && state.overlay.querySelector(".ipq-loader-dialog-title strong");
     if (title) {
@@ -770,6 +1120,37 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     if (state.openLink) {
       state.openLink.href = urls.fullPageURL;
     }
+    overlay.setAttribute("data-open", "true");
+  }
+
+  function openConnectPrompt(context, entryState) {
+    const overlay = ensureOverlay();
+    applyThemeClasses();
+    state.connectContext = {
+      uuid: context.uuid,
+      name: context.name || (entryState && entryState.name) || "未命名节点"
+    };
+    debugLog("open_connect_prompt", { uuid: context && context.uuid, exists: !!(entryState && entryState.exists) });
+    const title = overlay.querySelector(".ipq-loader-dialog-title strong");
+    const subtitle = overlay.querySelector(".ipq-loader-dialog-title span");
+    if (title) {
+      title.textContent = (context.name || "节点") + " IP 质量";
+    }
+    if (subtitle) {
+      subtitle.textContent = "当前节点还没有 IPQ 上报配置。";
+    }
+    if (state.openLink) {
+      state.openLink.removeAttribute("href");
+    }
+    if (state.iframe) {
+      state.iframe.removeAttribute("src");
+      state.iframe.src = "about:blank";
+    }
+    if (state.connectButton) {
+      state.connectButton.disabled = false;
+      state.connectButton.textContent = "去接入";
+    }
+    overlay.setAttribute("data-connect-open", "true");
     overlay.setAttribute("data-open", "true");
   }
 
@@ -1059,6 +1440,147 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     return contexts;
   }
 
+  function findDefaultHomeCardRoot(anchor) {
+    let current = anchor;
+    let depth = 0;
+    while (current && depth < 8) {
+      if (
+        current.classList &&
+        (current.classList.contains("node-card") || current.classList.contains("rt-Card")) &&
+        current.querySelector("a[href*='/instance/']")
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function findDefaultHomeHeader(card, anchor) {
+    let current = anchor.parentElement;
+    let depth = 0;
+    while (current && current !== card && depth < 6) {
+      if (
+        current.classList &&
+        current.classList.contains("rt-Flex") &&
+        current.classList.contains("rt-r-jc-space-between") &&
+        current.querySelector("a[href*='/instance/']") &&
+        current.children.length >= 2
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function findDefaultHomeActionGroup(header, anchor) {
+    const anchorBranch = Array.from(header.children).find(function (child) {
+      return child === anchor || child.contains(anchor);
+    });
+    const candidates = Array.from(header.children).filter(function (child) {
+      return child !== anchorBranch && child !== null;
+    });
+    return candidates.find(function (child) {
+      return child.classList && child.classList.contains("rt-Flex") && (child.querySelector("button, svg, .rt-Badge") || child.children.length > 0);
+    }) || null;
+  }
+
+  function ensureDefaultHomeSlot(header, anchor) {
+    const actionGroup = findDefaultHomeActionGroup(header, anchor) || header;
+    let slot = actionGroup.querySelector(".ipq-loader-default-home-slot[data-ipq-slot='home']");
+    if (!slot) {
+      slot = document.createElement("span");
+      slot.className = "ipq-loader-default-home-slot flex items-center justify-center";
+      slot.setAttribute("data-ipq-slot", "home");
+    }
+
+    const badge = Array.from(actionGroup.children).find(function (child) {
+      return child !== slot && child.classList && child.classList.contains("rt-Badge");
+    });
+    if (slot.parentElement !== actionGroup) {
+      if (badge) {
+        actionGroup.insertBefore(slot, badge);
+      } else {
+        actionGroup.appendChild(slot);
+      }
+    } else if (badge && slot.nextElementSibling !== badge) {
+      actionGroup.insertBefore(slot, badge);
+    }
+    return slot;
+  }
+
+  function extractDefaultHomeName(anchor, uuid) {
+    const heading = anchor.querySelector(".rt-r-weight-bold, h1, h2, h3, [class*='font-bold']");
+    const raw = heading ? heading.textContent : anchor.textContent;
+    return normalizeName(raw) || extractName(uuid);
+  }
+
+  function defaultHomeContexts() {
+    const contexts = [];
+    const seen = {};
+    const anchors = document.querySelectorAll("a[href*='/instance/']");
+    for (const anchor of anchors) {
+      if (!isVisible(anchor)) continue;
+      const href = anchor.getAttribute("href") || "";
+      const uuid = extractUUIDFromValue(href);
+      if (!uuid || seen[uuid]) continue;
+      const card = findDefaultHomeCardRoot(anchor);
+      if (!card || !isVisible(card)) continue;
+      const header = findDefaultHomeHeader(card, anchor);
+      if (!header || !isVisible(header)) continue;
+      const name = extractDefaultHomeName(anchor, uuid);
+      contexts.push({
+        uuid: uuid,
+        name: name,
+        key: uuid + "|" + name,
+        slot: ensureDefaultHomeSlot(header, anchor)
+      });
+      seen[uuid] = true;
+    }
+    return contexts;
+  }
+
+  function findDefaultHomeButton(slot, uuid) {
+    const buttons = slot.querySelectorAll("[data-ipq-default-home-button='true']");
+    for (const button of buttons) {
+      if (button.getAttribute("data-ipq-uuid") === uuid) {
+        return button;
+      }
+    }
+    return null;
+  }
+
+  function ensureDefaultHomeButton(slot, context) {
+    let button = findDefaultHomeButton(slot, context.uuid);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "rt-reset rt-BaseButton rt-r-size-1 rt-variant-ghost rt-IconButton ipq-loader-button ipq-node-icon-button ipq-default-home-button";
+      button.setAttribute("data-accent-color", "");
+      button.setAttribute("data-ipq-default-home-button", "true");
+      button.setAttribute("data-ipq-icon-button", "true");
+      button.setAttribute("data-ipq-uuid", context.uuid);
+      button.setAttribute("data-ipq-entry-state", "unknown");
+      slot.appendChild(button);
+      button.addEventListener("pointerdown", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        triggerContextAction(event, button._ipqContext || context, button, "pointerdown");
+      });
+      button.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        triggerContextAction(event, button._ipqContext || context, button, "click");
+      });
+    }
+    button._ipqContext = context;
+    refreshContextButtonState(button, context);
+    return button;
+  }
+
   function findPurCarteDetailSlot(context) {
     const cards = document.querySelectorAll("main .purcarte-blur.theme-card-style, main .theme-card-style, .purcarte-blur.theme-card-style, .theme-card-style");
     const hasReliableName = context.name && context.name !== "未命名节点";
@@ -1092,6 +1614,19 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     }
   }
 
+  function cleanupDefaultHomeButtons(activeUUIDs) {
+    const buttons = document.querySelectorAll("[data-ipq-default-home-button='true']");
+    for (const button of buttons) {
+      const uuid = button.getAttribute("data-ipq-uuid") || "";
+      if (activeUUIDs[uuid]) continue;
+      const slot = button.parentElement;
+      button.remove();
+      if (slot && slot.getAttribute("data-ipq-slot") && slot.childElementCount === 0) {
+        slot.remove();
+      }
+    }
+  }
+
   function syncPurCarte() {
     const activeUUIDs = {};
     let mounted = false;
@@ -1105,22 +1640,29 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
         mounted = true;
       }
       state.contextKey = context.key;
-      if (state.resumeHandledKey !== context.key) {
-        consumeResume(context);
-      }
     } else {
       const contexts = purCarteHomeContexts();
       for (const item of contexts) {
         ensurePurCarteButton(item.slot, item);
         activeUUIDs[item.uuid] = true;
-        if (state.resumeHandledKey !== item.key) {
-          consumeResume(item);
-        }
         mounted = true;
       }
     }
 
     cleanupPurCarteButtons(activeUUIDs);
+    return mounted;
+  }
+
+  function syncDefaultHome() {
+    const activeUUIDs = {};
+    let mounted = false;
+    const contexts = defaultHomeContexts();
+    for (const item of contexts) {
+      ensureDefaultHomeButton(item.slot, item);
+      activeUUIDs[item.uuid] = true;
+      mounted = true;
+    }
+    cleanupDefaultHomeButtons(activeUUIDs);
     return mounted;
   }
 
@@ -1207,11 +1749,23 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
 
     return null;
   }
-  function renderButton() {
+  function renderButton(context) {
     const button = ensureButton();
     button.classList.remove("ipq-purcarte-button");
+    button.classList.remove("ipq-node-icon-button");
     button.removeAttribute("data-ipq-icon-button");
+    if (context && context.uuid) {
+      const previousUUID = button.getAttribute("data-ipq-uuid") || "";
+      button._ipqContext = context;
+      button.setAttribute("data-ipq-uuid", context.uuid);
+      if (previousUUID !== context.uuid || !button.getAttribute("data-ipq-entry-state")) {
+        button.setAttribute("data-ipq-entry-state", "unknown");
+      }
+    }
     renderContextButton(button, state.busy);
+    if (context && context.uuid) {
+      refreshContextButtonState(button, context);
+    }
   }
 
   function mountButton() {
@@ -1255,7 +1809,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       renderContextButton(sourceButton, true);
     } else {
       state.busy = true;
-      renderButton();
+      renderButton(context);
     }
 
     try {
@@ -1263,7 +1817,32 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       const me = meResponse.ok ? await meResponse.json() : { logged_in: false };
       debugLog("komari_me", { ok: meResponse.ok, status: meResponse.status, loggedIn: !!(me && me.logged_in) });
       if (me && me.logged_in) {
-        openModal(context, { mode: "admin", komariReturn: window.location.href });
+        const entryState = await loadNodeEntryState(context);
+        if (!entryState) {
+          showToast("无法确认接入状态，请稍后重试");
+          return;
+        }
+        if (sourceButton) {
+          setButtonEntryState(sourceButton, entryState);
+        }
+
+        let displayIP = "";
+        try {
+          displayIP = displayIPFromKomariNode(await loadKomariPublicNode(context));
+        } catch (_) {
+          displayIP = "";
+        }
+
+        if (entryState.connected) {
+          openModal(context, {
+            mode: GUEST_READ_ENABLED ? "public" : "admin",
+            displayIP: displayIP,
+            komariReturn: window.location.href
+          });
+          return;
+        }
+
+        openConnectPrompt(context, entryState);
         return;
       }
 
@@ -1273,29 +1852,14 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
         return;
       }
 
-      const nodesResponse = await fetch(window.location.origin + "/api/nodes", { credentials: "include" });
-      if (!nodesResponse.ok) {
-        debugLog("komari_nodes_failed", { status: nodesResponse.status });
-        throw new Error("failed to load Komari public nodes");
-      }
-
-      const payload = await nodesResponse.json();
-      const items = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload && payload.data)
-          ? payload.data
-          : Object.values(payload || {});
-      const currentNode = items.find(function (item) {
-        return item && String(item.uuid || "").toLowerCase() === String(context.uuid).toLowerCase();
-      });
-
+      const currentNode = await loadKomariPublicNode(context);
       if (!currentNode) {
-        debugLog("guest_node_not_found", { uuid: context.uuid, count: items.length });
+        debugLog("guest_node_not_found", { uuid: context.uuid });
         showToast("管理员未开放该功能");
         return;
       }
 
-      const displayIP = String(currentNode.ipv4 || currentNode.ipv6 || "").trim();
+      const displayIP = displayIPFromKomariNode(currentNode);
       debugLog("guest_open", { uuid: context.uuid, displayIP: displayIP });
       openModal(context, { mode: "public", displayIP: displayIP });
     } catch (error) {
@@ -1307,33 +1871,9 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
         renderContextButton(sourceButton, false);
       } else {
         state.busy = false;
-        renderButton();
+        renderButton(context);
       }
     }
-  }
-
-  function consumeResume(context) {
-    const currentURL = new URL(window.location.href);
-    if (currentURL.searchParams.get("ipq_resume") !== "1") {
-      return;
-    }
-    if (!state.themeLoaded) {
-      return;
-    }
-
-    const resumeUUID = currentURL.searchParams.get("ipq_uuid") || "";
-    if (!resumeUUID || resumeUUID.toLowerCase() !== String(context.uuid).toLowerCase()) {
-      return;
-    }
-
-    const resumeName = currentURL.searchParams.get("ipq_name") || context.name || "未命名节点";
-    currentURL.searchParams.delete("ipq_resume");
-    currentURL.searchParams.delete("ipq_uuid");
-    currentURL.searchParams.delete("ipq_name");
-    const cleanURL = currentURL.toString();
-    history.replaceState(history.state, "", cleanURL);
-    state.resumeHandledKey = context.key;
-    openModal({ uuid: context.uuid, name: resumeName }, { mode: "admin", komariReturn: cleanURL, resume: true });
   }
 
   async function sync() {
@@ -1343,7 +1883,9 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       return;
     }
 
+    const context = detectContext();
     if (isPurCarteTheme()) {
+      cleanupDefaultHomeButtons({});
       unmountButton({ closeModal: false });
       const mountedPurCarte = syncPurCarte();
       if (mountedPurCarte) {
@@ -1352,12 +1894,20 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       }
     } else {
       cleanupPurCarteButtons({});
+      if (!context) {
+        const mountedDefaultHome = syncDefaultHome();
+        if (mountedDefaultHome) {
+          unmountButton({ closeModal: false });
+          clearRetryTimers();
+          return;
+        }
+      } else {
+        cleanupDefaultHomeButtons({});
+      }
     }
 
-    const context = detectContext();
     if (!context) {
       state.contextKey = "";
-      state.resumeHandledKey = "";
       if (isModalOpen()) {
         unmountButton({ closeModal: false });
         return;
@@ -1369,11 +1919,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
 
     const mountedInline = mountButton();
     state.contextKey = context.key;
-    renderButton();
-
-    if (state.resumeHandledKey !== context.key) {
-      consumeResume(context);
-    }
+    renderButton(context);
 
     if (mountedInline) {
       clearRetryTimers();
@@ -1410,6 +1956,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   installMutationObserver();
   window.addEventListener("hashchange", scheduleRouteSync);
   window.addEventListener("popstate", scheduleRouteSync);
+  window.addEventListener("focus", function () {
+    clearEntryStateCache();
+    scheduleRouteSync();
+  });
   window.addEventListener("message", function (event) {
     if (!event || !event.data || event.data.source !== "ipq-embed") {
       return;
@@ -1423,12 +1973,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     }
 
     if (event.data.type === "open-standalone" && event.data.url) {
-      if (state.modalSource === "resume") {
-        debugLog("ignore_standalone_after_resume", { url: event.data.url });
-        return;
-      }
       closeModal();
-      window.location.assign(event.data.url);
+      openStandalone(event.data.url);
     }
   });
   scheduleRouteSync();

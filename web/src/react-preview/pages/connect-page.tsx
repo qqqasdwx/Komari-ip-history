@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/layout/page-header";
 import { NodePageError } from "../components/node/node-page-error";
 import { apiRequest, UnauthorizedError } from "../lib/api";
-import { buildKomariResumeURL } from "../lib/embed-navigation";
+import { buildReportConfigListPath } from "../lib/embed-navigation";
 
 export function ConnectPage(props: { onUnauthorized: () => void }) {
   const navigate = useNavigate();
@@ -15,7 +15,6 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
   const name = searchParams.get("name")?.trim() || "未命名节点";
   const isEmbed = searchParams.get("embed") === "1";
   const returnTo = searchParams.get("return_to")?.trim() || "";
-  const resumePopup = searchParams.get("resume") === "popup";
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +37,7 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
         }
 
         if (returnTo) {
-          window.location.replace(buildKomariResumeURL(returnTo, uuid, name));
+          navigate(buildReportConfigListPath(uuid, { fromKomari: true, nodeName: name }), { replace: true });
           return;
         }
 
@@ -62,14 +61,14 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, returnTo, resumePopup, uuid]);
+  }, [isEmbed, location.pathname, location.search, name, navigate, props.onUnauthorized, returnTo, uuid]);
 
   if (loading) {
     return (
       <section className="space-y-6">
         <PageHeader
           title="接入节点"
-          subtitle={returnTo && resumePopup ? "正在完成登录并返回 Komari 弹窗。" : "正在为当前节点创建或恢复 IP 质量视图。"}
+          subtitle={returnTo ? "正在打开独立配置页。" : "正在为当前节点创建或恢复 IP 质量视图。"}
           backTo={isEmbed ? undefined : "/nodes"}
         />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">

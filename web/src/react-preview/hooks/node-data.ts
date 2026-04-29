@@ -34,7 +34,9 @@ export function useNodePageData(uuid: string, targetID: number | null, onUnautho
       }
 
       const currentDetail = detailRef.current;
-      const refreshInPlace = currentDetail !== null && currentDetail.komari_node_uuid === uuid;
+      const refreshInPlace =
+        currentDetail !== null &&
+        (currentDetail.node_uuid === uuid || currentDetail.komari_node_uuid === uuid);
       if (refreshInPlace) {
         setRefreshing(true);
       } else {
@@ -68,7 +70,7 @@ export function useNodePageData(uuid: string, targetID: number | null, onUnautho
           setErrorStatus(loadError.status);
         }
         const activeDetail = detailRef.current;
-        if (!activeDetail || activeDetail.komari_node_uuid !== uuid) {
+        if (!activeDetail || (activeDetail.node_uuid !== uuid && activeDetail.komari_node_uuid !== uuid)) {
           setError(loadError instanceof Error ? loadError.message : "加载节点详情失败");
         }
       } finally {

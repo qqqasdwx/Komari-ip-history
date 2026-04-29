@@ -98,7 +98,9 @@ export function App() {
               />
             ) : (
               isEmbed ? (
-                <EmbedAdminAccessBridge />
+                <EmbedFrameShell>
+                  <EmbedAdminAccessBridge />
+                </EmbedFrameShell>
               ) : (
                 <Navigate to={`/login?redirect=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />
               )

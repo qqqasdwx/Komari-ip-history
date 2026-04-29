@@ -23,7 +23,7 @@ export function PublicNodeDetailPage() {
   const nodeName = searchParams.get("node_name")?.trim() || "IP质量体检报告";
   const displayIP = searchParams.get("display_ip")?.trim() || "";
   const selectedTargetID = Number(searchParams.get("target_id") || "") || null;
-  const { loading, error, detail, reload } = usePublicNodePageData(uuid, selectedTargetID, displayIP);
+  const { loading, error, errorStatus, detail, reload } = usePublicNodePageData(uuid, selectedTargetID, displayIP);
 
   function replaceTargetSelection(targetID: number | null) {
     const params = new URLSearchParams(searchParams);
@@ -49,12 +49,13 @@ export function PublicNodeDetailPage() {
   }
 
   if (error || !detail) {
+    const blocked = errorStatus === 403;
     return (
       <NodePageError
         title="IP质量体检报告"
-        subtitle={error || "当前结果不可用"}
+        subtitle={blocked ? "管理员未开放游客查看" : error || "当前结果不可用"}
         backTo="/"
-        error={error || "当前结果不可用。"}
+        error={blocked ? "管理员未开放该功能，请联系管理员或登录后查看。" : error || "当前结果不可用。"}
         onRetry={reload}
       />
     );

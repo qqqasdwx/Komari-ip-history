@@ -49,7 +49,13 @@ func Run() error {
 		api.POST("/auth/login", authHandler.Login)
 		api.POST("/auth/logout", authHandler.Logout)
 
+		api.OPTIONS("/embed/nodes/register", embedHandler.Options)
 		api.POST("/embed/nodes/register", embedHandler.Register)
+		api.GET("/embed/nodes/register", embedHandler.RegisterBeacon)
+		api.OPTIONS("/embed/nodes/status", embedHandler.Options)
+		api.GET("/embed/nodes/status", embedHandler.NodeStatus)
+		api.OPTIONS("/embed/nodes/connect", embedHandler.Options)
+		api.GET("/embed/nodes/connect", embedHandler.ConnectNode)
 		api.GET("/public/nodes/:uuid/current", publicHandler.Current)
 		api.GET("/report/install-config/:installToken", reportHandler.InstallConfigByToken)
 		api.GET("/report/nodes/:uuid/install.sh", reportHandler.InstallScript)

@@ -123,7 +123,7 @@ async function cleanupNodes(appPage, scenarioPages) {
   }
 }
 
-async function createKomariNodeFromUI(page, baseURL, nodeName, scenarioDir) {
+async function createKomariNodeFromUI(page, baseURL, nodeName, scenarioDir, screenshotName = "01-komari-node-created.png") {
   log(`create Komari node from UI: ${nodeName}`);
   await loginKomari(page, baseURL);
   await page.getByRole("button", { name: "Add" }).first().click();
@@ -144,7 +144,7 @@ async function createKomariNodeFromUI(page, baseURL, nodeName, scenarioDir) {
   }
   await page.goto(`${baseURL}/instance/${node.uuid}`, { waitUntil: "domcontentloaded" });
   await page.getByText(nodeName, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
-  await page.screenshot({ path: path.join(scenarioDir, "01-komari-node-created.png"), fullPage: true });
+  await page.screenshot({ path: path.join(scenarioDir, screenshotName), fullPage: true });
   return node;
 }
 
@@ -192,13 +192,13 @@ async function setKomariHeaderFromUI(page, baseURL, loaderCode, scenarioDir) {
 }
 
 async function clickIpqAction(page) {
-  const accessibleButton = page.getByRole("button", { name: /IP 质量/ }).first();
+  const accessibleButton = page.getByRole("button", { name: /IP 质量|开启 IP 质量检测/ }).first();
   if ((await accessibleButton.count()) > 0) {
     await accessibleButton.waitFor({ state: "visible", timeout: 15000 });
     await accessibleButton.click();
     return;
   }
-  const textButton = page.locator("button").filter({ hasText: /IP 质量/ }).first();
+  const textButton = page.locator("button").filter({ hasText: /IP 质量|开启 IP 质量检测/ }).first();
   if ((await textButton.count()) > 0) {
     await textButton.waitFor({ state: "visible", timeout: 15000 });
     await textButton.click();
@@ -316,33 +316,233 @@ async function completeStandaloneLoginIfNeeded(page, baseURL, node) {
   return true;
 }
 
+async function assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir) {
+  await connectedButton.click();
+  const iframe = page.locator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await iframe.waitFor({ state: "visible", timeout: 15000 });
+  const iframeSrc = await iframe.evaluate((frame) => frame.getAttribute("src") || frame.src || "");
+  if (!iframeSrc.includes("embed=1")) {
+    throw new Error(`PurCarte connected popup should open the embedded detail URL: ${iframeSrc}`);
+  }
+  if (!iframeSrc.includes("komari_theme=PurCarte")) {
+    throw new Error(`PurCarte connected popup should pass the Komari theme to IPQ: ${iframeSrc}`);
+  }
+
+  const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await frame.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 20000 });
+  const styles = await page.evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        backdropFilter: style.backdropFilter
+      };
+    };
+    return {
+      overlay: read("#ipq-loader-overlay"),
+      dialog: read(".ipq-loader-dialog"),
+      frame: read(".ipq-loader-frame")
+    };
+  });
+  if (styles.overlay?.backgroundColor === "rgba(0, 0, 0, 0)") {
+    throw new Error("PurCarte connected popup should tint the overlay so white Komari cards do not show through as a pure-white background");
+  }
+  if (styles.dialog?.backgroundColor === "rgb(255, 255, 255)" && styles.dialog?.backgroundImage === "none") {
+    throw new Error("PurCarte connected popup dialog should not use a pure-white background");
+  }
+  if (styles.frame?.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte connected popup iframe should not use a pure-white background");
+  }
+
+  const innerStyles = await frame.locator("body").evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage
+      };
+    };
+    return {
+      shell: read(".embed-shell"),
+      header: read(".embed-detail-page > header"),
+      card: read(".embed-detail-card"),
+      report: read(".report-shell")
+    };
+  });
+  if (innerStyles.shell?.backgroundColor !== "rgba(0, 0, 0, 0)") {
+    throw new Error(`PurCarte embedded shell should remain transparent, got ${innerStyles.shell?.backgroundColor}`);
+  }
+  if (innerStyles.header?.backgroundColor === "rgb(255, 255, 255)" && innerStyles.header?.backgroundImage === "none") {
+    throw new Error("PurCarte embedded detail header should not use a pure-white background");
+  }
+  if (innerStyles.card?.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte embedded detail card should not use a pure-white background");
+  }
+  if (innerStyles.report?.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte report body should not use a pure-white background");
+  }
+
+  await page.screenshot({ path: path.join(scenarioDir, "10-komari-connected-popup.png"), fullPage: true });
+  await page.locator(".ipq-loader-close").click();
+  await page.locator("#ipq-loader-overlay").waitFor({ state: "attached", timeout: 5000 });
+}
+
 async function connectNodeFromKomari(page, baseURL, node, scenarioDir) {
   log(`connect node from Komari injected button: ${node.name}`);
   await page.goto(`${baseURL}/instance/${node.uuid}`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.getByText(node.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
   await clickIpqAction(page);
-  await waitForOpenIframeSrc(
-    page,
-    (src) => src.includes("#/login") || src.includes(`/connect`) || src.includes(`/nodes/${node.uuid}`),
-    `${node.name} connect`
-  );
-  await loginInOpenIframeIfNeeded(page);
-  let iframeSrc = await waitForOpenIframeSrc(
-    page,
-    (src) => src.includes(`/nodes/${node.uuid}`) && !src.includes("#/login"),
-    `${node.name} connected detail`
-  );
-  if (await completeStandaloneLoginIfNeeded(page, baseURL, node)) {
-    iframeSrc = await waitForOpenIframeSrc(
-      page,
-      (src) => src.includes(`/nodes/${node.uuid}`) && !src.includes("#/login"),
-      `${node.name} returned detail`
-    );
+  const connectButton = page.getByRole("button", { name: "去接入" }).first();
+  await connectButton.waitFor({ state: "visible", timeout: 15000 });
+  const connectPromptStyle = await page.evaluate(() => {
+    const overlay = document.querySelector("#ipq-loader-overlay");
+    const panel = document.querySelector(".ipq-loader-connect-panel");
+    const card = document.querySelector(".ipq-loader-connect-card");
+    const read = (element) => {
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        backdropFilter: style.backdropFilter
+      };
+    };
+    return {
+      isPurCarte: overlay?.classList.contains("ipq-loader-theme-purcarte") || false,
+      panel: read(panel),
+      card: read(card)
+    };
+  });
+  if (connectPromptStyle.isPurCarte) {
+    if (connectPromptStyle.panel?.backgroundColor !== "rgba(0, 0, 0, 0)") {
+      throw new Error(`PurCarte connect panel should be transparent, got ${connectPromptStyle.panel?.backgroundColor}`);
+    }
+    if (connectPromptStyle.card?.backgroundColor === "rgb(255, 255, 255)") {
+      throw new Error("PurCarte connect card should not use the default pure-white background");
+    }
+    if (!connectPromptStyle.card?.backdropFilter || connectPromptStyle.card.backdropFilter === "none") {
+      throw new Error("PurCarte connect card should use the glass backdrop filter");
+    }
   }
-  await waitForConnectedEmptyDetail(page, node.name);
-  await page.screenshot({ path: path.join(scenarioDir, "03-komari-connected-empty-popup.png"), fullPage: true });
-  return iframeSrc;
+  await page.screenshot({ path: path.join(scenarioDir, "03-komari-connect-prompt.png"), fullPage: true });
+  const [standalonePage] = await Promise.all([
+    page.context().waitForEvent("page"),
+    connectButton.click()
+  ]);
+  await standalonePage.waitForLoadState("domcontentloaded");
+  if (standalonePage.url().includes("#/login")) {
+    await standalonePage.getByRole("textbox", { name: "用户名" }).fill("admin");
+    await standalonePage.getByLabel("密码").fill("admin");
+    await standalonePage.getByRole("button", { name: "登录" }).click();
+  }
+  await standalonePage.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 15000 });
+  await standalonePage.locator('[data-komari-return-hint="true"]').waitFor({ state: "visible", timeout: 10000 });
+  await standalonePage.screenshot({ path: path.join(scenarioDir, "03-ipq-standalone-report-config.png"), fullPage: true });
+  const standaloneURL = standalonePage.url();
+  await standalonePage.close().catch(() => {});
+  return standaloneURL;
+}
+
+async function waitForButtonEntryState(page, selector, uuid, expectedState, label) {
+  const locator = page.locator(`${selector}[data-ipq-uuid="${uuid}"]`).first();
+  await locator.waitFor({ state: "visible", timeout: 15000 });
+  const deadline = Date.now() + 20000;
+  let lastState = "";
+  while (Date.now() < deadline) {
+    lastState = (await locator.getAttribute("data-ipq-entry-state").catch(() => "")) || "";
+    if (lastState === expectedState) {
+      return locator;
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`${label} expected ${expectedState} IPQ button state, got ${lastState || "<empty>"}`);
+}
+
+async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendingNode, scenarioDir) {
+  log(`verify ${theme} homepage IPQ entry buttons`);
+  await page.goto(`${baseURL}/`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle").catch(() => {});
+  await page.getByText(connectedNode.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
+  await page.getByText(pendingNode.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
+
+  const selector = theme === "purcarte"
+    ? '[data-ipq-purcarte-button="true"]'
+    : '[data-ipq-default-home-button="true"]';
+  const connectedButton = await waitForButtonEntryState(
+    page,
+    selector,
+    connectedNode.uuid,
+    "connected",
+    `${theme} connected homepage`
+  );
+  const pendingButton = await waitForButtonEntryState(
+    page,
+    selector,
+    pendingNode.uuid,
+    "pending",
+    `${theme} pending homepage`
+  );
+
+  const connectedTitle = (await connectedButton.getAttribute("title")) || "";
+  const pendingTitle = (await pendingButton.getAttribute("title")) || "";
+  if (!connectedTitle.includes("查看 IP 质量")) {
+    throw new Error(`${theme} connected homepage button title mismatch: ${connectedTitle}`);
+  }
+  if (!pendingTitle.includes("开启 IP 质量检测")) {
+    throw new Error(`${theme} pending homepage button title mismatch: ${pendingTitle}`);
+  }
+
+  const colors = await Promise.all([
+    connectedButton.evaluate((element) => getComputedStyle(element).color),
+    pendingButton.evaluate((element) => getComputedStyle(element).color)
+  ]);
+  if (colors[0] === colors[1]) {
+    throw new Error(`${theme} homepage connected and pending icons should use different colors`);
+  }
+
+  if (theme !== "purcarte") {
+    const placement = await connectedButton.evaluate((button) => {
+      const slot = button.parentElement;
+      const actionGroup = slot?.parentElement;
+      const card = button.closest(".node-card");
+      const anchor = card?.querySelector('a[href*="/instance/"]');
+      const badge = actionGroup?.querySelector(".rt-Badge");
+      const rect = (element) => {
+        const box = element?.getBoundingClientRect();
+        return box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null;
+      };
+      return {
+        buttonClass: String(button.className || ""),
+        actionGroupClass: String(actionGroup?.className || ""),
+        buttonRect: rect(button),
+        anchorRect: rect(anchor),
+        badgeRect: rect(badge)
+      };
+    });
+
+    if (!placement.buttonClass.includes("rt-IconButton")) {
+      throw new Error(`default homepage button should reuse Komari IconButton style: ${placement.buttonClass}`);
+    }
+    if (!placement.actionGroupClass.includes("rt-r-gap-2")) {
+      throw new Error(`default homepage button should be mounted in the right action group: ${placement.actionGroupClass}`);
+    }
+    if (placement.anchorRect && placement.buttonRect && placement.buttonRect.x <= placement.anchorRect.x) {
+      throw new Error("default homepage button was mounted before the node name");
+    }
+    if (placement.badgeRect && placement.buttonRect && placement.buttonRect.x >= placement.badgeRect.x) {
+      throw new Error("default homepage button should stay before the status badge in the right action group");
+    }
+  }
+
+  await page.screenshot({ path: path.join(scenarioDir, "09-komari-home-entry-buttons.png"), fullPage: true });
+  if (theme === "purcarte") {
+    await assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir);
+  }
 }
 
 async function openReportConfigFromUI(appPage, uuid, nodeName, scenarioDir) {
@@ -450,13 +650,29 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
   const scenarioDir = path.join(outputDir, scenarioName(theme));
   mkdirSync(scenarioDir, { recursive: true });
 
-  const nodeName = `${nodeNamePrefix} ${theme}`;
-  const node = await createKomariNodeFromUI(komariPage, baseURL, nodeName, scenarioDir);
-  const iframeSrc = await connectNodeFromKomari(komariPage, baseURL, node, scenarioDir);
+  const themeLabel = theme === "purcarte" ? "PurCarte" : "Default";
+  const nodeName = `${nodeNamePrefix} ${themeLabel} 已接入节点`;
+  const pendingNodeName = `${nodeNamePrefix} ${themeLabel} 未接入节点`;
+  const pendingNode = await createKomariNodeFromUI(
+    komariPage,
+    baseURL,
+    pendingNodeName,
+    scenarioDir,
+    "01-komari-pending-node-created.png"
+  );
+  const node = await createKomariNodeFromUI(
+    komariPage,
+    baseURL,
+    nodeName,
+    scenarioDir,
+    "01-komari-connected-node-created.png"
+  );
+  const standaloneURL = await connectNodeFromKomari(komariPage, baseURL, node, scenarioDir);
 
   await openReportConfigFromUI(appPage, node.uuid, nodeName, scenarioDir);
   await configureTargetsFromUI(appPage, scenarioDir, targets);
   await seedTargetReports(appPage, node.uuid, targets);
+  await verifyHomeEntryButtons(komariPage, baseURL, theme, node, pendingNode, scenarioDir);
 
   if (fullVerification) {
     await verifyConfiguredNode(appPage, node.uuid, targets, scenarioDir);
@@ -471,7 +687,9 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
     theme,
     nodeName,
     uuid: node.uuid,
-    iframeSrc,
+    pendingNodeName,
+    pendingUUID: pendingNode.uuid,
+    standaloneURL,
     targets
   };
 }

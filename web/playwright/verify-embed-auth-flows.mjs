@@ -10,6 +10,8 @@ const restoreIntegrationPublicBaseURL = (
 ).replace(/\/$/, "");
 const themeScenario = (process.env.KOMARI_THEME_SCENARIO || "default").replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
 const expectedKomariTheme = (process.env.EXPECTED_KOMARI_THEME || "").trim().toLowerCase();
+const themeDisplayName = expectedKomariTheme === "purcarte" ? "PurCarte" : "Default";
+const nodeNamePrefix = `Playwright ${themeDisplayName}`;
 const outputDir = path.resolve("playwright-output");
 const scenarioOutputDir = path.join(outputDir, `embed-${themeScenario}`);
 mkdirSync(outputDir, { recursive: true });
@@ -45,13 +47,13 @@ function expectOK(result, label) {
 }
 
 async function clickIpqAction(page) {
-  const accessibleButton = page.getByRole("button", { name: /IP 质量/ }).first();
+  const accessibleButton = page.getByRole("button", { name: /IP 质量|开启 IP 质量检测/ }).first();
   if ((await accessibleButton.count()) > 0) {
     await accessibleButton.waitFor({ state: "visible", timeout: 15000 });
     await accessibleButton.click();
     return;
   }
-  const textButton = page.locator("button").filter({ hasText: /IP 质量/ }).first();
+  const textButton = page.locator("button").filter({ hasText: /IP 质量|开启 IP 质量检测/ }).first();
   await textButton.waitFor({ state: "visible", timeout: 15000 });
   await textButton.click();
 }
@@ -73,6 +75,44 @@ function assertThemeParam(iframeSrc, label) {
 async function waitForEmbedReport(page) {
   const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
   await frame.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 15000 });
+}
+
+async function waitForEmbedBridge(page) {
+  const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await frame.getByRole("heading", { name: "需要登录" }).waitFor({ state: "visible", timeout: 15000 });
+  await frame.getByRole("link", { name: "登录 IPQ 后查看" }).waitFor({ state: "visible", timeout: 15000 });
+}
+
+async function assertPurCarteBridgeStyle(page) {
+  if (expectedKomariTheme !== "purcarte") {
+    return;
+  }
+  const overlayClass = (await page.locator("#ipq-loader-overlay").first().getAttribute("class")) || "";
+  if (!overlayClass.includes("ipq-loader-theme-purcarte")) {
+    throw new Error("purcarte login bridge overlay is missing the PurCarte theme class");
+  }
+  const styles = await page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first().locator("body").evaluate(() => {
+    const card = document.querySelector(".embed-bridge-card");
+    const action = document.querySelector(".embed-bridge-action");
+    const read = (element) => {
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return {
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage
+      };
+    };
+    return {
+      card: read(card),
+      action: read(action)
+    };
+  });
+  if (styles.card?.backgroundColor === "rgb(255, 255, 255)" && styles.card?.backgroundImage === "none") {
+    throw new Error("PurCarte login bridge card should not use a pure-white background");
+  }
+  if (styles.action?.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte login bridge action should not use a pure-white background");
+  }
 }
 
 async function waitForOpenIframeSrc(page, expectedPath, label) {
@@ -114,6 +154,34 @@ async function loginKomari(page) {
     method: "POST",
     body: JSON.stringify({ username: "admin", password: "admin" })
   }), "komari login");
+}
+
+async function waitForStandaloneReportConfig(page, label) {
+  const deadline = Date.now() + 30000;
+  let loginSubmitted = false;
+  let lastURL = page.url();
+  let lastText = "";
+
+  while (Date.now() < deadline) {
+    lastURL = page.url();
+    const modal = page.locator('[data-node-report-config="true"]').first();
+    if ((await modal.count()) > 0 && await modal.isVisible().catch(() => false)) {
+      return;
+    }
+
+    const loginBox = page.getByRole("textbox", { name: "用户名" });
+    if (!loginSubmitted && (lastURL.includes("#/login") || (await loginBox.count()) > 0)) {
+      await loginBox.fill("admin");
+      await page.getByLabel("密码").fill("admin");
+      await page.getByRole("button", { name: "登录" }).click();
+      loginSubmitted = true;
+    }
+
+    lastText = await page.locator("body").innerText().catch(() => lastText);
+    await page.waitForTimeout(250);
+  }
+
+  throw new Error(`${label} report config did not open: url=${lastURL} text=${lastText.slice(0, 500)}`);
 }
 
 async function configureLoader(appPage, komariPage, guestReadEnabled) {
@@ -172,8 +240,9 @@ const browser = await chromium.launch({ headless: true });
 const createdNodeUUIDs = [];
 let setupContext;
 let guestOffContext;
+let adminNoIpqContext;
 let guestOnContext;
-let adminReturnContext;
+let loggedInContext;
 
 try {
   setupContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -182,7 +251,7 @@ try {
   await loginApp(appPage);
   await loginKomari(komariPage);
 
-  const registeredNodeName = "Playwright Guest Read Node";
+  const registeredNodeName = `${nodeNamePrefix} Guest Read Node`;
   const registeredNode = await addKomariNode(komariPage, registeredNodeName);
   createdNodeUUIDs.push(registeredNode.uuid);
   await registerIpqNode(appPage, registeredNode.uuid, registeredNodeName);
@@ -215,6 +284,30 @@ try {
   await guestOffContext.close();
   guestOffContext = null;
 
+  adminNoIpqContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const adminNoIpqPage = await adminNoIpqContext.newPage();
+  const adminNoIpqNewPages = [];
+  adminNoIpqContext.on("page", (newPage) => adminNoIpqNewPages.push(newPage));
+  await loginKomari(adminNoIpqPage);
+  await adminNoIpqPage.goto(`${komariBaseURL}/instance/${registeredNode.uuid}`);
+  await adminNoIpqPage.waitForLoadState("networkidle");
+  await adminNoIpqPage.waitForTimeout(3000);
+  await clickIpqAction(adminNoIpqPage);
+  await adminNoIpqPage.waitForTimeout(1500);
+  const adminNoIpqIframeSrc = await waitForOpenIframeSrc(adminNoIpqPage, `/nodes/${registeredNode.uuid}`, "admin-no-ipq-login");
+  if (!adminNoIpqPage.url().startsWith(`${komariBaseURL}/instance/${registeredNode.uuid}`)) {
+    throw new Error(`admin-no-ipq-login should stay on the Komari page, got ${adminNoIpqPage.url()}`);
+  }
+  if (adminNoIpqNewPages.length !== 0) {
+    throw new Error(`admin-no-ipq-login should not auto-open a standalone page, got ${adminNoIpqNewPages.map((item) => item.url()).join(", ")}`);
+  }
+  assertThemeParam(adminNoIpqIframeSrc, "admin-no-ipq-login iframe");
+  await waitForEmbedBridge(adminNoIpqPage);
+  await assertPurCarteBridgeStyle(adminNoIpqPage);
+  await adminNoIpqPage.screenshot({ path: path.join(scenarioOutputDir, "admin-no-ipq-login.png"), fullPage: true });
+  await adminNoIpqContext.close();
+  adminNoIpqContext = null;
+
   await configureLoader(appPage, komariPage, true);
 
   guestOnContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -241,41 +334,59 @@ try {
   await guestOnContext.close();
   guestOnContext = null;
 
-  const adminReturnNode = await addKomariNode(komariPage, "Playwright Admin Return Node");
-  createdNodeUUIDs.push(adminReturnNode.uuid);
-  await registerIpqNode(appPage, adminReturnNode.uuid, "Playwright Admin Return Node");
-  await addIpqTarget(appPage, adminReturnNode.uuid, "198.51.100.20");
-  adminReturnContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  const adminReturnPage = await adminReturnContext.newPage();
-  await loginKomari(adminReturnPage);
-  await adminReturnPage.goto(`${komariBaseURL}/instance/${adminReturnNode.uuid}`);
-  await adminReturnPage.waitForLoadState("networkidle");
-  await adminReturnPage.waitForTimeout(3000);
-  await clickIpqAction(adminReturnPage);
-  await adminReturnPage.waitForURL("**/#/login**", { timeout: 15000 });
-  await adminReturnPage.getByRole("textbox", { name: "用户名" }).fill("admin");
-  await adminReturnPage.getByLabel("密码").fill("admin");
-  await adminReturnPage.getByRole("button", { name: "登录" }).click();
-  await adminReturnPage.waitForURL(`${komariBaseURL}/instance/**`, { timeout: 25000 });
-  await adminReturnPage.waitForLoadState("domcontentloaded");
-  const adminReturnIframeSrc = await waitForOpenIframeSrc(
-    adminReturnPage,
-    `/nodes/${adminReturnNode.uuid}`,
-    "admin-return"
-  );
-  const adminReturnOverlay = await adminReturnPage.locator('#ipq-loader-overlay[data-open="true"]').count();
-  if (adminReturnOverlay !== 1) {
-    throw new Error(`admin return scenario did not reopen the Komari popup detail: overlay=${adminReturnOverlay} iframe=${adminReturnIframeSrc || "<empty>"}`);
+  const loggedInConnectedNodeName = `${nodeNamePrefix} Logged In Connected Node`;
+  const loggedInConnectedNode = await addKomariNode(komariPage, loggedInConnectedNodeName);
+  createdNodeUUIDs.push(loggedInConnectedNode.uuid);
+  await registerIpqNode(appPage, loggedInConnectedNode.uuid, loggedInConnectedNodeName);
+  await addIpqTarget(appPage, loggedInConnectedNode.uuid, "198.51.100.20");
+  const loggedInPendingNode = await addKomariNode(komariPage, `${nodeNamePrefix} Logged In Pending Node`);
+  createdNodeUUIDs.push(loggedInPendingNode.uuid);
+
+  loggedInContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const loggedInPage = await loggedInContext.newPage();
+  await loginKomari(loggedInPage);
+  await loggedInPage.goto(`${komariBaseURL}/instance/${loggedInConnectedNode.uuid}`);
+  await loggedInPage.waitForLoadState("networkidle");
+  await loggedInPage.waitForTimeout(3000);
+  await clickIpqAction(loggedInPage);
+  await loggedInPage.waitForTimeout(1500);
+  const loggedInIframeSrc = await waitForOpenIframeSrc(loggedInPage, "/public/nodes/", "logged-in-connected");
+  const loggedInOverlay = await loggedInPage.locator('#ipq-loader-overlay[data-open="true"]').count();
+  if (loggedInOverlay !== 1) {
+    throw new Error(`logged-in connected scenario did not open the view popup: overlay=${loggedInOverlay} iframe=${loggedInIframeSrc || "<empty>"}`);
   }
-  assertThemeParam(adminReturnIframeSrc, "admin-return iframe");
+  assertThemeParam(loggedInIframeSrc, "logged-in connected iframe");
   if (expectedKomariTheme === "purcarte") {
-    const overlayClass = (await adminReturnPage.locator("#ipq-loader-overlay").first().getAttribute("class")) || "";
+    const overlayClass = (await loggedInPage.locator("#ipq-loader-overlay").first().getAttribute("class")) || "";
     if (!overlayClass.includes("ipq-loader-theme-purcarte")) {
-      throw new Error("purcarte admin overlay is missing the PurCarte theme class");
+      throw new Error("purcarte logged-in overlay is missing the PurCarte theme class");
     }
   }
-  await adminReturnContext.close();
-  adminReturnContext = null;
+
+  await loggedInPage.goto(`${komariBaseURL}/instance/${loggedInPendingNode.uuid}`);
+  await loggedInPage.waitForLoadState("networkidle");
+  await loggedInPage.waitForTimeout(3000);
+  const beforeConnect = await jsonFetch(appPage, `${appBaseURL}/api/v1/nodes/${loggedInPendingNode.uuid}`);
+  if (beforeConnect.status !== 404) {
+    throw new Error(`pending node was created before clicking 去接入: ${beforeConnect.status} ${beforeConnect.text}`);
+  }
+  await clickIpqAction(loggedInPage);
+  const connectButton = loggedInPage.getByRole("button", { name: "去接入" }).first();
+  await connectButton.waitFor({ state: "visible", timeout: 15000 });
+  const [standalonePage] = await Promise.all([
+    loggedInContext.waitForEvent("page"),
+    connectButton.click()
+  ]);
+  await standalonePage.waitForLoadState("domcontentloaded");
+  await waitForStandaloneReportConfig(standalonePage, "logged-in pending");
+  const standaloneURL = standalonePage.url();
+  if (!standaloneURL.includes("report_config=") || !standaloneURL.includes("from_komari=1")) {
+    throw new Error(`logged-in pending scenario did not open report config URL: ${standaloneURL}`);
+  }
+  await standalonePage.locator('[data-komari-return-hint="true"]').waitFor({ state: "visible", timeout: 10000 });
+  await standalonePage.close();
+  await loggedInContext.close();
+  loggedInContext = null;
 
   writeFileSync(
     path.join(outputDir, `verify-embed-auth-flows-${themeScenario}.json`),
@@ -287,13 +398,21 @@ try {
           nodeUUID: registeredNode.uuid,
           toastText: guestOffToastText
         },
+        adminNoIpqLogin: {
+          nodeUUID: registeredNode.uuid,
+          iframeSrc: adminNoIpqIframeSrc
+        },
         guestOn: {
           nodeUUID: registeredNode.uuid,
           iframeSrc: guestOnIframeSrc
         },
-        adminReturn: {
-          nodeUUID: adminReturnNode.uuid,
-          iframeSrc: adminReturnIframeSrc
+        loggedInConnected: {
+          nodeUUID: loggedInConnectedNode.uuid,
+          iframeSrc: loggedInIframeSrc
+        },
+        loggedInPending: {
+          nodeUUID: loggedInPendingNode.uuid,
+          standaloneURL
         }
       },
       null,
@@ -304,8 +423,9 @@ try {
   console.log(`verify-embed-auth-flows (${themeScenario}): ok`);
 } finally {
   if (guestOffContext) await guestOffContext.close().catch(() => {});
+  if (adminNoIpqContext) await adminNoIpqContext.close().catch(() => {});
   if (guestOnContext) await guestOnContext.close().catch(() => {});
-  if (adminReturnContext) await adminReturnContext.close().catch(() => {});
+  if (loggedInContext) await loggedInContext.close().catch(() => {});
 
   if (setupContext) {
     const appCleanupPage = await setupContext.newPage();

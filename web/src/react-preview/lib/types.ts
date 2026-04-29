@@ -30,6 +30,7 @@ export type HistoryRetentionSettings = {
 };
 
 export type NodeListItem = {
+  node_uuid: string;
   komari_node_uuid: string;
   name: string;
   has_data: boolean;
@@ -54,6 +55,7 @@ export type NodeTargetDetail = {
 };
 
 export type NodeDetail = {
+  node_uuid: string;
   komari_node_uuid: string;
   name: string;
   has_data: boolean;

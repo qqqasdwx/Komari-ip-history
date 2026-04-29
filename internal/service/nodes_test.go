@@ -194,3 +194,90 @@ func TestReportConfigUsesNodeUUIDPathsWhenAvailable(t *testing.T) {
 		t.Fatalf("expected legacy route install script to use node_uuid endpoint")
 	}
 }
+
+func TestSyncKomariNodeEntryStateCreatesPendingShell(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	state, err := SyncKomariNodeEntryState(db, RegisterNodeInput{
+		KomariNodeUUID: "komari-entry-new",
+		Name:           "Komari Entry New",
+	})
+	if err != nil {
+		t.Fatalf("sync komari node entry state: %v", err)
+	}
+	if state.NodeUUID == "" {
+		t.Fatalf("expected generated node_uuid")
+	}
+	if state.KomariNodeUUID != "komari-entry-new" {
+		t.Fatalf("unexpected komari uuid: %s", state.KomariNodeUUID)
+	}
+	if state.Connected {
+		t.Fatalf("new shell should not be connected before targets are configured")
+	}
+	if state.TargetCount != 0 {
+		t.Fatalf("expected no targets, got %d", state.TargetCount)
+	}
+
+	var node models.Node
+	if err := db.First(&node, "komari_node_uuid = ?", "komari-entry-new").Error; err != nil {
+		t.Fatalf("expected pending shell to be persisted: %v", err)
+	}
+	if node.ReporterToken == "" || node.InstallToken == "" {
+		t.Fatalf("expected pending shell to have reporter and install tokens")
+	}
+}
+
+func TestGetKomariNodeEntryStateDoesNotCreatePendingShell(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	state, err := GetKomariNodeEntryState(db, RegisterNodeInput{
+		KomariNodeUUID: "komari-entry-status-only",
+		Name:           "Komari Entry Status Only",
+	})
+	if err != nil {
+		t.Fatalf("get komari node entry state: %v", err)
+	}
+	if state.Exists {
+		t.Fatalf("missing node should not exist")
+	}
+	if state.NodeUUID != "" {
+		t.Fatalf("missing node should not expose node_uuid, got %s", state.NodeUUID)
+	}
+
+	var count int64
+	if err := db.Model(&models.Node{}).Where("komari_node_uuid = ?", "komari-entry-status-only").Count(&count).Error; err != nil {
+		t.Fatalf("count nodes: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("status lookup should not create node shell, got %d rows", count)
+	}
+}
+
+func TestSyncKomariNodeEntryStateMarksConfiguredNodeConnected(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{KomariNodeUUID: "komari-entry-existing", Name: "Old Name", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := db.Create(&models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", SortOrder: 0}).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	state, err := SyncKomariNodeEntryState(db, RegisterNodeInput{
+		KomariNodeUUID: node.KomariNodeUUID,
+		Name:           "Updated Name",
+	})
+	if err != nil {
+		t.Fatalf("sync komari node entry state: %v", err)
+	}
+	if !state.Connected {
+		t.Fatalf("expected node with targets to be connected")
+	}
+	if state.TargetCount != 1 {
+		t.Fatalf("expected one target, got %d", state.TargetCount)
+	}
+	if state.Name != "Updated Name" {
+		t.Fatalf("expected updated name, got %s", state.Name)
+	}
+}

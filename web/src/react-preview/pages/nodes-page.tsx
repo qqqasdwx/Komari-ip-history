@@ -56,6 +56,7 @@ function buildInstallCommand(
 function ReportConfigSection(props: {
   me: MeResponse;
   detail: NodeDetail;
+  fromKomari: boolean;
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
@@ -87,6 +88,7 @@ function ReportConfigSection(props: {
     publicBaseURL,
     props.detail.report_config.install_token
   );
+  const routeUUID = props.detail.node_uuid || props.detail.komari_node_uuid;
 
   useEffect(() => {
     if (!props.open) {
@@ -123,7 +125,7 @@ function ReportConfigSection(props: {
         const search = new URLSearchParams();
         search.set("cron", scheduleCron);
         search.set("run_immediately", runImmediately ? "1" : "0");
-        const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${props.detail.komari_node_uuid}/report-config/preview?${search.toString()}`, {
+        const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${routeUUID}/report-config/preview?${search.toString()}`, {
           signal: controller.signal
         });
         setPreview(data);
@@ -143,7 +145,7 @@ function ReportConfigSection(props: {
       controller.abort();
       window.clearTimeout(timeoutID);
     };
-  }, [props.detail.komari_node_uuid, props.open, runImmediately, scheduleCron]);
+  }, [props.open, routeUUID, runImmediately, scheduleCron]);
 
   useEffect(() => {
     if (!props.open || previewError) {
@@ -162,7 +164,7 @@ function ReportConfigSection(props: {
       setSaveState("saving");
       setSaveError("");
       try {
-        const config = await apiRequest<NodeDetail["report_config"]>(`/nodes/${props.detail.komari_node_uuid}/report-config`, {
+        const config = await apiRequest<NodeDetail["report_config"]>(`/nodes/${routeUUID}/report-config`, {
           method: "PUT",
           body: JSON.stringify({
             schedule_cron: normalizedCron,
@@ -207,9 +209,9 @@ function ReportConfigSection(props: {
     persistedConfig.scheduleCron,
     preview.schedule_cron,
     previewError,
-    props.detail.komari_node_uuid,
     props.onSaved,
     props.open,
+    routeUUID,
     runImmediately
   ]);
 
@@ -247,13 +249,20 @@ function ReportConfigSection(props: {
           </Button>
         </div>
         <div className="field-modal-body">
-        <div className="space-y-1">
-          {props.detail.report_config.target_ips.length > 0 ? (
-            <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
-          ) : (
-            <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
-          )}
-        </div>
+          {props.fromKomari ? (
+            <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-800" data-komari-return-hint="true">
+              {props.detail.report_config.target_ips.length > 0
+                ? "配置已保存。请回到 Komari 节点页重新点击 IPQ，查看当前 IP 质量结果。"
+                : "从 Komari 入口打开，请先添加目标 IP。保存后回到 Komari 节点页重新查看。"}
+            </div>
+          ) : null}
+          <div className="space-y-1">
+            {props.detail.report_config.target_ips.length > 0 ? (
+              <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
+            ) : (
+              <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
+            )}
+          </div>
         <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
@@ -365,6 +374,7 @@ function ReportConfigSection(props: {
 function NodeReportConfigDialog(props: {
   me: MeResponse;
   nodeUUID: string;
+  fromKomari: boolean;
   onClose: () => void;
   onUnauthorized: () => void;
 }) {
@@ -588,6 +598,7 @@ function NodeReportConfigDialog(props: {
   return (
     <ReportConfigSection
       detail={localDetail}
+      fromKomari={props.fromKomari}
       me={props.me}
       onAddTarget={handleAddTarget}
       onClose={props.onClose}
@@ -614,6 +625,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [reportConfigNodeUUID, setReportConfigNodeUUID] = useState("");
+  const reportConfigFromKomari = searchParams.get("from_komari") === "1";
 
   useEffect(() => {
     const requestedUUID = searchParams.get("report_config")?.trim() || "";
@@ -630,6 +642,8 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
   function closeReportConfig() {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete("report_config");
+    nextParams.delete("from_komari");
+    nextParams.delete("node_name");
     const query = nextParams.toString();
     navigate(`/nodes${query ? `?${query}` : ""}`, { replace: true });
     setReportConfigNodeUUID("");
@@ -679,6 +693,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
       {reportConfigNodeUUID ? (
         <NodeReportConfigDialog
           me={props.me}
+          fromKomari={reportConfigFromKomari}
           nodeUUID={reportConfigNodeUUID}
           onClose={closeReportConfig}
           onUnauthorized={props.onUnauthorized}
