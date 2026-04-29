@@ -27,6 +27,9 @@ import { HistoryPagination } from "../components/history/history-pagination";
 import { PageHeader } from "../components/layout/page-header";
 import { NodeDetailLoading } from "../components/node/node-detail-loading";
 import { NodePageError } from "../components/node/node-page-error";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 
 function HistoryChangeFiltersBar(props: {
   startDate: string;
@@ -79,10 +82,10 @@ function HistoryChangeFiltersBar(props: {
     <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
       <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.8fr)_minmax(180px,220px)_minmax(220px,1fr)]">
         <div className="relative" ref={rangePanelRef}>
-          <button
+          <Button
             data-history-range-trigger="true"
             className={[
-              "flex h-11 w-full items-center justify-between rounded-xl border bg-white px-3 text-left text-sm outline-none transition focus:ring-2 focus:ring-indigo-100",
+              "flex h-11 w-full justify-between rounded-xl border bg-white px-3 text-left text-sm font-normal hover:bg-white focus:ring-2 focus:ring-indigo-100",
               rangeOpen || props.startDate || props.endDate
                 ? "border-indigo-300 text-slate-900 focus:border-indigo-300"
                 : "border-slate-200 text-slate-700 hover:border-indigo-300 focus:border-indigo-300"
@@ -92,7 +95,7 @@ function HistoryChangeFiltersBar(props: {
           >
             <span className="truncate">{describeHistoryDateRange(startDate, endDate)}</span>
             <span className="ml-3 shrink-0 text-slate-400">{rangeOpen ? "收起" : "展开"}</span>
-          </button>
+          </Button>
           {rangeOpen ? (
             <div className="absolute left-0 top-full z-20 mt-2 w-[min(720px,calc(100vw-8rem))] rounded-[18px] border border-slate-200 bg-white p-4 shadow-xl">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -102,32 +105,38 @@ function HistoryChangeFiltersBar(props: {
                 </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <label className="grid gap-2 text-sm text-slate-700">
-                  <span>开始日期</span>
-                  <input
-                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                <div className="grid gap-2">
+                  <Label className="font-normal text-slate-700" htmlFor="history-start-date">
+                    开始日期
+                  </Label>
+                  <Input
+                    className="h-10 rounded-xl px-3 focus:border-indigo-300 focus:ring-indigo-100"
+                    id="history-start-date"
                     type="datetime-local"
                     step={1}
                     value={startDate}
                     onChange={(event) => setStartDate(event.target.value)}
                   />
-                </label>
-                <label className="grid gap-2 text-sm text-slate-700">
-                  <span>结束日期</span>
-                  <input
-                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                </div>
+                <div className="grid gap-2">
+                  <Label className="font-normal text-slate-700" htmlFor="history-end-date">
+                    结束日期
+                  </Label>
+                  <Input
+                    className="h-10 rounded-xl px-3 focus:border-indigo-300 focus:ring-indigo-100"
+                    id="history-end-date"
                     type="datetime-local"
                     step={1}
                     value={endDate}
                     onChange={(event) => setEndDate(event.target.value)}
                   />
-                </label>
+                </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {historyDateRangePresets.map((preset) => (
-                  <button
+                  <Button
                     key={preset.label}
-                    className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600"
+                    className="h-9 rounded-full border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600"
                     onClick={() => {
                       const next = preset.resolve();
                       setStartDate(next.startDate);
@@ -136,12 +145,12 @@ function HistoryChangeFiltersBar(props: {
                     type="button"
                   >
                     {preset.label}
-                  </button>
+                  </Button>
                 ))}
               </div>
               <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                <Button
+                  className="rounded-full border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                   onClick={() => {
                     props.onApply({
                       startDate: historyInputValueToQueryValue(startDate),
@@ -152,9 +161,9 @@ function HistoryChangeFiltersBar(props: {
                   type="button"
                 >
                   应用筛选
-                </button>
-                <button
-                  className="inline-flex h-10 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                </Button>
+                <Button
+                  className="rounded-full border border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-white hover:text-slate-700"
                   onClick={() => {
                     setStartDate("");
                     setEndDate("");
@@ -164,7 +173,7 @@ function HistoryChangeFiltersBar(props: {
                   type="button"
                 >
                   清空
-                </button>
+                </Button>
               </div>
             </div>
           ) : null}
@@ -402,12 +411,12 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
         backTo={detailBackTo}
         actions={
           compareTargetID ? (
-            <Link
-              className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-              to={historyPathForCompare}
+            <Button
+              asChild
+              className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
             >
-              快照对比
-            </Link>
+              <Link to={historyPathForCompare}>快照对比</Link>
+            </Button>
           ) : undefined
         }
       />
@@ -446,8 +455,8 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
                 <h2 className="text-base font-semibold text-slate-900">字段变化</h2>
                 <p className="text-sm text-slate-500">按字段独立记录变化，默认按时间倒序展示。</p>
               </div>
-              <button
-                className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+              <Button
+                className="h-9 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                 onClick={() => {
                   reload();
                   reloadHistory();
@@ -456,7 +465,7 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
                 type="button"
               >
                 刷新
-              </button>
+              </Button>
             </div>
 
             <HistoryChangeFiltersBar

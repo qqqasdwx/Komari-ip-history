@@ -23,6 +23,7 @@ import { NodeDetailLoading } from "../components/node/node-detail-loading";
 import { NodePageError } from "../components/node/node-page-error";
 import { TargetTabs } from "../components/node/target-tabs";
 import { pushToast } from "../components/toast";
+import { Button } from "../components/ui/button";
 
 function reportPathMatchesHighlight(nodePath: string, highlightPath: string) {
   return nodePath === highlightPath;
@@ -61,19 +62,19 @@ function CompareReportPane(props: {
             </span>
           ) : null}
         </div>
-        <button
+        <Button
           className={[
-            "inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium transition",
+            "h-9 rounded-full border px-4 text-sm font-medium",
             props.entry.is_favorite
-              ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300"
-              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:text-indigo-600"
+              ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
+              : "border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
           ].join(" ")}
           disabled={props.favoriteSaving}
           onClick={props.onToggleFavorite}
           type="button"
         >
           {props.favoriteSaving ? "处理中..." : props.entry.is_favorite ? "取消收藏" : "收藏快照"}
-        </button>
+        </Button>
       </div>
       <div ref={containerRef}>
         <CurrentReportView result={props.entry.result} hiddenPaths={[]} compact />
@@ -350,8 +351,8 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
               <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
               <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的独立快照对比。</p>
             </div>
-            <button
-              className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+            <Button
+              className="h-9 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
               onClick={() => {
                 reload();
                 reloadHistory();
@@ -359,7 +360,7 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
               type="button"
             >
               刷新
-            </button>
+            </Button>
           </div>
           {detail.targets.length > 0 ? (
             <TargetTabs
