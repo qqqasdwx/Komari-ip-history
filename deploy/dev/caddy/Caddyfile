@@ -9,3 +9,9 @@
 		reverse_proxy komari-purcarte:25774
 	}
 }
+
+:8090 {
+	handle {
+		reverse_proxy workspace:8090
+	}
+}
