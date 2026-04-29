@@ -4,6 +4,10 @@ import { formatByteSize, formatRetentionDays } from "../lib/display-format";
 import type { HistoryRetentionSettings } from "../lib/types";
 import { PageHeader } from "../components/layout/page-header";
 import { pushToast } from "../components/toast";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 
 export function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
   const [loading, setLoading] = useState(true);
@@ -87,9 +91,9 @@ export function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
           <div className="h-52 animate-pulse rounded-[24px] bg-slate-100" />
         </div>
       ) : error ? (
-        <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">{error}</div>
+        <Card className="border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</Card>
       ) : (
-        <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+        <Card className="p-6">
           <div className="space-y-4">
             <div className="space-y-2">
               <h2 className="text-base font-semibold text-slate-900">历史保留</h2>
@@ -98,17 +102,20 @@ export function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
               </p>
             </div>
 
-            <label className="flex w-full flex-col gap-2 text-sm text-slate-700">
-              <span className="font-medium text-slate-900">历史保留天数</span>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+            <div className="flex w-full flex-col gap-2">
+              <Label className="text-slate-900" htmlFor="retention-days">
+                历史保留天数
+              </Label>
+              <Input
+                className="rounded-2xl px-4 py-3 focus:border-slate-300"
+                id="retention-days"
                 placeholder="-1 或正整数"
                 value={retentionDaysInput}
                 onChange={(event) => setRetentionDaysInput(event.target.value)}
                 type="text"
                 inputMode="numeric"
               />
-            </label>
+            </div>
 
             <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-2">
               <div>
@@ -139,12 +146,17 @@ export function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <button className="button" disabled={saving || !retentionDaysDirty} onClick={() => void saveHistoryRetentionSettings()} type="button">
+              <Button
+                className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
+                disabled={saving || !retentionDaysDirty}
+                onClick={() => void saveHistoryRetentionSettings()}
+                type="button"
+              >
                 {saving ? "保存中…" : "保存历史保留设置"}
-              </button>
+              </Button>
             </div>
           </div>
-        </section>
+        </Card>
       )}
     </section>
   );
