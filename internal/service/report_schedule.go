@@ -83,9 +83,10 @@ func buildNodeReportConfig(node models.Node, targetIPs []string) (NodeReportConf
 	if err != nil {
 		return NodeReportConfig{}, err
 	}
+	routeUUID := nodeRouteUUID(node)
 	return NodeReportConfig{
-		EndpointPath:   "/api/v1/report/nodes/" + node.KomariNodeUUID,
-		InstallerPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
+		EndpointPath:   "/api/v1/report/nodes/" + routeUUID,
+		InstallerPath:  "/api/v1/report/nodes/" + routeUUID + "/install.sh",
 		ReporterToken:  node.ReporterToken,
 		InstallToken:   node.InstallToken,
 		TargetIPs:      targetIPs,
@@ -96,8 +97,8 @@ func buildNodeReportConfig(node models.Node, targetIPs []string) (NodeReportConf
 }
 
 func GetNodeReportConfigPreview(db *gorm.DB, uuid string, scheduleCron string, runImmediately *bool) (NodeReportConfigPreview, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
 		return NodeReportConfigPreview{}, err
 	}
 	storedCron, storedRunImmediately := normalizeReporterSchedule(node)
@@ -112,8 +113,8 @@ func GetNodeReportConfigPreview(db *gorm.DB, uuid string, scheduleCron string, r
 }
 
 func UpdateNodeReportConfig(db *gorm.DB, uuid string, input UpdateNodeReportConfigInput) (NodeReportConfig, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
 		return NodeReportConfig{}, err
 	}
 	preview, err := previewNodeReportConfig(input.ScheduleCron, input.RunImmediately, time.Now().UTC())

@@ -102,3 +102,95 @@ func TestReportNodeMatchesEquivalentIPv6Forms(t *testing.T) {
 		t.Fatalf("expected 1 history row, got %d", historyCount)
 	}
 }
+
+func TestNodeRoutesAcceptNodeUUIDAndKomariUUID(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{NodeUUID: "ipq-node-route", KomariNodeUUID: "komari-node-route", Name: "node-route", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", SortOrder: 0}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	if _, err := GetNodeDetail(db, node.NodeUUID, nil); err != nil {
+		t.Fatalf("get detail by node_uuid: %v", err)
+	}
+	if _, err := GetNodeDetail(db, node.KomariNodeUUID, nil); err != nil {
+		t.Fatalf("get detail by komari_node_uuid: %v", err)
+	}
+	if _, err := AddNodeTarget(db, config.Config{}, node.NodeUUID, AddNodeTargetInput{IP: "2.2.2.2"}); err != nil {
+		t.Fatalf("add target by node_uuid: %v", err)
+	}
+	if err := ReportNode(db, node.NodeUUID, node.ReporterToken, ReportNodeInput{
+		TargetIP: "1.1.1.1",
+		Summary:  "ok",
+		Result: map[string]any{
+			"Head": map[string]any{"IP": "1.1.1.1"},
+		},
+	}); err != nil {
+		t.Fatalf("report by node_uuid: %v", err)
+	}
+	if err := ReportNode(db, node.KomariNodeUUID, node.ReporterToken, ReportNodeInput{
+		TargetIP: "1.1.1.1",
+		Summary:  "ok",
+		Result: map[string]any{
+			"Head": map[string]any{"IP": "1.1.1.1"},
+		},
+	}); err != nil {
+		t.Fatalf("report by komari_node_uuid: %v", err)
+	}
+}
+
+func TestReportConfigUsesNodeUUIDPathsWhenAvailable(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{NodeUUID: "ipq-report-config", KomariNodeUUID: "komari-report-config", Name: "node-report-config", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", SortOrder: 0}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	detail, err := GetNodeDetail(db, node.KomariNodeUUID, nil)
+	if err != nil {
+		t.Fatalf("get node detail: %v", err)
+	}
+	if detail.ReportConfig.EndpointPath != "/api/v1/report/nodes/"+node.NodeUUID {
+		t.Fatalf("expected endpoint path to use node_uuid, got %s", detail.ReportConfig.EndpointPath)
+	}
+	if detail.ReportConfig.InstallerPath != "/api/v1/report/nodes/"+node.NodeUUID+"/install.sh" {
+		t.Fatalf("expected installer path to use node_uuid, got %s", detail.ReportConfig.InstallerPath)
+	}
+
+	config, err := GetNodeInstallConfigByInstallToken(db, node.InstallToken, "https://example.test")
+	if err != nil {
+		t.Fatalf("get install config by install token: %v", err)
+	}
+	if config.NodeUUID != node.NodeUUID {
+		t.Fatalf("expected install config node_uuid %q, got %q", node.NodeUUID, config.NodeUUID)
+	}
+	if config.ReportEndpoint != "https://example.test/api/v1/report/nodes/"+node.NodeUUID {
+		t.Fatalf("expected report endpoint to use node_uuid, got %s", config.ReportEndpoint)
+	}
+
+	legacyEndpointConfig, err := GetNodeInstallConfig(db, node.KomariNodeUUID, node.ReporterToken, "https://example.test/api/v1/report/nodes/"+node.KomariNodeUUID)
+	if err != nil {
+		t.Fatalf("get install config by legacy route: %v", err)
+	}
+	if legacyEndpointConfig.ReportEndpoint != "https://example.test/api/v1/report/nodes/"+node.NodeUUID {
+		t.Fatalf("expected legacy route install config to return node_uuid endpoint, got %s", legacyEndpointConfig.ReportEndpoint)
+	}
+
+	script, err := GetNodeInstallScript(db, node.KomariNodeUUID, node.ReporterToken, "https://example.test/api/v1/report/nodes/"+node.KomariNodeUUID, "", nil)
+	if err != nil {
+		t.Fatalf("get install script by legacy route: %v", err)
+	}
+	if !strings.Contains(script, "REPORT_ENDPOINT='https://example.test/api/v1/report/nodes/"+node.NodeUUID+"'") {
+		t.Fatalf("expected legacy route install script to use node_uuid endpoint")
+	}
+}

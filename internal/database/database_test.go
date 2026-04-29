@@ -1,9 +1,11 @@
 package database
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
+	"komari-ip-history/internal/config"
 	"komari-ip-history/internal/models"
 
 	"gorm.io/driver/sqlite"
@@ -144,5 +146,103 @@ func TestAutoMigrateCreatesHistoryCompositeIndexes(t *testing.T) {
 	}
 	if !db.Migrator().HasIndex(&models.NodeTargetHistory{}, "idx_node_target_history_favorite_recorded") {
 		t.Fatalf("expected composite index idx_node_target_history_favorite_recorded")
+	}
+}
+
+func TestOpenMigratesLegacyDatabaseWithMultipleNodes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if err := db.Exec(`
+CREATE TABLE nodes (
+  id integer primary key autoincrement,
+  komari_node_uuid text not null,
+  name text not null,
+  has_data numeric not null default false,
+  current_summary text,
+  current_result_json text,
+  current_result_updated_at datetime,
+  reporter_token text,
+  install_token text not null default '',
+  reporter_schedule_cron text not null default '0 0 * * *',
+  reporter_run_immediately numeric not null default true,
+  created_at datetime,
+  updated_at datetime
+);
+CREATE UNIQUE INDEX idx_nodes_komari_node_uuid ON nodes(komari_node_uuid);
+INSERT INTO nodes (komari_node_uuid, name, reporter_token) VALUES ('legacy-a', 'Legacy A', 'token-a');
+INSERT INTO nodes (komari_node_uuid, name, reporter_token) VALUES ('legacy-b', 'Legacy B', 'token-b');
+CREATE TABLE node_targets (
+  id integer primary key autoincrement,
+  node_id integer not null,
+  target_ip text not null,
+  sort_order integer not null default 0,
+  has_data numeric not null default false,
+  current_summary text,
+  current_result_json text,
+  current_result_updated_at datetime,
+  created_at datetime,
+  updated_at datetime
+);
+CREATE UNIQUE INDEX idx_node_target_ip ON node_targets(node_id, target_ip);
+CREATE TABLE node_histories (
+  id integer primary key autoincrement,
+  node_id integer not null,
+  result_json text,
+  summary text,
+  recorded_at datetime not null,
+  created_at datetime
+);
+CREATE TABLE node_target_histories (
+  id integer primary key autoincrement,
+  node_target_id integer not null,
+  result_json text,
+  summary text,
+  recorded_at datetime not null,
+  created_at datetime
+);
+CREATE TABLE app_settings (
+  key text primary key,
+  value text not null,
+  updated_at datetime
+);
+`).Error; err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+
+	reopened, err := Open(config.Config{
+		DatabasePath:      path,
+		DefaultAdminUser:  "admin",
+		DefaultAdminPass:  "admin",
+		SessionCookieName: "ipq_session",
+	})
+	if err != nil {
+		t.Fatalf("open migrated db: %v", err)
+	}
+
+	var nodes []models.Node
+	if err := reopened.Order("komari_node_uuid ASC").Find(&nodes).Error; err != nil {
+		t.Fatalf("list migrated nodes: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 migrated nodes, got %d", len(nodes))
+	}
+	seen := map[string]struct{}{}
+	for _, node := range nodes {
+		if node.KomariNodeUUID == "" {
+			t.Fatal("expected komari_node_uuid to be preserved")
+		}
+		if node.NodeUUID == "" {
+			t.Fatal("expected node_uuid to be backfilled")
+		}
+		if _, ok := seen[node.NodeUUID]; ok {
+			t.Fatalf("expected unique node_uuid values, got duplicate %q", node.NodeUUID)
+		}
+		seen[node.NodeUUID] = struct{}{}
+	}
+	if !reopened.Migrator().HasIndex(&models.Node{}, "idx_nodes_node_uuid") {
+		t.Fatalf("expected node_uuid index after migration")
 	}
 }

@@ -48,6 +48,12 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	if err := ensureNodeInstallTokens(db); err != nil {
 		return nil, err
 	}
+	if err := ensureNodeUUIDs(db); err != nil {
+		return nil, err
+	}
+	if err := ensureNodeUUIDIndex(db); err != nil {
+		return nil, err
+	}
 	if err := migrateLegacyNodeTargets(db); err != nil {
 		return nil, err
 	}
@@ -83,7 +89,7 @@ func ensureDefaultAdmin(db *gorm.DB, cfg config.Config) error {
 }
 
 func ensureSchemaColumns(db *gorm.DB) error {
-	nodeColumns := []string{"ReporterScheduleCron", "ReporterRunImmediately", "InstallToken"}
+	nodeColumns := []string{"NodeUUID", "ReporterScheduleCron", "ReporterRunImmediately", "InstallToken"}
 	for _, column := range nodeColumns {
 		if db.Migrator().HasColumn(&models.Node{}, column) {
 			continue
@@ -100,6 +106,55 @@ func ensureSchemaColumns(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func ensureNodeUUIDs(db *gorm.DB) error {
+	var nodes []models.Node
+	if err := db.Order("id ASC").Find(&nodes).Error; err != nil {
+		return err
+	}
+
+	seen := make(map[string]uint, len(nodes))
+	for _, node := range nodes {
+		nodeUUID := strings.TrimSpace(node.NodeUUID)
+		if nodeUUID != "" {
+			if _, exists := seen[nodeUUID]; !exists {
+				seen[nodeUUID] = node.ID
+				continue
+			}
+		}
+
+		token, err := newUniqueNodeUUID(seen)
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&models.Node{}).Where("id = ?", node.ID).Update("node_uuid", token).Error; err != nil {
+			return err
+		}
+		seen[token] = node.ID
+	}
+	return nil
+}
+
+func newUniqueNodeUUID(seen map[string]uint) (string, error) {
+	for attempts := 0; attempts < 16; attempts++ {
+		token, err := auth.NewInstallToken()
+		if err != nil {
+			return "", err
+		}
+		if _, exists := seen[token]; exists {
+			continue
+		}
+		return token, nil
+	}
+	return "", errors.New("failed to generate unique node uuid")
+}
+
+func ensureNodeUUIDIndex(db *gorm.DB) error {
+	if db.Migrator().HasIndex(&models.Node{}, "idx_nodes_node_uuid") {
+		return nil
+	}
+	return db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_node_uuid ON nodes(node_uuid)").Error
 }
 
 func ensureNodeInstallTokens(db *gorm.DB) error {

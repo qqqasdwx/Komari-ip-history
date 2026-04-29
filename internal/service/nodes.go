@@ -30,6 +30,7 @@ type ReorderNodeTargetsInput struct {
 }
 
 type NodeListItem struct {
+	NodeUUID       string     `json:"node_uuid"`
 	KomariNodeUUID string     `json:"komari_node_uuid"`
 	Name           string     `json:"name"`
 	HasData        bool       `json:"has_data"`
@@ -90,6 +91,7 @@ type NodeInstallConfig struct {
 }
 
 type NodeDetail struct {
+	NodeUUID         string               `json:"node_uuid"`
 	KomariNodeUUID   string               `json:"komari_node_uuid"`
 	Name             string               `json:"name"`
 	HasData          bool                 `json:"has_data"`
@@ -203,7 +205,7 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 	query := db.Order("has_data DESC").Order("current_result_updated_at DESC").Order("created_at DESC")
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		query = query.Where("name LIKE ? OR komari_node_uuid LIKE ?", like, like)
+		query = query.Where("name LIKE ? OR node_uuid LIKE ? OR komari_node_uuid LIKE ?", like, like, like)
 	}
 	if err := query.Find(&nodes).Error; err != nil {
 		return nil, err
@@ -212,6 +214,7 @@ func ListNodes(db *gorm.DB, keyword string) ([]NodeListItem, error) {
 	items := make([]NodeListItem, 0, len(nodes))
 	for _, node := range nodes {
 		items = append(items, NodeListItem{
+			NodeUUID:       node.NodeUUID,
 			KomariNodeUUID: node.KomariNodeUUID,
 			Name:           node.Name,
 			HasData:        node.HasData,
@@ -252,6 +255,7 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	}
 
 	detail := NodeDetail{
+		NodeUUID:       node.NodeUUID,
 		KomariNodeUUID: node.KomariNodeUUID,
 		Name:           node.Name,
 		HasData:        node.HasData,
@@ -461,8 +465,10 @@ func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTar
 	}
 
 	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	if loaded, err := loadNodeByUUID(db, uuid); err != nil {
 		return NodeTargetListItem{}, err
+	} else {
+		node = loaded
 	}
 
 	existingTarget, err := findNodeTargetByNormalizedIP(db, node.ID, ip)
@@ -534,9 +540,11 @@ func DeleteNodeTarget(db *gorm.DB, uuid string, targetID uint) error {
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		var node models.Node
-		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		loadedNode, err := loadNodeByUUID(tx, uuid)
+		if err != nil {
 			return err
 		}
+		node = loadedNode
 
 		var target models.NodeTarget
 		if err := tx.First(&target, "id = ? AND node_id = ?", targetID, node.ID).Error; err != nil {
@@ -563,9 +571,11 @@ func ReorderNodeTargets(db *gorm.DB, uuid string, input ReorderNodeTargetsInput)
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		var node models.Node
-		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		loadedNode, err := loadNodeByUUID(tx, uuid)
+		if err != nil {
 			return err
 		}
+		node = loadedNode
 
 		var targets []models.NodeTarget
 		if err := tx.Where("node_id = ?", node.ID).Find(&targets).Error; err != nil {
@@ -608,9 +618,11 @@ func ReorderNodeTargets(db *gorm.DB, uuid string, input ReorderNodeTargetsInput)
 func DeleteNode(db *gorm.DB, uuid string) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		var node models.Node
-		if err := tx.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+		loadedNode, err := loadNodeByUUID(tx, uuid)
+		if err != nil {
 			return err
 		}
+		node = loadedNode
 		var targets []models.NodeTarget
 		if err := tx.Where("node_id = ?", node.ID).Find(&targets).Error; err != nil {
 			return err
@@ -636,8 +648,10 @@ func DeleteNode(db *gorm.DB, uuid string) error {
 
 func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error) {
 	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	if loaded, err := loadNodeByUUID(db, uuid); err != nil {
 		return NodeReportConfig{}, err
+	} else {
+		node = loaded
 	}
 
 	token, err := newReporterToken()
@@ -658,8 +672,8 @@ func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error)
 	}
 
 	return NodeReportConfig{
-		EndpointPath:  "/api/v1/report/nodes/" + node.KomariNodeUUID,
-		InstallerPath: "/api/v1/report/nodes/" + node.KomariNodeUUID + "/install.sh",
+		EndpointPath:  "/api/v1/report/nodes/" + nodeRouteUUID(node),
+		InstallerPath: "/api/v1/report/nodes/" + nodeRouteUUID(node) + "/install.sh",
 		ReporterToken: token,
 		TargetIPs:     targetIPs,
 	}, nil
@@ -697,7 +711,7 @@ func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, sc
 		return "", err
 	}
 
-	return buildNodeInstallScript(node, targetIPs, reportEndpointURL, normalizedCron, runImmediately), nil
+	return buildNodeInstallScript(node, targetIPs, nodeReportEndpointURL(reportEndpointURL, node), normalizedCron, runImmediately), nil
 }
 
 func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (NodeInstallConfig, error) {
@@ -727,8 +741,8 @@ func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (N
 	}
 
 	return NodeInstallConfig{
-		NodeUUID:       node.KomariNodeUUID,
-		ReportEndpoint: reportEndpointURL,
+		NodeUUID:       nodeRouteUUID(node),
+		ReportEndpoint: nodeReportEndpointURL(reportEndpointURL, node),
 		ReporterToken:  node.ReporterToken,
 		ScheduleCron:   normalizedCron,
 		RunImmediately: runImmediately,
@@ -767,9 +781,9 @@ func GetNodeInstallConfigByInstallToken(db *gorm.DB, installToken, reportBaseURL
 		return NodeInstallConfig{}, err
 	}
 
-	reportEndpointURL := strings.TrimRight(reportBaseURL, "/") + "/api/v1/report/nodes/" + node.KomariNodeUUID
+	reportEndpointURL := strings.TrimRight(reportBaseURL, "/") + "/api/v1/report/nodes/" + nodeRouteUUID(node)
 	return NodeInstallConfig{
-		NodeUUID:       node.KomariNodeUUID,
+		NodeUUID:       nodeRouteUUID(node),
 		ReportEndpoint: reportEndpointURL,
 		ReporterToken:  node.ReporterToken,
 		ScheduleCron:   normalizedCron,
@@ -791,8 +805,10 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 	}
 
 	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	if loaded, err := loadNodeByUUID(db, uuid); err != nil {
 		return err
+	} else {
+		node = loaded
 	}
 	if node.ReporterToken == "" || token != node.ReporterToken {
 		return errors.New("invalid reporter token")
@@ -880,8 +896,8 @@ func applyPublicDisplayIP(result map[string]any, displayIP string) {
 }
 
 func loadNodeWithTargets(db *gorm.DB, uuid string) (models.Node, []models.NodeTarget, error) {
-	var node models.Node
-	if err := db.First(&node, "komari_node_uuid = ?", uuid).Error; err != nil {
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
 		return models.Node{}, nil, err
 	}
 
@@ -891,6 +907,39 @@ func loadNodeWithTargets(db *gorm.DB, uuid string) (models.Node, []models.NodeTa
 	}
 
 	return node, targets, nil
+}
+
+func loadNodeByUUID(db *gorm.DB, uuid string) (models.Node, error) {
+	trimmed := strings.TrimSpace(uuid)
+	if trimmed == "" {
+		return models.Node{}, gorm.ErrRecordNotFound
+	}
+	var node models.Node
+	if err := db.First(&node, "node_uuid = ?", trimmed).Error; err == nil {
+		return node, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.Node{}, err
+	}
+	if err := db.First(&node, "komari_node_uuid = ?", trimmed).Error; err != nil {
+		return models.Node{}, err
+	}
+	return node, nil
+}
+
+func nodeRouteUUID(node models.Node) string {
+	if value := strings.TrimSpace(node.NodeUUID); value != "" {
+		return value
+	}
+	return strings.TrimSpace(node.KomariNodeUUID)
+}
+
+func nodeReportEndpointURL(reportEndpointURL string, node models.Node) string {
+	endpoint := strings.TrimSpace(reportEndpointURL)
+	marker := "/report/nodes/"
+	if index := strings.LastIndex(endpoint, marker); index >= 0 {
+		return endpoint[:index+len(marker)] + nodeRouteUUID(node)
+	}
+	return endpoint
 }
 
 func selectNodeTarget(targets []models.NodeTarget, selectedTargetID *uint) (*models.NodeTarget, error) {

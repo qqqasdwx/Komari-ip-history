@@ -26,6 +26,7 @@ type Session struct {
 
 type Node struct {
 	ID                     uint       `gorm:"primaryKey" json:"id"`
+	NodeUUID               string     `gorm:"size:48;not null;default:''" json:"node_uuid"`
 	KomariNodeUUID         string     `gorm:"size:64;uniqueIndex;not null" json:"komari_node_uuid"`
 	Name                   string     `gorm:"size:255;not null" json:"name"`
 	HasData                bool       `gorm:"not null;default:false" json:"has_data"`
@@ -41,6 +42,13 @@ type Node struct {
 }
 
 func (n *Node) BeforeCreate(_ *gorm.DB) error {
+	if n.NodeUUID == "" {
+		token, err := auth.NewInstallToken()
+		if err != nil {
+			return err
+		}
+		n.NodeUUID = token
+	}
 	if n.InstallToken != "" {
 		return nil
 	}
