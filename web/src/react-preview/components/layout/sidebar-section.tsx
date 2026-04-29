@@ -7,7 +7,7 @@ export type NavItem = {
   icon: ReactNode;
 };
 
-export function SidebarSection(props: { title: string; items: NavItem[] }) {
+export function SidebarSection(props: { title: string; items: NavItem[]; onNavigate?: () => void }) {
   return (
     <div className="space-y-2">
       <p className="px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{props.title}</p>
@@ -22,8 +22,9 @@ export function SidebarSection(props: { title: string; items: NavItem[] }) {
                 isActive ? "bg-indigo-50 text-indigo-600" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               ].join(" ")
             }
+            onClick={props.onNavigate}
           >
-            <span className="text-base">{item.icon}</span>
+            <span className="[&_svg]:size-4">{item.icon}</span>
             <span>{item.label}</span>
           </NavLink>
         ))}
