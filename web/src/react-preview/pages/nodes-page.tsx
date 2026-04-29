@@ -1,8 +1,8 @@
 import {
-  GearIcon,
-  PlusIcon,
-  ReloadIcon
-} from "@radix-ui/react-icons";
+  Plus,
+  RotateCcw,
+  Settings
+} from "lucide-react";
 import {
   type FormEvent,
   useEffect,
@@ -293,7 +293,7 @@ function ReportConfigSection(props: {
               disabled={props.targetSaving || !props.targetInput.trim()}
               type="submit"
             >
-              <PlusIcon />
+              <Plus className="size-4" />
             </Button>
           </form>
           {props.targetError ? <p className="text-sm text-rose-600">{props.targetError}</p> : null}
@@ -712,14 +712,14 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
           <div className="grid gap-4 px-2 py-8">
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{error}</div>
             <div>
-              <button
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+              <Button
+                className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                 onClick={() => setReloadToken((value) => value + 1)}
                 type="button"
               >
-                <ReloadIcon />
+                <RotateCcw className="size-4" />
                 <span>重试</span>
-              </button>
+              </Button>
             </div>
           </div>
         ) : nodes.length === 0 ? (
@@ -732,12 +732,12 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                 </p>
               </div>
               <div>
-                <Link
-                  className="inline-flex h-10 items-center rounded-xl bg-indigo-500 px-4 text-sm font-medium text-white transition hover:bg-indigo-600"
-                  to="/settings/integration"
+                <Button
+                  asChild
+                  className="rounded-xl bg-indigo-500 text-white hover:bg-indigo-600"
                 >
-                  去接入
-                </Link>
+                  <Link to="/settings/integration">去接入</Link>
+                </Button>
               </div>
             </div>
           </div>
@@ -776,9 +776,9 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                   </div>
                   <div className="min-w-0 text-center text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
                   <div className="flex items-center justify-center gap-2">
-                    <button
+                    <Button
                       aria-label="上报设置"
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+                      className="h-9 w-9 rounded-xl border border-slate-200 bg-white p-0 text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                       data-node-report-settings="true"
                       onClick={(event) => {
                         event.stopPropagation();
@@ -786,8 +786,8 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                       }}
                       type="button"
                     >
-                      <GearIcon />
-                    </button>
+                      <Settings className="size-4" />
+                    </Button>
                     <span className="text-sm font-semibold text-indigo-600">查看</span>
                   </div>
                 </div>

@@ -19,6 +19,7 @@ import { PageHeader } from "../components/layout/page-header";
 import { NodeDetailLoading } from "../components/node/node-detail-loading";
 import { NodePageError } from "../components/node/node-page-error";
 import { TargetTabs } from "../components/node/target-tabs";
+import { Button } from "../components/ui/button";
 import { EmbedBridgePage } from "./embed-bridge-page";
 
 export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
@@ -103,30 +104,30 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
           detail.current_target ? (
             isEmbed ? (
               <>
-                <a
-                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-                  href={toStandaloneAppURL(historyPath)}
-                  rel="noreferrer"
-                  target="_blank"
+                <Button
+                  asChild
+                  className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                 >
-                  历史记录
-                </a>
-                <a
-                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-                  href={toStandaloneAppURL(comparePath)}
-                  rel="noreferrer"
-                  target="_blank"
+                  <a href={toStandaloneAppURL(historyPath)} rel="noreferrer" target="_blank">
+                    历史记录
+                  </a>
+                </Button>
+                <Button
+                  asChild
+                  className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
                 >
-                  快照对比
-                </a>
+                  <a href={toStandaloneAppURL(comparePath)} rel="noreferrer" target="_blank">
+                    快照对比
+                  </a>
+                </Button>
               </>
             ) : (
-              <Link
-                className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:border-indigo-300 hover:text-indigo-600"
-                to={historyPath}
+              <Button
+                asChild
+                className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
               >
-                查看历史记录
-              </Link>
+                <Link to={historyPath}>查看历史记录</Link>
+              </Button>
             )
           ) : undefined
         }
@@ -144,9 +145,9 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>当前节点还没有目标 IP。</span>
-              <button className="button" onClick={goToReportConfig} type="button">
+              <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
                 去接入
-              </button>
+              </Button>
             </div>
           )}
         </div>

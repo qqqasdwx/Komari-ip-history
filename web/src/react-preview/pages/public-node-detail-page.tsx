@@ -12,6 +12,7 @@ import { PageHeader } from "../components/layout/page-header";
 import { NodeDetailLoading } from "../components/node/node-detail-loading";
 import { NodePageError } from "../components/node/node-page-error";
 import { TargetTabs } from "../components/node/target-tabs";
+import { Button } from "../components/ui/button";
 
 export function PublicNodeDetailPage() {
   const { uuid = "" } = useParams();
@@ -82,9 +83,9 @@ export function PublicNodeDetailPage() {
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>管理员还没有配置可查看的目标 IP。</span>
               {!isEmbed ? (
-                <button className="button" onClick={goToReportConfig} type="button">
+                <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
                   去接入
-                </button>
+                </Button>
               ) : null}
             </div>
           )}

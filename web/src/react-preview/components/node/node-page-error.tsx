@@ -1,5 +1,6 @@
-import { ReloadIcon } from "@radix-ui/react-icons";
+import { RotateCcw } from "lucide-react";
 import { PageHeader } from "../layout/page-header";
+import { Button } from "../ui/button";
 
 export function NodePageError(props: {
   title: string;
@@ -15,14 +16,14 @@ export function NodePageError(props: {
         <div className="space-y-4">
           <p>{props.error}</p>
           <div>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:border-indigo-300 hover:text-indigo-600"
+            <Button
+              className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
               onClick={props.onRetry}
               type="button"
             >
-              <ReloadIcon />
+              <RotateCcw className="size-4" />
               <span>重试</span>
-            </button>
+            </Button>
           </div>
         </div>
       </section>

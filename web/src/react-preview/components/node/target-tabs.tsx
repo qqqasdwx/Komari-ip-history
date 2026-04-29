@@ -1,5 +1,6 @@
-import { Cross2Icon } from "@radix-ui/react-icons";
+import { X } from "lucide-react";
 import { type DragEvent, useState } from "react";
+import { Button } from "../ui/button";
 
 export function TargetTabs(props: {
   items: Array<{ id: number; label: string; has_data: boolean }>;
@@ -60,10 +61,12 @@ export function TargetTabs(props: {
             <span>{item.label}</span>
           </button>
           {props.onDelete ? (
-            <button
+            <Button
               aria-label={`删除 ${item.label}`}
+              size="icon"
+              variant="ghost"
               className={[
-                "absolute inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-rose-600",
+                "absolute h-6 w-6 rounded-full p-0 text-slate-400 hover:bg-rose-50 hover:text-rose-600",
                 isAttached ? "right-2 top-[18px]" : "right-2 top-1/2 -translate-y-1/2"
               ].join(" ")}
               onClick={(event) => {
@@ -72,8 +75,8 @@ export function TargetTabs(props: {
               }}
               type="button"
             >
-              <Cross2Icon />
-            </button>
+              <X className="size-3.5" />
+            </Button>
           ) : null}
         </div>
       ))}
