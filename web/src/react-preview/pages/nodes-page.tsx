@@ -29,6 +29,9 @@ import { SearchBox } from "../components/common/search-box";
 import { StatusPill } from "../components/node/status-pill";
 import { TargetTabs } from "../components/node/target-tabs";
 import { pushToast } from "../components/toast";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 
 const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
 
@@ -235,9 +238,13 @@ function ReportConfigSection(props: {
             <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
             <p className="text-sm text-slate-500">统一管理目标 IP、执行计划和接入命令。</p>
           </div>
-          <button className="button ghost" onClick={props.onClose} type="button">
+          <Button
+            className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+            onClick={props.onClose}
+            type="button"
+          >
             关闭
-          </button>
+          </Button>
         </div>
         <div className="field-modal-body">
         <div className="space-y-1">
@@ -268,37 +275,44 @@ function ReportConfigSection(props: {
             </div>
           )}
           <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_48px]" onSubmit={props.onAddTarget}>
-            <label className="grid min-w-0 gap-2 text-sm text-slate-700">
-              <input
-                className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            <div className="grid min-w-0 gap-2">
+              <Label className="sr-only" htmlFor="report-config-target-ip">
+                目标 IP
+              </Label>
+              <Input
+                className="h-11 rounded-xl px-3 focus:border-indigo-300 focus:ring-indigo-100"
+                id="report-config-target-ip"
                 onChange={(event) => props.onTargetInputChange(event.target.value)}
                 placeholder="例如 1.1.1.1 或 2606:4700:4700::1111"
                 value={props.targetInput}
               />
-            </label>
-            <button
+            </div>
+            <Button
               aria-label="添加 IP"
-              className="inline-flex h-11 w-12 items-center justify-center rounded-xl bg-indigo-500 text-sm font-medium text-white transition hover:bg-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
+              className="h-11 w-12 rounded-xl bg-indigo-500 px-0 text-white hover:bg-indigo-600 disabled:bg-indigo-300"
               disabled={props.targetSaving || !props.targetInput.trim()}
               type="submit"
             >
               <PlusIcon />
-            </button>
+            </Button>
           </form>
           {props.targetError ? <p className="text-sm text-rose-600">{props.targetError}</p> : null}
         </div>
         <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
-          <label className="space-y-1 text-sm text-slate-700">
-            <span className="font-medium text-slate-900">Cron</span>
-            <input
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+          <div className="space-y-1">
+            <Label className="text-slate-900" htmlFor="report-config-cron">
+              Cron
+            </Label>
+            <Input
+              className="rounded-xl px-3 py-2 focus:border-slate-400"
+              id="report-config-cron"
               onChange={(event) => setScheduleCron(event.target.value)}
               placeholder="0 0 * * *"
               spellCheck={false}
               value={scheduleCron}
             />
             <p className="text-xs text-slate-500">默认每天 0 点执行，使用标准 5 段 cron 表达式。</p>
-          </label>
+          </div>
           <label className="space-y-1 text-sm text-slate-700">
             <span className="font-medium text-slate-900">安装后立即执行一次</span>
             <span className="flex h-11 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -329,14 +343,14 @@ function ReportConfigSection(props: {
             <div className="summary-section">
               <div className="summary-head">
                 <strong>接入命令</strong>
-                <button
-                  className="button ghost"
+                <Button
+                  className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
                   disabled={previewError !== ""}
                   onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
                   type="button"
                 >
                   复制
-                </button>
+                </Button>
               </div>
               <pre className="code-block report-config-command">{installCommand}</pre>
             </div>
@@ -515,9 +529,13 @@ function NodeReportConfigDialog(props: {
               <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
               <p className="text-sm text-slate-500">正在加载当前节点配置。</p>
             </div>
-            <button className="button ghost" onClick={props.onClose} type="button">
+            <Button
+              className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+              onClick={props.onClose}
+              type="button"
+            >
               关闭
-            </button>
+            </Button>
           </div>
           <div className="field-modal-body">
             <div className="grid gap-3">
@@ -540,18 +558,26 @@ function NodeReportConfigDialog(props: {
               <h2 className="text-base font-semibold text-slate-900">节点上报设置</h2>
               <p className="text-sm text-slate-500">加载失败，请重试。</p>
             </div>
-            <button className="button ghost" onClick={props.onClose} type="button">
+            <Button
+              className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+              onClick={props.onClose}
+              type="button"
+            >
               关闭
-            </button>
+            </Button>
           </div>
           <div className="field-modal-body space-y-4">
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
               {error || "加载节点上报设置失败。"}
             </div>
             <div>
-              <button className="button" onClick={reload} type="button">
+              <Button
+                className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
+                onClick={reload}
+                type="button"
+              >
                 重试
-              </button>
+              </Button>
             </div>
           </div>
         </section>

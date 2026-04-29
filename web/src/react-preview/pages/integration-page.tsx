@@ -4,6 +4,10 @@ import { copyText } from "../lib/clipboard";
 import type { IntegrationSettings, MeResponse, RuntimeResponse } from "../lib/types";
 import { PageHeader } from "../components/layout/page-header";
 import { pushToast } from "../components/toast";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 
 function buildPreviewPath(variant: "loader" | "inline", baseURL: string) {
   const query = new URLSearchParams({ variant });
@@ -145,10 +149,10 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
           <div className="h-44 animate-pulse rounded-[24px] bg-slate-100" />
         </div>
       ) : error ? (
-        <div className="rounded-[24px] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">{error}</div>
+        <Card className="border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</Card>
       ) : (
         <>
-          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="p-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <h2 className="text-base font-semibold text-slate-900">接入地址</h2>
@@ -157,16 +161,19 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                 </p>
               </div>
 
-              <label className="flex w-full flex-col gap-2 text-sm text-slate-700">
-                <span className="font-medium text-slate-900">手动覆盖地址（可选）</span>
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-300 focus:ring-2 focus:ring-slate-200"
+              <div className="flex w-full flex-col gap-2">
+                <Label className="text-slate-900" htmlFor="integration-public-base-url">
+                  手动覆盖地址（可选）
+                </Label>
+                <Input
+                  className="rounded-2xl px-4 py-3 focus:border-slate-300"
+                  id="integration-public-base-url"
                   placeholder={suggestedPublicBaseURL || window.location.origin}
                   value={publicBaseURLInput}
                   onChange={(event) => setPublicBaseURLInput(event.target.value)}
                   type="text"
                 />
-              </label>
+              </div>
 
               <p className="text-sm leading-6 text-slate-500">
                 {publicBaseURL
@@ -175,8 +182,8 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
               </p>
 
               <div className="flex flex-wrap gap-3">
-                <button
-                  className="button"
+                <Button
+                  className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
                   disabled={savingAddress || !publicBaseURLDirty}
                   onClick={() =>
                     void saveIntegrationSettings(publicBaseURLInput, savedGuestReadEnabled, {
@@ -188,9 +195,9 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                   type="button"
                 >
                   {savingAddress ? "保存中…" : "保存"}
-                </button>
-                <button
-                  className="button ghost"
+                </Button>
+                <Button
+                  className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
                   disabled={savingAddress || savedPublicBaseURL === ""}
                   onClick={() =>
                     void saveIntegrationSettings("", savedGuestReadEnabled, {
@@ -202,12 +209,12 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                   type="button"
                 >
                   恢复默认
-                </button>
+                </Button>
               </div>
             </div>
-          </section>
+          </Card>
 
-          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="p-6">
             <div className="space-y-4">
               <div className="space-y-2">
                 <h2 className="text-base font-semibold text-slate-900">游客只读</h2>
@@ -230,8 +237,8 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
               </label>
 
               <div className="flex flex-wrap items-center gap-3">
-                <button
-                  className="button"
+                <Button
+                  className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
                   disabled={savingGuestRead || !guestReadDirty}
                   onClick={() =>
                     void saveIntegrationSettings(savedPublicBaseURL, guestReadEnabledInput, {
@@ -243,39 +250,47 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                   type="button"
                 >
                   {savingGuestRead ? "保存中…" : "保存游客只读设置"}
-                </button>
+                </Button>
                 <span className="text-sm text-slate-500">
                   {savedGuestReadEnabled ? "当前状态：已开放" : "当前状态：未开放"}
                 </span>
               </div>
             </div>
-          </section>
+          </Card>
 
-          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="p-6">
             <div className="section-head">
               <div>
                 <h2>推荐方案：loader 版</h2>
                 <p className="muted">推荐优先使用 loader 版，后续更新通常不需要重新复制整段代码。</p>
               </div>
-              <button className="button" onClick={() => void handleCopy(loaderCode, "短 loader 版代码已复制。")} type="button">
+              <Button
+                className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
+                onClick={() => void handleCopy(loaderCode, "短 loader 版代码已复制。")}
+                type="button"
+              >
                 复制 loader 版
-              </button>
+              </Button>
             </div>
             <pre className="code-block code-block-compact">{loaderCode}</pre>
-          </section>
+          </Card>
 
-          <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
+          <Card className="p-6">
             <div className="section-head">
               <div>
                 <h2>完整内联版</h2>
                 <p className="muted">只有在你明确不想依赖 loader 时再使用。逻辑更新后需要重新复制。</p>
               </div>
-              <button className="button ghost" onClick={() => void handleCopy(inlineCode, "完整内联版代码已复制。")} type="button">
+              <Button
+                className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+                onClick={() => void handleCopy(inlineCode, "完整内联版代码已复制。")}
+                type="button"
+              >
                 复制完整内联版
-              </button>
+              </Button>
             </div>
             <pre className="code-block code-block-compact">{inlineCode}</pre>
-          </section>
+          </Card>
         </>
       )}
     </section>
