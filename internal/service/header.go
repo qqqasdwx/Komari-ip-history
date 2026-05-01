@@ -111,6 +111,39 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   }
 
   const DEBUG_ENABLED = isDebugEnabled();
+  const HOST_THEME_TOKEN_MAP = [
+    ["background", "komari_bg", "--ipq-loader-bg"],
+    ["surface", "komari_surface", "--ipq-loader-surface"],
+    ["card", "komari_card", "--ipq-loader-card"],
+    ["cardMuted", "komari_card_muted", "--ipq-loader-card-muted"],
+    ["border", "komari_border", "--ipq-loader-border"],
+    ["text", "komari_text", "--ipq-loader-text"],
+    ["muted", "komari_muted", "--ipq-loader-muted"],
+    ["accent", "komari_accent_color", "--ipq-loader-accent"],
+    ["accentSoft", "komari_accent_soft", "--ipq-loader-accent-soft"],
+    ["accentStrong", "komari_accent_strong", "--ipq-loader-accent-strong"],
+    ["accentContrast", "komari_accent_contrast", "--ipq-loader-accent-contrast"]
+  ];
+  const PURCARTE_STYLE_TOKEN_MAP = [
+    ["card", "komari_purcarte_card", "--ipq-purcarte-card"],
+    ["cardMuted", "komari_purcarte_card_muted", "--ipq-purcarte-card-muted"],
+    ["cardHover", "komari_purcarte_card_hover", "--ipq-purcarte-card-hover"],
+    ["canvas", "komari_canvas", "--ipq-purcarte-canvas"],
+    ["border", "komari_purcarte_border", "--ipq-purcarte-border"],
+    ["themeBorder", "komari_theme_border", "--ipq-purcarte-theme-border"],
+    ["themeShadow", "komari_theme_shadow", "--ipq-purcarte-theme-shadow"],
+    ["radius", "komari_radius", "--ipq-purcarte-radius"],
+    ["innerCard", "komari_purcarte_inner_card", "--ipq-purcarte-inner-card"],
+    ["innerBorder", "komari_purcarte_inner_border", "--ipq-purcarte-inner-border"],
+    ["innerShadow", "komari_purcarte_inner_shadow", "--ipq-purcarte-inner-shadow"],
+    ["text", "komari_purcarte_text", "--ipq-purcarte-text"],
+    ["muted", "komari_purcarte_muted", "--ipq-purcarte-muted"],
+    ["shell", "komari_purcarte_shell", "--ipq-purcarte-shell"],
+    ["blur", "komari_blur", "--ipq-purcarte-blur"]
+  ];
+  const PURCARTE_STYLE_VARS = PURCARTE_STYLE_TOKEN_MAP.map(function (item) {
+    return item[2];
+  });
 
   function debugLog(event, detail) {
     if (!DEBUG_ENABLED || !window.console || !window.console.debug) return;
@@ -196,7 +229,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  align-items: center;",
       "  justify-content: center;",
       "  padding: 28px;",
-      "  background: rgba(15, 23, 42, 0.48);",
+      "  background: var(--ipq-loader-overlay-bg, rgba(15, 23, 42, 0.48));",
       "  backdrop-filter: blur(6px);",
       "  z-index: 99999;",
       "}",
@@ -206,7 +239,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       ".ipq-loader-dialog {",
       "  width: min(1080px, calc(100vw - 32px));",
       "  height: min(820px, calc(100vh - 32px));",
-      "  background: #fff;",
+      "  background: var(--ipq-loader-surface, #fff);",
+      "  border: 1px solid var(--ipq-loader-border, transparent);",
       "  border-radius: 22px;",
       "  overflow: hidden;",
       "  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.35);",
@@ -219,8 +253,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  justify-content: space-between;",
       "  gap: 12px;",
       "  padding: 14px 18px;",
-      "  background: linear-gradient(180deg, #f8fafc 0%%, #eef6f5 100%%);",
-      "  border-bottom: 1px solid rgba(148, 163, 184, 0.28);",
+      "  background: var(--ipq-loader-card, linear-gradient(180deg, #f8fafc 0%%, #eef6f5 100%%));",
+      "  border-bottom: 1px solid var(--ipq-loader-border, rgba(148, 163, 184, 0.28));",
       "}",
       ".ipq-loader-dialog-title {",
       "  display: grid;",
@@ -228,11 +262,11 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "}",
       ".ipq-loader-dialog-title strong {",
       "  font: 700 15px/1.2 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
-      "  color: #0f172a;",
+      "  color: var(--ipq-loader-text, #0f172a);",
       "}",
       ".ipq-loader-dialog-title span {",
       "  font: 13px/1.3 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
-      "  color: #475569;",
+      "  color: var(--ipq-loader-muted, #475569);",
       "}",
       ".ipq-loader-dialog-actions {",
       "  display: flex;",
@@ -249,14 +283,14 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  cursor: pointer;",
       "}",
       ".ipq-loader-link {",
-      "  border: 1px solid rgba(148, 163, 184, 0.45);",
-      "  color: #0f172a;",
-      "  background: #fff;",
+      "  border: 1px solid var(--ipq-loader-border, rgba(148, 163, 184, 0.45));",
+      "  color: var(--ipq-loader-text, #0f172a);",
+      "  background: var(--ipq-loader-card, #fff);",
       "}",
       ".ipq-loader-close {",
       "  border: 0;",
-      "  color: #fff;",
-      "  background: #0f766e;",
+      "  color: var(--ipq-loader-accent-contrast, #fff);",
+      "  background: var(--ipq-loader-accent-strong, #0f766e);",
       "}",
       ".ipq-loader-close svg {",
       "  width: 18px;",
@@ -268,7 +302,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  align-items: center;",
       "  justify-content: center;",
       "  padding: 24px;",
-      "  background: #f8fafc;",
+      "  background: var(--ipq-loader-bg, #f8fafc);",
       "}",
       ".ipq-loader-overlay[data-connect-open=\"true\"] .ipq-loader-connect-panel {",
       "  display: flex;",
@@ -284,18 +318,18 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  display: grid;",
       "  gap: 14px;",
       "  padding: 24px;",
-      "  border: 1px solid rgba(148, 163, 184, 0.28);",
+      "  border: 1px solid var(--ipq-loader-border, rgba(148, 163, 184, 0.28));",
       "  border-radius: 18px;",
-      "  background: #fff;",
+      "  background: var(--ipq-loader-card, #fff);",
       "  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);",
       "}",
       ".ipq-loader-connect-card strong {",
       "  font: 700 18px/1.3 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
-      "  color: #0f172a;",
+      "  color: var(--ipq-loader-text, #0f172a);",
       "}",
       ".ipq-loader-connect-card span {",
       "  font: 14px/1.6 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
-      "  color: #475569;",
+      "  color: var(--ipq-loader-muted, #475569);",
       "}",
       ".ipq-loader-connect-action {",
       "  justify-self: flex-start;",
@@ -304,8 +338,8 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  border-radius: 12px;",
       "  padding: 10px 14px;",
       "  font: 700 14px/1 -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;",
-      "  color: #fff;",
-      "  background: #4f46e5;",
+      "  color: var(--ipq-loader-accent-contrast, #fff);",
+      "  background: var(--ipq-loader-accent-strong, #4f46e5);",
       "  cursor: pointer;",
       "}",
       ".ipq-loader-connect-action:disabled {",
@@ -316,7 +350,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  width: 100%%;",
       "  height: 100%%;",
       "  border: 0;",
-      "  background: #f8fafc;",
+      "  background: var(--ipq-loader-bg, #f8fafc);",
       "}",
       ".ipq-loader-toast {",
       "  position: fixed;",
@@ -423,18 +457,18 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  margin-right: 6px;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte {",
-      "  background: var(--ipq-purcarte-overlay-tint, rgba(22, 34, 49, 0.18));",
-      "  backdrop-filter: blur(2px) saturate(0.96);",
+      "  background: transparent;",
+      "  backdrop-filter: none;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-dialog {",
-      "  width: min(960px, calc(100vw - 56px));",
-      "  height: min(80vh, calc(100vh - 56px));",
+      "  width: min(896px, calc(100vw - 4px));",
+      "  height: min(80vh, calc(100vh - 4px));",
       "  padding: 20px;",
-      "  background: linear-gradient(0deg, var(--ipq-purcarte-modal-tint, rgba(59, 79, 101, 0.42)), var(--ipq-purcarte-modal-tint, rgba(59, 79, 101, 0.42))), var(--ipq-purcarte-shell, var(--ipq-purcarte-card, rgba(255, 255, 255, 0.5)));",
-      "  border: 1px solid var(--ipq-purcarte-theme-border, rgba(23, 23, 23, 0.28));",
-      "  border-radius: 10px;",
-      "  box-shadow: 0 2px 8px rgba(23, 23, 23, 0.24);",
-      "  backdrop-filter: blur(var(--ipq-purcarte-blur, var(--purcarte-blur, 10px))) saturate(1.08);",
+      "  background: var(--ipq-purcarte-card, rgba(255, 255, 255, 0.5));",
+      "  border: 0;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
+      "  box-shadow: var(--ipq-purcarte-theme-shadow, 0 1px 3px 0 rgba(23, 23, 23, 0.1), 0 1px 2px -1px rgba(23, 23, 23, 0.1));",
+      "  backdrop-filter: blur(var(--ipq-purcarte-blur, 10px));",
       "  gap: 0;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-dialog-header {",
@@ -468,7 +502,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  align-items: center;",
       "  height: 32px;",
       "  padding: 0 14px;",
-      "  border-radius: 10px;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
       "  background: var(--accent-a6, rgba(145, 119, 230, 0.32));",
       "  color: var(--accent-11, #5b4bc4);",
       "}",
@@ -479,7 +513,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  width: 32px;",
       "  height: 32px;",
       "  padding: 0;",
-      "  border-radius: 10px;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
       "  color: var(--ipq-purcarte-text, var(--primary, #171717));",
       "  display: inline-flex;",
       "  align-items: center;",
@@ -490,17 +524,20 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-frame {",
       "  background: transparent;",
-      "  border-radius: 10px;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
+      "  overflow: hidden;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-panel {",
       "  background: transparent;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-card {",
-      "  border-color: var(--ipq-purcarte-inner-border, rgba(255, 255, 255, 0.3));",
-      "  border-radius: 10px;",
-      "  background: var(--ipq-purcarte-inner-card, rgba(255, 255, 255, 0.18));",
-      "  box-shadow: 0 2px 6px var(--ipq-purcarte-inner-shadow, rgba(23, 23, 23, 0.07));",
-      "  backdrop-filter: blur(var(--ipq-purcarte-blur, 10px)) saturate(1.08);",
+      "  border: 0;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
+      "  background: var(--ipq-purcarte-card, rgba(255, 255, 255, 0.5));",
+      "  box-shadow: var(--ipq-purcarte-theme-shadow, 0 1px 3px 0 rgba(23, 23, 23, 0.1), 0 1px 2px -1px rgba(23, 23, 23, 0.1));",
+      "  backdrop-filter: blur(var(--ipq-purcarte-blur, 10px));",
+      "  overflow: hidden;",
+      "  background-clip: padding-box;",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-card strong {",
       "  color: var(--ipq-purcarte-text, var(--foreground, #171717));",
@@ -509,7 +546,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       "  color: var(--ipq-purcarte-muted, rgba(49, 49, 49, 0.72));",
       "}",
       ".ipq-loader-overlay.ipq-loader-theme-purcarte .ipq-loader-connect-action {",
-      "  border-radius: 10px;",
+      "  border-radius: var(--ipq-purcarte-radius, 10px);",
       "  background: var(--accent-a6, rgba(145, 119, 230, 0.32));",
       "  color: var(--accent-11, #5b4bc4);",
       "}",
@@ -575,8 +612,22 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     applyThemeVariables();
   }
 
+  function activeThemeRoot() {
+    return document.querySelector(".radix-themes.dark, .radix-themes.light") ||
+      document.querySelector(".radix-themes") ||
+      document.documentElement;
+  }
+
+  function themeRoots() {
+    const roots = [];
+    [activeThemeRoot(), document.documentElement, document.body].forEach(function (root) {
+      if (root && roots.indexOf(root) < 0) roots.push(root);
+    });
+    return roots;
+  }
+
   function readCSSVariable(name, fallback) {
-    const roots = [document.documentElement, document.body, document.querySelector(".radix-themes")];
+    const roots = themeRoots();
     for (const root of roots) {
       if (!root) continue;
       const value = window.getComputedStyle(root).getPropertyValue(name).trim();
@@ -591,15 +642,91 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     return text;
   }
 
-  function withAlpha(color, alpha) {
+  function firstThemeCSSValue(names, fallback) {
+    const keys = Array.isArray(names) ? names : [names];
+    const roots = themeRoots();
+    for (const root of roots) {
+      const style = window.getComputedStyle(root);
+      for (const key of keys) {
+        const value = sanitizeCSSValue(style.getPropertyValue(key).trim());
+        if (value) return value;
+      }
+    }
+    return fallback || "";
+  }
+
+  function parseColorChannels(color) {
     const text = sanitizeCSSValue(color);
-    const rgba = text.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i);
-    if (!rgba) return "";
-    const channels = rgba.slice(1, 4).map(function (value) {
-      return Math.max(0, Math.min(255, Number(value) || 0));
+    let match = text.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*([0-9.]+))?\s*\)$/i);
+    if (match) {
+      return {
+        r: Math.max(0, Math.min(255, Number(match[1]) || 0)),
+        g: Math.max(0, Math.min(255, Number(match[2]) || 0)),
+        b: Math.max(0, Math.min(255, Number(match[3]) || 0)),
+        a: match[4] === undefined ? 1 : Math.max(0, Math.min(1, Number(match[4]) || 0))
+      };
+    }
+    match = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!match) return null;
+    const hex = match[1].length === 3
+      ? match[1].split("").map(function (part) { return part + part; }).join("")
+      : match[1];
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+      a: 1
+    };
+  }
+
+  function compositeColor(foreground, background, fallback) {
+    const fg = parseColorChannels(foreground);
+    const bg = parseColorChannels(background);
+    if (!fg || !bg) return fallback;
+    const alpha = Math.max(0, Math.min(1, fg.a));
+    const channel = function (front, back) {
+      return Math.round(front * alpha + back * (1 - alpha));
+    };
+    return "rgb(" + channel(fg.r, bg.r) + ", " + channel(fg.g, bg.g) + ", " + channel(fg.b, bg.b) + ")";
+  }
+
+  function readPurCarteNativeCardStyle() {
+    const candidates = Array.from(document.querySelectorAll(".purcarte-blur.theme-card-style, .theme-card-style, .purcarte-blur"));
+    let best = null;
+    let bestScore = -Infinity;
+    candidates.forEach(function (element) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const style = window.getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden") return;
+      const className = String(element.className || "");
+      const radiusValue = parseFloat(style.borderRadius || "0");
+      const hasCardBackground = style.backgroundColor && style.backgroundColor !== "rgba(0, 0, 0, 0)";
+      let score = 0;
+      if (hasCardBackground) score += 40;
+      if (style.boxShadow && style.boxShadow !== "none") score += 20;
+      if ((style.backdropFilter || style.webkitBackdropFilter || "") && (style.backdropFilter || style.webkitBackdropFilter) !== "none") score += 20;
+      if (radiusValue > 0) score += 120;
+      if (/rounded-none/.test(className) || radiusValue <= 0) score -= 120;
+      if (/\bring-/.test(className)) score -= 40;
+      if (rect.width >= window.innerWidth * 0.95 && rect.height <= 64) score -= 80;
+      if (rect.height < 48) score -= 30;
+      score += Math.min(30, rect.height / 20);
+      if (score > bestScore) {
+        best = element;
+        bestScore = score;
+      }
     });
-    const nextAlpha = Math.max(0, Math.min(1, alpha));
-    return "rgba(" + channels[0] + ", " + channels[1] + ", " + channels[2] + ", " + nextAlpha + ")";
+    if (!best) {
+      return {};
+    }
+    const style = window.getComputedStyle(best);
+    return {
+      background: sanitizeCSSValue(style.backgroundColor),
+      border: sanitizeCSSValue(style.borderColor),
+      radius: sanitizeCSSValue(style.borderRadius),
+      shadow: sanitizeCSSValue(style.boxShadow)
+    };
   }
 
   function getPurCarteGlassConfig() {
@@ -615,6 +742,16 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     const selectedCard = appearance === "dark"
       ? (cssDark || parts[1] || cssCard || parts[0] || fallbackCard)
       : (cssLight || parts[0] || cssCard || parts[1] || fallbackCard);
+    const nativeCard = readPurCarteNativeCardStyle();
+    const card = nativeCard.background || selectedCard;
+    const canvasBase = appearance === "dark"
+      ? firstThemeCSSValue(["--color-background", "--background", "--gray-1"], "#0b1120")
+      : firstThemeCSSValue(["--color-background", "--background", "--gray-1"], "#f8fafc");
+    const canvas = compositeColor(
+      card,
+      canvasBase,
+      appearance === "dark" ? "rgb(6, 9, 16)" : "rgb(252, 253, 254)"
+    );
     const configuredBlur = Number(settings.blurValue);
     const cssBlur = readCSSVariable("--purcarte-blur", "");
     const parsedCSSBlur = Number(String(cssBlur).replace(/px$/i, ""));
@@ -622,23 +759,117 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       Number.isFinite(configuredBlur) ? configuredBlur : (Number.isFinite(parsedCSSBlur) ? parsedCSSBlur : 10)
     );
     const blur = Math.max(0, Math.min(40, blurValue));
-    const shell = withAlpha(selectedCard, appearance === "dark" ? 0.42 : 0.08) || selectedCard;
+    const shell = card;
     return {
       appearance: appearance,
-      card: selectedCard,
-      cardMuted: selectedCard,
+      card: card,
+      cardMuted: card,
+      canvas: canvas,
       cardHover: appearance === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(255, 255, 255, 0.68)",
       border: appearance === "dark" ? "rgba(255, 255, 255, 0.16)" : "rgba(255, 255, 255, 0.5)",
-      themeBorder: appearance === "dark" ? "rgba(250, 250, 250, 0.5)" : "rgba(23, 23, 23, 0.5)",
+      themeBorder: nativeCard.border || (appearance === "dark" ? "rgba(250, 250, 250, 0.5)" : "rgba(23, 23, 23, 0.5)"),
+      themeShadow: nativeCard.shadow && nativeCard.shadow !== "none" ? nativeCard.shadow : "0 1px 3px 0 rgba(23, 23, 23, 0.1), 0 1px 2px -1px rgba(23, 23, 23, 0.1)",
+      radius: nativeCard.radius || "10px",
       overlayTint: appearance === "dark" ? "rgba(0, 0, 0, 0.26)" : "rgba(22, 34, 49, 0.18)",
-      modalTint: appearance === "dark" ? "rgba(0, 0, 0, 0.34)" : "rgba(59, 79, 101, 0.42)",
-      innerCard: appearance === "dark" ? "rgba(255, 255, 255, 0.04)" : "rgba(255, 255, 255, 0.18)",
-      innerBorder: appearance === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(255, 255, 255, 0.3)",
-      innerShadow: appearance === "dark" ? "rgba(0, 0, 0, 0.08)" : "rgba(23, 23, 23, 0.07)",
+      innerCard: card,
+      innerBorder: "transparent",
+      innerShadow: nativeCard.shadow && nativeCard.shadow !== "none" ? nativeCard.shadow : "0 1px 3px 0 rgba(23, 23, 23, 0.1), 0 1px 2px -1px rgba(23, 23, 23, 0.1)",
       text: appearance === "dark" ? "rgba(250, 250, 250, 0.96)" : "rgba(23, 23, 23, 0.96)",
       muted: appearance === "dark" ? "rgba(250, 250, 250, 0.68)" : "rgba(49, 49, 49, 0.72)",
       shell: shell,
       blur: blur + "px"
+    };
+  }
+
+  function getHostThemeConfig(purcarteGlass) {
+    const appearance = getKomariAppearance() === "dark" ? "dark" : "light";
+    const dark = appearance === "dark";
+    const fallbackBackground = dark ? "#111113" : "#ffffff";
+    const fallbackSurface = dark ? "#18191b" : "#f8fafc";
+    const fallbackCard = dark ? "#212225" : "#ffffff";
+    const fallbackBorder = dark ? "rgba(255, 255, 255, 0.16)" : "rgba(148, 163, 184, 0.32)";
+    const fallbackText = dark ? "#edeef0" : "#0f172a";
+    const fallbackMuted = dark ? "#b0b4ba" : "#475569";
+    const fallbackAccent = dark ? "#b1a9ff" : "#4f46e5";
+    const fallbackAccentSoft = dark ? "rgba(177, 169, 255, 0.18)" : "rgba(79, 70, 229, 0.12)";
+
+    const config = {
+      appearance: appearance,
+      background: firstThemeCSSValue(["--color-background", "--background", "--gray-1"], fallbackBackground),
+      surface: firstThemeCSSValue(["--gray-2", "--card", "--popover"], fallbackSurface),
+      card: firstThemeCSSValue(["--gray-3", "--card", "--popover"], fallbackCard),
+      cardMuted: firstThemeCSSValue(["--gray-4", "--secondary", "--gray-3"], fallbackSurface),
+      border: firstThemeCSSValue(["--gray-a6", "--border"], fallbackBorder),
+      text: firstThemeCSSValue(["--gray-12", "--foreground", "--card-foreground"], fallbackText),
+      muted: firstThemeCSSValue(["--gray-11", "--secondary-foreground"], fallbackMuted),
+      accent: firstThemeCSSValue(["--accent-11", "--primary"], fallbackAccent),
+      accentSoft: firstThemeCSSValue(["--accent-a4", "--accent-a5", "--accent-4"], fallbackAccentSoft),
+      accentStrong: firstThemeCSSValue(["--accent-9", "--primary"], fallbackAccent),
+      accentContrast: firstThemeCSSValue(["--primary-foreground"], dark ? "#111113" : "#ffffff"),
+      blur: "0px"
+    };
+
+    if (isPurCarteTheme()) {
+      const glass = purcarteGlass || getPurCarteGlassConfig();
+      config.background = glass.card || config.background;
+      config.surface = glass.card || config.surface;
+      config.card = glass.card || config.card;
+      config.cardMuted = glass.cardHover || config.cardMuted;
+      config.border = glass.innerBorder || config.border;
+      config.text = glass.text || config.text;
+      config.muted = glass.muted || config.muted;
+      config.blur = glass.blur || config.blur;
+    }
+
+    return config;
+  }
+
+  function getEmbedThemeContext() {
+    const theme = normalizeThemeName(state.themeName || detectThemeFromDOM());
+    const appearance = getKomariAppearance() === "dark" ? "dark" : "light";
+    const accent = getKomariAccent();
+    const purcarte = isPurCarteTheme() ? getPurCarteGlassConfig() : null;
+    const hostTheme = getHostThemeConfig(purcarte);
+    const queryParams = [["komari_theme_protocol", "1"]];
+    const cssVars = {};
+
+    if (theme) queryParams.push(["komari_theme", theme]);
+    if (appearance) queryParams.push(["komari_appearance", appearance]);
+    if (accent) queryParams.push(["komari_accent", accent]);
+
+    HOST_THEME_TOKEN_MAP.forEach(function (item) {
+      const key = item[0];
+      const param = item[1];
+      const cssVar = item[2];
+      const value = hostTheme[key];
+      if (value) {
+        queryParams.push([param, value]);
+        cssVars[cssVar] = value;
+      }
+    });
+    cssVars["--ipq-loader-overlay-bg"] = hostTheme.appearance === "dark"
+      ? "rgba(0, 0, 0, 0.58)"
+      : "rgba(15, 23, 42, 0.36)";
+
+    if (purcarte) {
+      queryParams.push(["komari_glass", "1"]);
+      PURCARTE_STYLE_TOKEN_MAP.forEach(function (item) {
+        const key = item[0];
+        const param = item[1];
+        const cssVar = item[2];
+        const value = purcarte[key];
+        if (!value) return;
+        cssVars[cssVar] = value;
+        if (param) queryParams.push([param, value]);
+      });
+    }
+
+    return {
+      theme: theme,
+      appearance: appearance,
+      purcarte: Boolean(purcarte),
+      queryParams: queryParams,
+      cssVars: cssVars
     };
   }
 
@@ -647,47 +878,19 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       .concat(Array.from(document.querySelectorAll("[data-ipq-purcarte-button='true']")))
       .filter(Boolean);
     if (!targets.length) return;
-    if (!isPurCarteTheme()) {
+    const themeContext = getEmbedThemeContext();
+    targets.forEach(function (element) {
+      Object.keys(themeContext.cssVars).forEach(function (name) {
+        element.style.setProperty(name, themeContext.cssVars[name]);
+      });
+    });
+    if (!themeContext.purcarte) {
       targets.forEach(function (element) {
-        [
-          "--ipq-purcarte-card",
-          "--ipq-purcarte-card-muted",
-          "--ipq-purcarte-card-hover",
-          "--ipq-purcarte-border",
-          "--ipq-purcarte-theme-border",
-          "--ipq-purcarte-overlay-tint",
-          "--ipq-purcarte-modal-tint",
-          "--ipq-purcarte-inner-card",
-          "--ipq-purcarte-inner-border",
-          "--ipq-purcarte-inner-shadow",
-          "--ipq-purcarte-text",
-          "--ipq-purcarte-muted",
-          "--ipq-purcarte-shell",
-          "--ipq-purcarte-blur"
-        ].forEach(function (name) {
+        PURCARTE_STYLE_VARS.forEach(function (name) {
           element.style.removeProperty(name);
         });
       });
-      return;
     }
-
-    const glass = getPurCarteGlassConfig();
-    targets.forEach(function (element) {
-      element.style.setProperty("--ipq-purcarte-card", glass.card);
-      element.style.setProperty("--ipq-purcarte-card-muted", glass.cardMuted);
-      element.style.setProperty("--ipq-purcarte-card-hover", glass.cardHover);
-      element.style.setProperty("--ipq-purcarte-border", glass.border);
-      element.style.setProperty("--ipq-purcarte-theme-border", glass.themeBorder);
-      element.style.setProperty("--ipq-purcarte-overlay-tint", glass.overlayTint);
-      element.style.setProperty("--ipq-purcarte-modal-tint", glass.modalTint);
-      element.style.setProperty("--ipq-purcarte-inner-card", glass.innerCard);
-      element.style.setProperty("--ipq-purcarte-inner-border", glass.innerBorder);
-      element.style.setProperty("--ipq-purcarte-inner-shadow", glass.innerShadow);
-      element.style.setProperty("--ipq-purcarte-text", glass.text);
-      element.style.setProperty("--ipq-purcarte-muted", glass.muted);
-      element.style.setProperty("--ipq-purcarte-shell", glass.shell);
-      element.style.setProperty("--ipq-purcarte-blur", glass.blur);
-    });
   }
 
   function cleanupPortal() {
@@ -1154,6 +1357,32 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
     overlay.setAttribute("data-open", "true");
   }
 
+  function refreshEntryStateAfterImmediateOpen(context, sourceButton) {
+    loadNodeEntryState(context).then(function (entryState) {
+      if (!entryState || !sourceButton) return;
+      if (sourceButton._ipqContext && sourceButton._ipqContext.uuid !== context.uuid) return;
+      setButtonEntryState(sourceButton, entryState);
+      renderContextButton(sourceButton, sourceButton.disabled);
+    });
+  }
+
+  function openFromKnownEntryState(context, sourceButton) {
+    const entryState = sourceButton && sourceButton._ipqEntryState;
+    if (!entryState) return false;
+    if (entryState.connected) {
+      openModal(context, {
+        mode: GUEST_READ_ENABLED ? "public" : "admin",
+        komariReturn: window.location.href
+      });
+      refreshEntryStateAfterImmediateOpen(context, sourceButton);
+      return true;
+    }
+
+    openConnectPrompt(context, entryState);
+    refreshEntryStateAfterImmediateOpen(context, sourceButton);
+    return true;
+  }
+
   function isVisible(element) {
     return !!element && !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
   }
@@ -1193,24 +1422,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
   }
 
   function appendThemeParams(params) {
-    const theme = normalizeThemeName(state.themeName || detectThemeFromDOM());
-    if (theme) {
-      params.set("komari_theme", theme);
-    }
-    const appearance = getKomariAppearance();
-    if (appearance) {
-      params.set("komari_appearance", appearance);
-    }
-    const accent = getKomariAccent();
-    if (accent) {
-      params.set("komari_accent", accent);
-    }
-    if (isPurCarteTheme()) {
-      const glass = getPurCarteGlassConfig();
-      params.set("komari_blur", glass.blur);
-      params.set("komari_card", glass.card);
-      params.set("komari_glass", "1");
-    }
+    const themeContext = getEmbedThemeContext();
+    themeContext.queryParams.forEach(function (item) {
+      if (item[1]) params.set(item[0], item[1]);
+    });
   }
 
   async function loadThemeInfo() {
@@ -1817,6 +2032,10 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       const me = meResponse.ok ? await meResponse.json() : { logged_in: false };
       debugLog("komari_me", { ok: meResponse.ok, status: meResponse.status, loggedIn: !!(me && me.logged_in) });
       if (me && me.logged_in) {
+        if (openFromKnownEntryState(context, sourceButton)) {
+          return;
+        }
+
         const entryState = await loadNodeEntryState(context);
         if (!entryState) {
           showToast("无法确认接入状态，请稍后重试");

@@ -376,14 +376,14 @@ function TypeSection(props: { structured: StructuredCurrentResult; hiddenPaths: 
           {
             label: "使用类型",
             values: columns.map((column) => {
-              const value = usageMap.get(column) ?? { text: "N/A", tone: "muted" };
+              const value = usageMap.get(column) ?? { text: "N/A", tone: "muted" as const, path: undefined };
               return { ...value, hidden: isPathHidden(props.hiddenPaths, value.path) };
             })
           },
           {
             label: "公司类型",
             values: columns.map((column) => {
-              const value = companyMap.get(column) ?? { text: "N/A", tone: "muted" };
+              const value = companyMap.get(column) ?? { text: "N/A", tone: "muted" as const, path: undefined };
               return { ...value, hidden: isPathHidden(props.hiddenPaths, value.path) };
             })
           }

@@ -59,16 +59,36 @@ async function clickIpqAction(page) {
 }
 
 function assertThemeParam(iframeSrc, label) {
-  if (!expectedKomariTheme) {
-    return;
-  }
   const url = new URL(iframeSrc);
   const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
   const query = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
   const params = new URLSearchParams(query);
+
+  if (params.get("komari_theme_protocol") !== "1") {
+    throw new Error(`${label} missing Komari theme protocol marker`);
+  }
+  for (const key of ["komari_theme", "komari_appearance", "komari_bg", "komari_card", "komari_border", "komari_text", "komari_muted", "komari_accent_color"]) {
+    if (!params.get(key)) {
+      throw new Error(`${label} missing Komari theme token ${key}`);
+    }
+  }
+
+  if (!expectedKomariTheme) {
+    return;
+  }
   const actual = (params.get("komari_theme") || "").toLowerCase();
   if (!actual.includes(expectedKomariTheme)) {
     throw new Error(`${label} expected komari_theme=${expectedKomariTheme}, got ${params.get("komari_theme") || "<empty>"}`);
+  }
+  if (expectedKomariTheme === "purcarte") {
+    for (const key of ["komari_glass", "komari_blur", "komari_canvas", "komari_purcarte_card"]) {
+      if (!params.get(key)) {
+        throw new Error(`${label} missing PurCarte theme token ${key}`);
+      }
+    }
+    if (params.get("komari_bg") !== params.get("komari_purcarte_card")) {
+      throw new Error(`${label} should use PurCarte card as embedded background`);
+    }
   }
 }
 
@@ -428,31 +448,35 @@ try {
   if (loggedInContext) await loggedInContext.close().catch(() => {});
 
   if (setupContext) {
-    const appCleanupPage = await setupContext.newPage();
-    const komariCleanupPage = await setupContext.newPage();
-    await loginApp(appCleanupPage);
-    await loginKomari(komariCleanupPage);
-    await jsonFetch(appCleanupPage, `${appBaseURL}/api/v1/admin/integration`, {
-      method: "PUT",
-      body: JSON.stringify({ public_base_url: restoreIntegrationPublicBaseURL, guest_read_enabled: false })
-    }).catch(() => {});
-    const preview = await jsonFetch(
-      appCleanupPage,
-      `${appBaseURL}/api/v1/admin/header-preview?variant=loader&public_base_url=${encodeURIComponent(restoreIntegrationPublicBaseURL)}`
-    ).catch(() => null);
-    if (preview && preview.status >= 200 && preview.status < 300) {
-      const payload = parseJSON(preview);
-      await jsonFetch(komariCleanupPage, `${komariBaseURL}/api/admin/settings/`, {
-        method: "POST",
-        body: JSON.stringify({ custom_head: payload.code || "" })
+    try {
+      const appCleanupPage = await setupContext.newPage();
+      const komariCleanupPage = await setupContext.newPage();
+      await loginApp(appCleanupPage);
+      await loginKomari(komariCleanupPage);
+      await jsonFetch(appCleanupPage, `${appBaseURL}/api/v1/admin/integration`, {
+        method: "PUT",
+        body: JSON.stringify({ public_base_url: restoreIntegrationPublicBaseURL, guest_read_enabled: false })
       }).catch(() => {});
+      const preview = await jsonFetch(
+        appCleanupPage,
+        `${appBaseURL}/api/v1/admin/header-preview?variant=loader&public_base_url=${encodeURIComponent(restoreIntegrationPublicBaseURL)}`
+      ).catch(() => null);
+      if (preview && preview.status >= 200 && preview.status < 300) {
+        const payload = parseJSON(preview);
+        await jsonFetch(komariCleanupPage, `${komariBaseURL}/api/admin/settings/`, {
+          method: "POST",
+          body: JSON.stringify({ custom_head: payload.code || "" })
+        }).catch(() => {});
+      }
+      for (const uuid of createdNodeUUIDs) {
+        await removeIpqNode(appCleanupPage, uuid).catch(() => {});
+        await removeKomariNode(komariCleanupPage, uuid).catch(() => {});
+      }
+      await appCleanupPage.close().catch(() => {});
+      await komariCleanupPage.close().catch(() => {});
+    } catch (_) {
+      // Preserve the original verification failure if the browser context closed first.
     }
-    for (const uuid of createdNodeUUIDs) {
-      await removeIpqNode(appCleanupPage, uuid).catch(() => {});
-      await removeKomariNode(komariCleanupPage, uuid).catch(() => {});
-    }
-    await appCleanupPage.close().catch(() => {});
-    await komariCleanupPage.close().catch(() => {});
     await setupContext.close().catch(() => {});
   }
 

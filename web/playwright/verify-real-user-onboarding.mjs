@@ -69,7 +69,7 @@ async function apiOK(page, url, options, label) {
 
 async function loginIPQ(page) {
   log(`login IPQ at ${appBaseURL}`);
-  await page.goto(`${appBaseURL}/#/login`);
+  await page.goto(`${appBaseURL}/#/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForLoadState("domcontentloaded");
   if ((await page.getByRole("heading", { name: "节点列表" }).count()) === 0) {
     await page.getByRole("textbox", { name: "用户名" }).fill("admin");
@@ -82,16 +82,20 @@ async function loginIPQ(page) {
 
 async function loginKomari(page, baseURL) {
   log(`login Komari at ${baseURL}`);
+  await page.context().request.post(`${baseURL}/api/login`, {
+    data: { username: "admin", password: "admin" }
+  }).catch(() => {});
+  const authCheck = await page.context().request.get(`${baseURL}/api/admin/client/list`).catch(() => null);
+  if (!authCheck || authCheck.status() < 200 || authCheck.status() >= 300) {
+    throw new Error(`Komari login failed at ${baseURL}`);
+  }
   await page.goto(`${baseURL}/admin`, { waitUntil: "domcontentloaded", timeout: 20000 });
-  await page.waitForLoadState("networkidle").catch(() => {});
   if ((await page.locator('input[placeholder="admin"]').count()) > 0) {
     await page.locator('input[placeholder="admin"]').fill("admin");
     await page.locator('input[type="password"]').fill("admin");
     await page.getByRole("button", { name: "Login" }).last().click();
     await page.waitForLoadState("domcontentloaded").catch(() => {});
   }
-  await page.getByText("Node list", { exact: true }).waitFor({ state: "visible", timeout: 15000 });
-  await page.waitForLoadState("networkidle").catch(() => {});
   await page.waitForTimeout(250);
 }
 
@@ -101,24 +105,41 @@ async function listKomariNodes(page, baseURL) {
   return Array.isArray(payload) ? payload : [];
 }
 
-async function listIPQNodes(page) {
-  const payload = await apiOK(page, `${appBaseURL}/api/v1/nodes`, undefined, "list IPQ nodes");
-  return Array.isArray(payload.items) ? payload.items : [];
+async function requestJSON(context, url, options = {}) {
+  const response = await context.request.fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    },
+    ...options
+  });
+  const text = await response.text();
+  return { status: response.status(), text };
 }
 
 async function cleanupNodes(appPage, scenarioPages) {
   log("cleanup stale real-user nodes");
-  await appPage.goto(`${appBaseURL}/#/nodes`).catch(() => {});
-  const ipqNodes = await listIPQNodes(appPage).catch(() => []);
+  const context = appPage.context();
+  const ipqResult = await requestJSON(context, `${appBaseURL}/api/v1/nodes`).catch(() => null);
+  const ipqPayload = ipqResult && ipqResult.status >= 200 && ipqResult.status < 300 && ipqResult.text
+    ? JSON.parse(ipqResult.text)
+    : {};
+  const ipqNodes = Array.isArray(ipqPayload.items) ? ipqPayload.items : [];
   for (const node of ipqNodes.filter((item) => String(item.name || "").startsWith("Playwright Real User "))) {
-    await jsonFetch(appPage, `${appBaseURL}/api/v1/nodes/${node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
+    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
   }
 
-  for (const { page, baseURL } of scenarioPages) {
-    await loginKomari(page, baseURL).catch(() => {});
-    const nodes = await listKomariNodes(page, baseURL).catch(() => []);
+  for (const { baseURL } of scenarioPages) {
+    await requestJSON(context, `${baseURL}/api/login`, {
+      method: "POST",
+      data: { username: "admin", password: "admin" }
+    }).catch(() => {});
+    const result = await requestJSON(context, `${baseURL}/api/admin/client/list`).catch(() => null);
+    const nodes = result && result.status >= 200 && result.status < 300 && result.text
+      ? JSON.parse(result.text)
+      : [];
     for (const node of nodes.filter((item) => String(item.name || "").startsWith("Playwright Real User "))) {
-      await jsonFetch(page, `${baseURL}/api/admin/client/${node.uuid}/remove`, { method: "POST", body: "{}" }).catch(() => {});
+      await requestJSON(context, `${baseURL}/api/admin/client/${node.uuid}/remove`, { method: "POST", data: {} }).catch(() => {});
     }
   }
 }
@@ -168,7 +189,12 @@ async function configureIntegrationFromUI(appPage) {
   if (!loaderCode.includes("/embed/loader.js")) {
     throw new Error("loader header code was not rendered");
   }
-  if (!loaderCode.includes(integrationPublicBaseURL)) {
+  const usesConfiguredPublicBase = loaderCode.includes(integrationPublicBaseURL);
+  const usesDynamicKomariHost =
+    loaderCode.includes("window.location.hostname") &&
+    loaderCode.includes(":8090") &&
+    loaderCode.includes("/embed/loader.js");
+  if (!usesConfiguredPublicBase && !usesDynamicKomariHost) {
     throw new Error(`loader header code does not use ${integrationPublicBaseURL}`);
   }
   return loaderCode;
@@ -316,7 +342,7 @@ async function completeStandaloneLoginIfNeeded(page, baseURL, node) {
   return true;
 }
 
-async function assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir) {
+async function assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir, screenshotName = "10-komari-connected-popup.png") {
   await connectedButton.click();
   const iframe = page.locator('#ipq-loader-overlay[data-open="true"] iframe').first();
   await iframe.waitFor({ state: "visible", timeout: 15000 });
@@ -327,34 +353,104 @@ async function assertPurCarteConnectedPopupTheme(page, connectedButton, scenario
   if (!iframeSrc.includes("komari_theme=PurCarte")) {
     throw new Error(`PurCarte connected popup should pass the Komari theme to IPQ: ${iframeSrc}`);
   }
+  const iframeURL = new URL(iframeSrc);
+  const iframeHash = iframeURL.hash.startsWith("#") ? iframeURL.hash.slice(1) : iframeURL.hash;
+  const iframeQuery = iframeHash.includes("?") ? iframeHash.slice(iframeHash.indexOf("?") + 1) : "";
+  const iframeParams = new URLSearchParams(iframeQuery);
+  if (iframeParams.get("komari_theme_protocol") !== "1") {
+    throw new Error("PurCarte connected popup should use the normalized Komari theme protocol");
+  }
+  const appearance = iframeParams.get("komari_appearance") === "dark" ? "dark" : "light";
+  for (const key of ["komari_bg", "komari_canvas", "komari_card", "komari_border", "komari_text", "komari_muted", "komari_accent_color", "komari_glass", "komari_blur", "komari_theme_shadow", "komari_radius"]) {
+    if (!iframeParams.get(key)) {
+      throw new Error(`PurCarte connected popup should pass host theme token ${key}`);
+    }
+  }
+  if (/^0(?:px)?$/i.test(iframeParams.get("komari_radius") || "")) {
+    throw new Error("PurCarte connected popup should not sample the rounded-none header/footer as its native card radius");
+  }
+  if (/^rgb\(\s*255\s*,\s*255\s*,\s*255\s*\)$/i.test(iframeParams.get("komari_bg") || "")) {
+    throw new Error("PurCarte connected popup should pass the host glass background instead of an opaque white iframe background");
+  }
+  const purcarteCard = iframeParams.get("komari_purcarte_card") || "";
+  if (purcarteCard && iframeParams.get("komari_bg") !== purcarteCard) {
+    throw new Error("PurCarte connected popup should use the theme card color as the iframe background");
+  }
 
   const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
   await frame.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 20000 });
   const styles = await page.evaluate(() => {
-    const read = (selector) => {
-      const element = document.querySelector(selector);
+    const read = (target) => {
+      const element = typeof target === "string" ? document.querySelector(target) : target;
       if (!element) return null;
       const style = getComputedStyle(element);
       return {
         backgroundColor: style.backgroundColor,
         backgroundImage: style.backgroundImage,
+        borderRadius: style.borderRadius,
+        borderTopWidth: style.borderTopWidth,
+        borderColor: style.borderColor,
+        overflow: style.overflow,
         backdropFilter: style.backdropFilter
       };
+    };
+    const findNativePurCarteCard = () => {
+      let best = null;
+      let bestScore = -Infinity;
+      for (const element of document.querySelectorAll(".purcarte-blur.theme-card-style, .theme-card-style, .purcarte-blur")) {
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        const style = getComputedStyle(element);
+        if (style.display === "none" || style.visibility === "hidden") continue;
+        const className = String(element.className || "");
+        const radius = Number.parseFloat(style.borderRadius || "0");
+        let score = 0;
+        if (style.backgroundColor && style.backgroundColor !== "rgba(0, 0, 0, 0)") score += 40;
+        if (style.boxShadow && style.boxShadow !== "none") score += 20;
+        if (style.backdropFilter && style.backdropFilter !== "none") score += 20;
+        if (radius > 0) score += 120;
+        if (/rounded-none/.test(className) || radius <= 0) score -= 120;
+        if (/\bring-/.test(className)) score -= 40;
+        if (rect.width >= window.innerWidth * 0.95 && rect.height <= 64) score -= 80;
+        if (rect.height < 48) score -= 30;
+        score += Math.min(30, rect.height / 20);
+        if (score > bestScore) {
+          best = element;
+          bestScore = score;
+        }
+      }
+      return best;
     };
     return {
       overlay: read("#ipq-loader-overlay"),
       dialog: read(".ipq-loader-dialog"),
-      frame: read(".ipq-loader-frame")
+      frame: read(".ipq-loader-frame"),
+      nativeCard: read(findNativePurCarteCard())
     };
   });
-  if (styles.overlay?.backgroundColor === "rgba(0, 0, 0, 0)") {
-    throw new Error("PurCarte connected popup should tint the overlay so white Komari cards do not show through as a pure-white background");
+  if (styles.overlay?.backgroundColor !== "rgba(0, 0, 0, 0)") {
+    throw new Error(`PurCarte connected popup overlay should stay transparent like the native PurCarte modal, got ${styles.overlay?.backgroundColor || "<missing>"}`);
   }
   if (styles.dialog?.backgroundColor === "rgb(255, 255, 255)" && styles.dialog?.backgroundImage === "none") {
     throw new Error("PurCarte connected popup dialog should not use a pure-white background");
   }
-  if (styles.frame?.backgroundColor === "rgb(255, 255, 255)") {
-    throw new Error("PurCarte connected popup iframe should not use a pure-white background");
+  if (styles.dialog?.backgroundImage && styles.dialog.backgroundImage !== "none") {
+    throw new Error(`PurCarte connected popup dialog should use the theme card color without extra tint layers, got ${styles.dialog.backgroundImage}`);
+  }
+  if (styles.nativeCard?.backgroundColor && styles.dialog?.backgroundColor !== styles.nativeCard.backgroundColor) {
+    throw new Error(`PurCarte connected popup dialog should match the native theme card background, got ${styles.dialog?.backgroundColor} vs ${styles.nativeCard.backgroundColor}`);
+  }
+  if (styles.nativeCard?.borderRadius && iframeParams.get("komari_radius") !== styles.nativeCard.borderRadius) {
+    throw new Error(`PurCarte connected popup should pass the native rounded card radius, got ${iframeParams.get("komari_radius") || "<missing>"} vs ${styles.nativeCard.borderRadius}`);
+  }
+  if (styles.dialog?.borderTopWidth && styles.dialog.borderTopWidth !== "0px") {
+    throw new Error(`PurCarte connected popup dialog should not add a border that the native modal does not use, got ${styles.dialog.borderTopWidth}`);
+  }
+  if (styles.nativeCard?.borderRadius && styles.dialog?.borderRadius !== styles.nativeCard.borderRadius) {
+    throw new Error(`PurCarte connected popup dialog should match the native rounded card radius, got ${styles.dialog?.borderRadius} vs ${styles.nativeCard.borderRadius}`);
+  }
+  if (styles.frame?.backgroundColor !== "rgba(0, 0, 0, 0)") {
+    throw new Error(`PurCarte iframe element should stay transparent so card gaps expose the dialog glass, got ${styles.frame?.backgroundColor || "<missing>"}`);
   }
 
   const innerStyles = await frame.locator("body").evaluate(() => {
@@ -364,30 +460,148 @@ async function assertPurCarteConnectedPopupTheme(page, connectedButton, scenario
       const style = getComputedStyle(element);
       return {
         backgroundColor: style.backgroundColor,
-        backgroundImage: style.backgroundImage
+        backgroundImage: style.backgroundImage,
+        borderRadius: style.borderRadius,
+        borderTopWidth: style.borderTopWidth,
+        borderColor: style.borderColor,
+        color: style.color,
+        colorScheme: style.colorScheme,
+        overflow: style.overflow,
+        backdropFilter: style.backdropFilter
       };
     };
     return {
+      html: read("html"),
+      body: read("body"),
+      app: read("#app"),
       shell: read(".embed-shell"),
       header: read(".embed-detail-page > header"),
       card: read(".embed-detail-card"),
+      activeTab: read(".target-tab-button-attached.is-active"),
       report: read(".report-shell")
     };
   });
-  if (innerStyles.shell?.backgroundColor !== "rgba(0, 0, 0, 0)") {
-    throw new Error(`PurCarte embedded shell should remain transparent, got ${innerStyles.shell?.backgroundColor}`);
+  for (const key of ["html", "body", "app"]) {
+    if (!innerStyles[key]) {
+      throw new Error(`PurCarte embedded ${key} style is missing`);
+    }
+    if (innerStyles[key].backgroundColor !== "rgba(0, 0, 0, 0)") {
+      throw new Error(`PurCarte embedded ${key} should stay transparent so card gaps show the host glass background, got ${innerStyles[key].backgroundColor}`);
+    }
+    if (appearance === "dark" && !String(innerStyles[key].colorScheme || "").includes("dark")) {
+      throw new Error(`PurCarte dark embedded ${key} should declare dark color-scheme so transparent iframe canvas does not render white, got ${innerStyles[key].colorScheme || "<empty>"}`);
+    }
+  }
+  if (!innerStyles.shell || innerStyles.shell.backgroundColor !== "rgba(0, 0, 0, 0)") {
+    throw new Error(`PurCarte embedded shell should stay transparent above the theme canvas, got ${innerStyles.shell?.backgroundColor || "<missing>"}`);
+  }
+  if (innerStyles.shell.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte embedded shell should adapt to the host theme instead of using an opaque white background");
   }
   if (innerStyles.header?.backgroundColor === "rgb(255, 255, 255)" && innerStyles.header?.backgroundImage === "none") {
-    throw new Error("PurCarte embedded detail header should not use a pure-white background");
+    throw new Error("PurCarte embedded detail header should adapt to the host theme instead of using a pure-white background");
+  }
+  if (styles.nativeCard?.backgroundColor && innerStyles.header?.backgroundColor !== styles.nativeCard.backgroundColor) {
+    throw new Error(`PurCarte embedded detail header should match the native theme card background, got ${innerStyles.header?.backgroundColor} vs ${styles.nativeCard.backgroundColor}`);
+  }
+  for (const [name, style] of Object.entries({ header: innerStyles.header, card: innerStyles.card })) {
+    if (!style) {
+      throw new Error(`PurCarte embedded ${name} card style is missing`);
+    }
+    if (style.borderTopWidth !== "0px") {
+      throw new Error(`PurCarte embedded ${name} card should not keep the IPQ rectangular border, got ${style.borderTopWidth}`);
+    }
+    if (styles.nativeCard?.borderRadius && style.borderRadius !== styles.nativeCard.borderRadius) {
+      throw new Error(`PurCarte embedded ${name} card should use the native rounded card radius, got ${style.borderRadius} vs ${styles.nativeCard.borderRadius}`);
+    }
+    if (!style.overflow || style.overflow === "visible") {
+      throw new Error(`PurCarte embedded ${name} card should clip its surface to the rounded card, got overflow=${style.overflow || "<empty>"}`);
+    }
   }
   if (innerStyles.card?.backgroundColor === "rgb(255, 255, 255)") {
-    throw new Error("PurCarte embedded detail card should not use a pure-white background");
+    throw new Error("PurCarte embedded detail card should adapt to the host theme instead of using a pure-white background");
+  }
+  if (styles.nativeCard?.backgroundColor && innerStyles.card?.backgroundColor !== styles.nativeCard.backgroundColor) {
+    throw new Error(`PurCarte embedded detail card should match the native theme card background, got ${innerStyles.card?.backgroundColor} vs ${styles.nativeCard.backgroundColor}`);
+  }
+  if (!innerStyles.activeTab || innerStyles.activeTab.backgroundColor === "rgb(255, 255, 255)") {
+    throw new Error("PurCarte embedded target tab should adapt to the host theme");
   }
   if (innerStyles.report?.backgroundColor === "rgb(255, 255, 255)") {
     throw new Error("PurCarte report body should not use a pure-white background");
   }
 
-  await page.screenshot({ path: path.join(scenarioDir, "10-komari-connected-popup.png"), fullPage: true });
+  await page.screenshot({ path: path.join(scenarioDir, screenshotName), fullPage: true });
+  await page.locator(".ipq-loader-close").click();
+  await page.locator("#ipq-loader-overlay").waitFor({ state: "attached", timeout: 5000 });
+}
+
+async function assertDefaultConnectedPopupTheme(page, connectedButton, scenarioDir, screenshotName, expectedAppearance) {
+  await connectedButton.click();
+  const iframe = page.locator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await iframe.waitFor({ state: "visible", timeout: 15000 });
+  const iframeSrc = await iframe.evaluate((frame) => frame.getAttribute("src") || frame.src || "");
+  const iframeURL = new URL(iframeSrc);
+  const iframeHash = iframeURL.hash.startsWith("#") ? iframeURL.hash.slice(1) : iframeURL.hash;
+  const iframeQuery = iframeHash.includes("?") ? iframeHash.slice(iframeHash.indexOf("?") + 1) : "";
+  const iframeParams = new URLSearchParams(iframeQuery);
+  if (iframeParams.get("komari_theme_protocol") !== "1") {
+    throw new Error("Default connected popup should use the normalized Komari theme protocol");
+  }
+  if ((iframeParams.get("komari_theme") || "").toLowerCase() !== "default") {
+    throw new Error(`Default connected popup should pass komari_theme=default, got ${iframeParams.get("komari_theme") || "<empty>"}`);
+  }
+  if (iframeParams.get("komari_appearance") !== expectedAppearance) {
+    throw new Error(`Default connected popup should pass komari_appearance=${expectedAppearance}, got ${iframeParams.get("komari_appearance") || "<empty>"}`);
+  }
+  for (const key of ["komari_bg", "komari_card", "komari_border", "komari_text", "komari_muted", "komari_accent_color"]) {
+    if (!iframeParams.get(key)) {
+      throw new Error(`Default connected popup should pass host theme token ${key}`);
+    }
+  }
+
+  const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
+  await frame.locator('[data-detail-report="true"]').waitFor({ state: "visible", timeout: 20000 });
+  const styles = await page.evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { backgroundColor: style.backgroundColor, color: style.color, borderColor: style.borderColor };
+    };
+    return {
+      dialog: read(".ipq-loader-dialog"),
+      frame: read(".ipq-loader-frame")
+    };
+  });
+  const innerStyles = await frame.locator("body").evaluate(() => {
+    const read = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const style = getComputedStyle(element);
+      return { backgroundColor: style.backgroundColor, color: style.color, borderColor: style.borderColor };
+    };
+    return {
+      html: read("html"),
+      body: read("body"),
+      app: read("#app"),
+      shell: read(".embed-shell"),
+      header: read(".embed-detail-page > header"),
+      card: read(".embed-detail-card")
+    };
+  });
+  if (expectedAppearance === "dark") {
+    for (const [name, style] of Object.entries({ ...styles, ...innerStyles })) {
+      if (!style) {
+        throw new Error(`Default dark popup style for ${name} is missing`);
+      }
+      if (style.backgroundColor === "rgb(255, 255, 255)" || style.backgroundColor === "rgba(0, 0, 0, 0)") {
+        throw new Error(`Default dark popup ${name} should adapt to the dark theme, got ${style.backgroundColor}`);
+      }
+    }
+  }
+
+  await page.screenshot({ path: path.join(scenarioDir, screenshotName), fullPage: true });
   await page.locator(".ipq-loader-close").click();
   await page.locator("#ipq-loader-overlay").waitFor({ state: "attached", timeout: 5000 });
 }
@@ -463,8 +677,37 @@ async function waitForButtonEntryState(page, selector, uuid, expectedState, labe
   throw new Error(`${label} expected ${expectedState} IPQ button state, got ${lastState || "<empty>"}`);
 }
 
+async function assertConnectedPopupDoesNotWaitForStatus(page, connectedButton, label) {
+  let interceptedStatusChecks = 0;
+  const statusPattern = "**/api/v1/embed/nodes/status?**";
+  await page.route(statusPattern, async (route) => {
+    interceptedStatusChecks += 1;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "status intentionally unavailable during popup-open verification" })
+    });
+  });
+
+  try {
+    await connectedButton.click();
+    await page.locator('#ipq-loader-overlay[data-open="true"]').waitFor({ state: "visible", timeout: 1200 });
+    await page.locator('#ipq-loader-overlay[data-open="true"] iframe').first().waitFor({ state: "visible", timeout: 1200 });
+  } finally {
+    await page.unroute(statusPattern).catch(() => {});
+  }
+
+  if (interceptedStatusChecks === 0) {
+    throw new Error(`${label} should refresh IPQ status in the background after opening the popup`);
+  }
+  await page.locator(".ipq-loader-close").click();
+  await page.locator("#ipq-loader-overlay").waitFor({ state: "attached", timeout: 5000 });
+  await page.waitForTimeout(700);
+}
+
 async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendingNode, scenarioDir) {
   log(`verify ${theme} homepage IPQ entry buttons`);
+  await page.emulateMedia({ colorScheme: "light" });
   await page.goto(`${baseURL}/`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.getByText(connectedNode.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
@@ -540,8 +783,37 @@ async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendi
   }
 
   await page.screenshot({ path: path.join(scenarioDir, "09-komari-home-entry-buttons.png"), fullPage: true });
+  await assertConnectedPopupDoesNotWaitForStatus(page, connectedButton, `${theme} connected homepage`);
   if (theme === "purcarte") {
-    await assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir);
+    await assertPurCarteConnectedPopupTheme(page, connectedButton, scenarioDir, "10-komari-connected-popup-light.png");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.getByText(connectedNode.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
+    const darkConnectedButton = await waitForButtonEntryState(
+      page,
+      selector,
+      connectedNode.uuid,
+      "connected",
+      `${theme} connected homepage dark`
+    );
+    await assertPurCarteConnectedPopupTheme(page, darkConnectedButton, scenarioDir, "11-komari-connected-popup-dark.png");
+    await page.emulateMedia({ colorScheme: "light" });
+  } else {
+    await assertDefaultConnectedPopupTheme(page, connectedButton, scenarioDir, "10-komari-connected-popup-light.png", "light");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.getByText(connectedNode.name, { exact: false }).waitFor({ state: "visible", timeout: 15000 });
+    const darkConnectedButton = await waitForButtonEntryState(
+      page,
+      selector,
+      connectedNode.uuid,
+      "connected",
+      `${theme} connected homepage dark`
+    );
+    await assertDefaultConnectedPopupTheme(page, darkConnectedButton, scenarioDir, "11-komari-connected-popup-dark.png", "dark");
+    await page.emulateMedia({ colorScheme: "light" });
   }
 }
 
@@ -717,7 +989,6 @@ try {
     { page: purcarteKomariPage, baseURL: purcarteKomariBaseURL }
   ]);
 
-  await loginIPQ(appPage);
   const loaderCode = await configureIntegrationFromUI(appPage);
   await setKomariHeaderFromUI(defaultKomariPage, defaultKomariBaseURL, loaderCode, path.join(outputDir, "default"));
   await setKomariHeaderFromUI(purcarteKomariPage, purcarteKomariBaseURL, loaderCode, path.join(outputDir, "purcarte"));

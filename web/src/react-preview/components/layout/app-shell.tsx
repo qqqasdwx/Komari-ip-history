@@ -27,12 +27,7 @@ import { NodeHistoryComparePage } from "../../pages/node-history-compare-page";
 import { NodeHistoryPage } from "../../pages/node-history-page";
 import { NodesPage } from "../../pages/nodes-page";
 import { Button } from "../ui/button";
-import {
-  EmbedFrameShell,
-  getEmbedAppearance,
-  getEmbedGlassStyle,
-  getEmbedTheme
-} from "./embed-frame-shell";
+import { EmbedFrameShell } from "./embed-frame-shell";
 import { SidebarSection, type NavItem } from "./sidebar-section";
 
 const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <Server /> }];
@@ -63,37 +58,10 @@ export function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>;
   const [searchParams] = useSearchParams();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isEmbed = searchParams.get("embed") === "1";
-  const embedTheme = getEmbedTheme(searchParams);
-  const embedAppearance = getEmbedAppearance(searchParams);
-  const embedGlassStyle = getEmbedGlassStyle(searchParams);
 
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-    if (!isEmbed) {
-      delete root.dataset.ipqEmbedTheme;
-      delete body.dataset.ipqEmbedTheme;
-      delete root.dataset.ipqEmbedAppearance;
-      delete body.dataset.ipqEmbedAppearance;
-      return;
-    }
-
-    root.dataset.ipqEmbedTheme = embedTheme;
-    body.dataset.ipqEmbedTheme = embedTheme;
-    root.dataset.ipqEmbedAppearance = embedAppearance;
-    body.dataset.ipqEmbedAppearance = embedAppearance;
-
-    return () => {
-      delete root.dataset.ipqEmbedTheme;
-      delete body.dataset.ipqEmbedTheme;
-      delete root.dataset.ipqEmbedAppearance;
-      delete body.dataset.ipqEmbedAppearance;
-    };
-  }, [embedAppearance, embedTheme, isEmbed]);
 
   const content = (
     <Routes>
@@ -117,14 +85,7 @@ export function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>;
   );
 
   if (isEmbed) {
-    return (
-      <div
-        className={`embed-shell embed-theme-${embedTheme} embed-appearance-${embedAppearance} bg-slate-50 text-slate-900`}
-        style={embedGlassStyle}
-      >
-        <div className="embed-panel mx-auto max-w-[1120px] space-y-6">{content}</div>
-      </div>
-    );
+    return <EmbedFrameShell>{content}</EmbedFrameShell>;
   }
 
   return (
