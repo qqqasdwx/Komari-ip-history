@@ -141,7 +141,7 @@ async function cleanupNodes(appPage, scenarioPages) {
     : {};
   const ipqNodes = Array.isArray(ipqPayload.items) ? ipqPayload.items : [];
   for (const node of ipqNodes.filter((item) => String(item.name || "").startsWith("Playwright Real User "))) {
-    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
+    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.node_uuid || node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
   }
 
   for (const { baseURL } of scenarioPages) {
@@ -1059,16 +1059,18 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
     "01-komari-connected-node-created.png"
   );
   const standaloneURL = await connectNodeFromKomari(komariPage, baseURL, node, scenarioDir);
+  const connectedDetail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${node.uuid}`, undefined, "load connected IPQ node");
+  const ipqNodeUUID = connectedDetail.node_uuid || node.uuid;
 
-  await openReportConfigFromUI(appPage, node.uuid, nodeName, scenarioDir);
-  await configureTargetsFromUI(appPage, scenarioDir, targets, node.uuid);
-  await seedTargetReports(appPage, node.uuid, targets);
+  await openReportConfigFromUI(appPage, ipqNodeUUID, nodeName, scenarioDir);
+  await configureTargetsFromUI(appPage, scenarioDir, targets, ipqNodeUUID);
+  await seedTargetReports(appPage, ipqNodeUUID, targets);
   await verifyHomeEntryButtons(komariPage, baseURL, theme, node, pendingNode, scenarioDir);
 
   if (fullVerification) {
-    await verifyConfiguredNode(appPage, node.uuid, targets, scenarioDir);
+    await verifyConfiguredNode(appPage, ipqNodeUUID, targets, scenarioDir);
   } else {
-    const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${node.uuid}`, undefined, "load PurCarte node");
+    const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${ipqNodeUUID}`, undefined, "load PurCarte node");
     if (!detail.has_data) {
       throw new Error("PurCarte real-user node did not receive report data");
     }
@@ -1078,6 +1080,7 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
     theme,
     nodeName,
     uuid: node.uuid,
+    ipqNodeUUID,
     pendingNodeName,
     pendingUUID: pendingNode.uuid,
     standaloneURL,

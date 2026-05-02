@@ -79,7 +79,9 @@ func Run() error {
 		nodes.Use(middleware.RequireAdmin())
 		{
 			nodes.GET("", nodeHandler.List)
+			nodes.POST("", nodeHandler.Create)
 			nodes.GET("/:uuid", nodeHandler.Detail)
+			nodes.PATCH("/:uuid", nodeHandler.Update)
 			nodes.GET("/:uuid/history", nodeHandler.History)
 			nodes.GET("/:uuid/history/events", nodeHandler.HistoryEvents)
 			nodes.GET("/:uuid/history/fields", nodeHandler.HistoryFields)
@@ -91,6 +93,9 @@ func Run() error {
 			nodes.POST("/:uuid/targets/reorder", nodeHandler.ReorderTargets)
 			nodes.GET("/:uuid/report-config/preview", nodeHandler.PreviewReportConfig)
 			nodes.PUT("/:uuid/report-config", nodeHandler.UpdateReportConfig)
+			nodes.GET("/:uuid/komari-binding/candidates", nodeHandler.KomariBindingCandidates)
+			nodes.POST("/:uuid/komari-binding", nodeHandler.BindKomari)
+			nodes.DELETE("/:uuid/komari-binding", nodeHandler.UnbindKomari)
 			nodes.POST("/:uuid/reporter-token/rotate", nodeHandler.RotateReporterToken)
 			nodes.DELETE("/:uuid", nodeHandler.Delete)
 		}

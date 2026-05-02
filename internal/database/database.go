@@ -41,6 +41,9 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 	if err := ensureSchemaColumns(db); err != nil {
 		return nil, err
 	}
+	if err := ensureKomariNodeBindingIndex(db); err != nil {
+		return nil, err
+	}
 
 	if err := ensureDefaultAdmin(db, cfg); err != nil {
 		return nil, err
@@ -89,7 +92,7 @@ func ensureDefaultAdmin(db *gorm.DB, cfg config.Config) error {
 }
 
 func ensureSchemaColumns(db *gorm.DB) error {
-	nodeColumns := []string{"NodeUUID", "ReporterScheduleCron", "ReporterScheduleTimezone", "ReporterRunImmediately", "InstallToken"}
+	nodeColumns := []string{"NodeUUID", "KomariNodeName", "ReporterScheduleCron", "ReporterScheduleTimezone", "ReporterRunImmediately", "InstallToken"}
 	for _, column := range nodeColumns {
 		if db.Migrator().HasColumn(&models.Node{}, column) {
 			continue
@@ -121,7 +124,21 @@ func ensureSchemaColumns(db *gorm.DB) error {
 		}
 	}
 
+	if err := db.Model(&models.Node{}).
+		Where("komari_node_uuid <> '' AND (komari_node_name = '' OR komari_node_name IS NULL)").
+		Update("komari_node_name", gorm.Expr("name")).
+		Error; err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func ensureKomariNodeBindingIndex(db *gorm.DB) error {
+	if err := db.Exec("DROP INDEX IF EXISTS idx_nodes_komari_node_uuid").Error; err != nil {
+		return err
+	}
+	return db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_komari_node_uuid_bound ON nodes(komari_node_uuid) WHERE komari_node_uuid <> ''").Error
 }
 
 func ensureNodeUUIDs(db *gorm.DB) error {

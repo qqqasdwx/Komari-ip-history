@@ -25,6 +25,7 @@ TRANSIENT_NODE_PREFIXES = (
     "Playwright Real User ",
     "Playwright Default ",
     "Playwright PurCarte ",
+    "Playwright Step5 ",
     "Docker Debian Install Test ",
     "Docker Debian Auto Discovery Test ",
 )
@@ -284,7 +285,7 @@ def cleanup_prefixed_nodes(komari_opener, komari_base, ipq_opener, ipq_base):
     for node in ipq_nodes:
         name = node.get("name") or ""
         if name.startswith(NAME_PREFIX) or name in LEGACY_DEV_NODE_NAMES or any(name.startswith(prefix) for prefix in TRANSIENT_NODE_PREFIXES):
-            remove_ipq_node(ipq_opener, ipq_base, node["komari_node_uuid"])
+            remove_ipq_node(ipq_opener, ipq_base, node.get("node_uuid") or node["komari_node_uuid"])
 
     komari_nodes = list_komari_nodes(komari_opener, komari_base)
     for node in komari_nodes:

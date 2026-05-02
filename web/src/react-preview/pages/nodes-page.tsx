@@ -4,6 +4,7 @@ import {
   Power,
   PowerOff,
   RotateCcw,
+  Server,
   Settings,
   Trash2
 } from "lucide-react";
@@ -14,7 +15,6 @@ import {
   useState
 } from "react";
 import {
-  Link,
   useNavigate,
   useSearchParams
 } from "react-router-dom";
@@ -96,6 +96,16 @@ function targetSourceLabel(source: string) {
 
 function optionalDateTime(value?: string | null) {
   return value ? formatDateTime(value) : "暂无";
+}
+
+function nodeRouteID(item: Pick<NodeListItem, "node_uuid" | "komari_node_uuid">) {
+  return item.node_uuid || item.komari_node_uuid;
+}
+
+function nodeBindingLabel(item: Pick<NodeListItem, "binding_state" | "komari_node_name">) {
+  return item.binding_state === "komari_bound"
+    ? `已绑定 Komari${item.komari_node_name ? `：${item.komari_node_name}` : ""}`
+    : "独立节点";
 }
 
 function ReportTargetList(props: {
@@ -849,6 +859,110 @@ function NodeReportConfigDialog(props: {
   );
 }
 
+function CreateIndependentNodeDialog(props: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (detail: NodeDetail) => void;
+  onUnauthorized: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!props.open) {
+      return;
+    }
+    setName("");
+    setError("");
+    setSaving(false);
+  }, [props.open]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("请输入节点名称。");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const detail = await apiRequest<NodeDetail>("/nodes", {
+        method: "POST",
+        body: JSON.stringify({ name: trimmedName })
+      });
+      props.onCreated(detail);
+    } catch (createError) {
+      if (createError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setError(createError instanceof Error ? createError.message : "创建节点失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!props.open) {
+    return null;
+  }
+
+  return (
+    <div className="field-modal-backdrop" onClick={props.onClose}>
+      <section className="field-modal max-w-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="field-modal-head">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">新建独立节点</h2>
+            <p className="text-sm text-slate-500">先创建 IPQ 节点，再配置目标 IP、上报计划和接入命令。</p>
+          </div>
+          <Button
+            className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+            onClick={props.onClose}
+            type="button"
+          >
+            关闭
+          </Button>
+        </div>
+        <form className="field-modal-body space-y-4" onSubmit={handleSubmit}>
+          <div className="grid gap-2">
+            <Label className="text-slate-900" htmlFor="independent-node-name">
+              节点名称
+            </Label>
+            <Input
+              autoFocus
+              className="h-11 rounded-xl px-3 focus:border-indigo-300 focus:ring-indigo-100"
+              id="independent-node-name"
+              onChange={(event) => setName(event.target.value)}
+              placeholder="例如 香港 01"
+              value={name}
+            />
+          </div>
+          {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              className="rounded-xl border border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+              disabled={saving}
+              onClick={props.onClose}
+              type="button"
+            >
+              取消
+            </Button>
+            <Button
+              className="rounded-xl bg-indigo-500 px-4 text-white hover:bg-indigo-600 disabled:bg-indigo-300"
+              disabled={saving || !name.trim()}
+              type="submit"
+            >
+              <Server className="size-4" />
+              <span>{saving ? "创建中" : "创建"}</span>
+            </Button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -859,6 +973,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
   const [searchQuery, setSearchQuery] = useState("");
   const [reloadToken, setReloadToken] = useState(0);
   const [reportConfigNodeUUID, setReportConfigNodeUUID] = useState("");
+  const [createNodeOpen, setCreateNodeOpen] = useState(false);
   const reportConfigFromKomari = searchParams.get("from_komari") === "1";
 
   useEffect(() => {
@@ -924,6 +1039,17 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
 
   return (
     <section className="space-y-6">
+      <CreateIndependentNodeDialog
+        onClose={() => setCreateNodeOpen(false)}
+        onCreated={(detail) => {
+          setCreateNodeOpen(false);
+          setReloadToken((value) => value + 1);
+          pushToast("节点已创建。");
+          openReportConfig(detail.node_uuid);
+        }}
+        onUnauthorized={props.onUnauthorized}
+        open={createNodeOpen}
+      />
       {reportConfigNodeUUID ? (
         <NodeReportConfigDialog
           me={props.me}
@@ -937,9 +1063,19 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
         title="节点列表"
         subtitle={`${nodes.length} 个已接入节点`}
         actions={
-          showSearch ? (
-            <SearchBox value={searchInput} onChange={setSearchInput} onSubmit={() => setSearchQuery(searchInput.trim())} />
-          ) : undefined
+          <>
+            {showSearch ? (
+              <SearchBox value={searchInput} onChange={setSearchInput} onSubmit={() => setSearchQuery(searchInput.trim())} />
+            ) : null}
+            <Button
+              className="rounded-xl bg-indigo-500 text-white hover:bg-indigo-600"
+              onClick={() => setCreateNodeOpen(true)}
+              type="button"
+            >
+              <Plus className="size-4" />
+              <span>新建节点</span>
+            </Button>
+          </>
         }
       />
 
@@ -982,10 +1118,12 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
               </div>
               <div>
                 <Button
-                  asChild
                   className="rounded-xl bg-indigo-500 text-white hover:bg-indigo-600"
+                  onClick={() => setCreateNodeOpen(true)}
+                  type="button"
                 >
-                  <Link to="/settings/integration">去接入</Link>
+                  <Plus className="size-4" />
+                  <span>新建节点</span>
                 </Button>
               </div>
             </div>
@@ -994,24 +1132,28 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
           <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-200">
             <div className="react-node-list-head bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               <span>节点</span>
+              <span className="text-center">来源</span>
               <span className="text-center">状态</span>
               <span className="text-center">最近更新</span>
               <span className="text-center">操作</span>
             </div>
             <div className="react-node-list-body">
-              {nodes.map((item) => (
+              {nodes.map((item) => {
+                const routeID = nodeRouteID(item);
+                return (
                 <div
-                  key={item.komari_node_uuid}
+                  key={routeID}
                   className="react-node-list-row cursor-pointer border-t border-slate-200 px-4 py-4 text-sm text-slate-700 transition hover:bg-slate-50 first:border-t-0"
                   data-node-row="true"
-                  data-node-uuid={item.komari_node_uuid}
+                  data-node-binding-state={item.binding_state}
+                  data-node-uuid={routeID}
                   role="link"
                   tabIndex={0}
-                  onClick={() => navigate(`/nodes/${item.komari_node_uuid}`)}
+                  onClick={() => navigate(`/nodes/${routeID}`)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      navigate(`/nodes/${item.komari_node_uuid}`);
+                      navigate(`/nodes/${routeID}`);
                     }
                   }}
                 >
@@ -1019,6 +1161,20 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                     <strong className="block truncate text-sm font-semibold text-slate-900" data-node-name="true">
                       {item.name}
                     </strong>
+                    <span className="mt-1 block truncate text-xs text-slate-400">IPQ ID：{item.node_uuid}</span>
+                  </div>
+                  <div className="flex min-w-0 justify-center">
+                    <span
+                      className={[
+                        "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                        item.binding_state === "komari_bound"
+                          ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                          : "border-slate-200 bg-slate-50 text-slate-600"
+                      ].join(" ")}
+                      data-node-binding-label="true"
+                    >
+                      <span className="truncate">{nodeBindingLabel(item)}</span>
+                    </span>
                   </div>
                   <div className="flex min-w-0 justify-center">
                     <StatusPill hasData={item.has_data} />
@@ -1031,7 +1187,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                       data-node-report-settings="true"
                       onClick={(event) => {
                         event.stopPropagation();
-                        openReportConfig(item.komari_node_uuid);
+                        openReportConfig(routeID);
                       }}
                       type="button"
                     >
@@ -1040,7 +1196,8 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                     <span className="text-sm font-semibold text-indigo-600">查看</span>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
