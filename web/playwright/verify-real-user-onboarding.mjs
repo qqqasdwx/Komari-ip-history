@@ -832,7 +832,7 @@ async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendi
   }
 }
 
-async function openReportConfigFromUI(appPage, uuid, nodeName, scenarioDir) {
+async function openNodeSettingsFromUI(appPage, uuid, nodeName, scenarioDir) {
   log(`open IPQ node settings from UI: ${nodeName}`);
   await appPage.goto(`${appBaseURL}/#/nodes`);
   await appPage.getByPlaceholder("搜索节点名称").fill(nodeName);
@@ -1063,7 +1063,7 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
   const connectedDetail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${node.uuid}`, undefined, "load connected IPQ node");
   const ipqNodeUUID = connectedDetail.node_uuid || node.uuid;
 
-  await openReportConfigFromUI(appPage, ipqNodeUUID, nodeName, scenarioDir);
+  await openNodeSettingsFromUI(appPage, ipqNodeUUID, nodeName, scenarioDir);
   await configureTargetsFromUI(appPage, scenarioDir, targets, ipqNodeUUID);
   await seedTargetReports(appPage, ipqNodeUUID, targets);
   await verifyHomeEntryButtons(komariPage, baseURL, theme, node, pendingNode, scenarioDir);
