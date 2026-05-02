@@ -1,9 +1,14 @@
 import {
+  GripVertical,
   Plus,
+  Power,
+  PowerOff,
   RotateCcw,
-  Settings
+  Settings,
+  Trash2
 } from "lucide-react";
 import {
+  type DragEvent,
   type FormEvent,
   useEffect,
   useState
@@ -27,7 +32,6 @@ import type {
 import { PageHeader } from "../components/layout/page-header";
 import { SearchBox } from "../components/common/search-box";
 import { StatusPill } from "../components/node/status-pill";
-import { TargetTabs } from "../components/node/target-tabs";
 import { pushToast } from "../components/toast";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -86,6 +90,112 @@ function buildInstallCommand(
   return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${argString}; }`;
 }
 
+function targetSourceLabel(source: string) {
+  return source === "auto" ? "自动发现" : "手动添加";
+}
+
+function optionalDateTime(value?: string | null) {
+  return value ? formatDateTime(value) : "暂无";
+}
+
+function ReportTargetList(props: {
+  items: NodeTargetListItem[];
+  selectedId: number | null;
+  busy: boolean;
+  onSelect: (targetID: number) => void;
+  onReorder: (sourceID: number, destinationID: number) => void;
+  onDelete: (targetID: number) => void;
+  onToggle: (targetID: number, enabled: boolean) => void;
+}) {
+  const [draggingTargetID, setDraggingTargetID] = useState<number | null>(null);
+
+  function handleDrop(destinationID: number) {
+    if (draggingTargetID === null || draggingTargetID === destinationID) {
+      setDraggingTargetID(null);
+      return;
+    }
+    props.onReorder(draggingTargetID, destinationID);
+    setDraggingTargetID(null);
+  }
+
+  return (
+    <div className="grid gap-2">
+      {props.items.map((item) => {
+        const selected = props.selectedId === item.id;
+        return (
+          <div
+            key={item.id}
+            className={[
+              "grid gap-3 rounded-2xl border bg-white px-3 py-3 text-sm transition md:grid-cols-[minmax(0,1fr)_auto]",
+              selected ? "border-indigo-200 ring-2 ring-indigo-100" : "border-slate-200"
+            ].join(" ")}
+            data-report-enabled={item.report_enabled ? "true" : "false"}
+            data-report-target-row="true"
+            data-target-id={item.id}
+            data-target-ip={item.ip}
+            data-target-source={item.source}
+            draggable={!props.busy}
+            onDragOver={(event: DragEvent<HTMLDivElement>) => event.preventDefault()}
+            onDragStart={() => setDraggingTargetID(item.id)}
+            onDrop={() => handleDrop(item.id)}
+            onDragEnd={() => setDraggingTargetID(null)}
+          >
+            <button className="min-w-0 text-left" onClick={() => props.onSelect(item.id)} type="button">
+              <span className="flex min-w-0 items-center gap-2">
+                <GripVertical className="size-4 shrink-0 text-slate-300" />
+                <span className={["h-2.5 w-2.5 shrink-0 rounded-full", item.has_data ? "bg-emerald-500" : "bg-slate-300"].join(" ")} />
+                <span className="truncate font-medium text-slate-900">{item.ip}</span>
+              </span>
+              <span className="mt-2 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-600">
+                  {targetSourceLabel(item.source)}
+                </span>
+                <span className={[
+                  "rounded-full border px-2 py-0.5",
+                  item.report_enabled
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-slate-100 text-slate-500"
+                ].join(" ")}>
+                  {item.report_enabled ? "已启用" : "已停用"}
+                </span>
+              </span>
+              <span className="mt-2 grid gap-1 text-xs text-slate-500 sm:grid-cols-2">
+                <span>最近发现：{optionalDateTime(item.last_discovered_at)}</span>
+                <span>最近上报：{optionalDateTime(item.updated_at)}</span>
+              </span>
+            </button>
+            <div className="flex items-center gap-2 md:justify-end">
+              <Button
+                className={[
+                  "h-9 rounded-xl px-3 text-xs",
+                  item.report_enabled
+                    ? "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    : "bg-indigo-500 text-white hover:bg-indigo-600"
+                ].join(" ")}
+                disabled={props.busy}
+                onClick={() => props.onToggle(item.id, !item.report_enabled)}
+                type="button"
+              >
+                {item.report_enabled ? <PowerOff className="mr-1.5 size-3.5" /> : <Power className="mr-1.5 size-3.5" />}
+                {item.report_enabled ? "停用" : "启用"}
+              </Button>
+              <Button
+                aria-label={`删除 ${item.ip}`}
+                className="h-9 w-9 rounded-xl border border-slate-200 bg-white p-0 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+                disabled={props.busy}
+                onClick={() => props.onDelete(item.id)}
+                type="button"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReportConfigSection(props: {
   me: MeResponse;
   detail: NodeDetail;
@@ -101,6 +211,7 @@ function ReportConfigSection(props: {
   onDeleteCurrentTarget: (targetID: number) => void;
   onSelectTarget: (targetID: number) => void;
   onReorderTargets: (sourceID: number, destinationID: number) => void;
+  onUpdateTarget: (targetID: number, enabled: boolean) => void;
 }) {
   const publicBaseURL = resolvePublicBaseURL(props.me);
   const storedScheduleTimezone = props.detail.report_config.schedule_timezone.trim();
@@ -308,34 +419,36 @@ function ReportConfigSection(props: {
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-800" data-komari-return-hint="true">
               {props.detail.report_config.target_ips.length > 0
                 ? "配置已保存。请回到 Komari 节点页重新点击 IPQ，查看当前 IP 质量结果。"
-                : "从 Komari 入口打开，请先添加目标 IP。保存后回到 Komari 节点页重新查看。"}
+                : "从 Komari 入口打开。可以手动添加目标 IP，也可以安装脚本后让节点自动发现本机 IP。"}
             </div>
           ) : null}
           <div className="space-y-1">
             {props.detail.report_config.target_ips.length > 0 ? (
-              <p className="text-sm text-slate-500">当前命令会顺序探查以下 IP，并逐个上报结果。</p>
+              <p className="text-sm text-slate-500">节点执行时会先请求上报计划，再按已启用的目标 IP 探查并上报。</p>
             ) : (
-              <p className="text-sm text-slate-500">请先添加目标 IP，添加后才会生成接入命令。</p>
+              <p className="text-sm text-slate-500">可以先安装脚本，节点执行时会自动发现本机候选 IP 并请求上报计划。</p>
             )}
           </div>
         <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
               <h3 className="text-sm font-semibold text-slate-900">目标 IP</h3>
-              <p className="text-sm text-slate-500">拖拽可调整顺序，接入命令会按当前顺序依次探查。</p>
+              <p className="text-sm text-slate-500">手动目标会按启用状态纳入计划，自动发现目标来自节点脚本上报的候选 IP。</p>
             </div>
           </div>
           {props.detail.targets.length > 0 ? (
-            <TargetTabs
-              items={props.detail.targets.map((item) => ({ id: item.id, label: item.ip, has_data: item.has_data }))}
+            <ReportTargetList
+              busy={props.targetSaving}
+              items={props.detail.targets}
               onDelete={(targetID) => void props.onDeleteCurrentTarget(targetID)}
               onReorder={(sourceID, destinationID) => void props.onReorderTargets(sourceID, destinationID)}
               onSelect={(targetID) => props.onSelectTarget(targetID)}
+              onToggle={(targetID, enabled) => props.onUpdateTarget(targetID, enabled)}
               selectedId={props.detail.selected_target_id ?? props.detail.current_target?.id ?? null}
             />
           ) : (
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-              当前节点还没有目标 IP，请先添加。
+              当前节点还没有目标 IP。可以手动添加，也可以先安装脚本，让节点执行时自动发现本机 IP。
             </div>
           )}
           <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_48px]" onSubmit={props.onAddTarget}>
@@ -421,29 +534,25 @@ function ReportConfigSection(props: {
             ))}
           </div>
         </div>
-        {props.detail.report_config.target_ips.length > 0 ? (
-          <>
-            <div className="grid gap-2 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:grid-cols-3">
-              <span>计划：{preview.schedule_cron}</span>
-              <span>时区：{preview.schedule_timezone || scheduleTimezone}</span>
-              <span>立即执行：{runImmediately ? "启用" : "关闭"}</span>
-            </div>
-            <div className="summary-section">
-              <div className="summary-head">
-                <strong>接入命令</strong>
-                <Button
-                  className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
-                  disabled={previewError !== ""}
-                  onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
-                  type="button"
-                >
-                  复制
-                </Button>
-              </div>
-              <pre className="code-block report-config-command">{installCommand}</pre>
-            </div>
-          </>
-        ) : null}
+        <div className="grid gap-2 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:grid-cols-3">
+          <span>计划：{preview.schedule_cron}</span>
+          <span>时区：{preview.schedule_timezone || scheduleTimezone}</span>
+          <span>立即执行：{runImmediately ? "启用" : "关闭"}</span>
+        </div>
+        <div className="summary-section">
+          <div className="summary-head">
+            <strong>接入命令</strong>
+            <Button
+              className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
+              disabled={previewError !== ""}
+              onClick={() => void handleCopy(installCommand, "接入命令已复制。")}
+              type="button"
+            >
+              复制
+            </Button>
+          </div>
+          <pre className="code-block report-config-command">{installCommand}</pre>
+        </div>
         </div>
       </section>
     </div>
@@ -550,6 +659,47 @@ function NodeReportConfigDialog(props: {
         return;
       }
       setTargetError(targetDeleteError instanceof Error ? targetDeleteError.message : "删除目标 IP 失败");
+    } finally {
+      setTargetSaving(false);
+    }
+  }
+
+  async function handleUpdateTarget(targetID: number, enabled: boolean) {
+    const previousDetail = localDetail;
+    setTargetSaving(true);
+    setTargetError("");
+    try {
+      const updated = await apiRequest<NodeTargetListItem>(`/nodes/${props.nodeUUID}/targets/${targetID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ report_enabled: enabled })
+      });
+      setLocalDetail((current) => {
+        if (!current) {
+          return current;
+        }
+        return {
+          ...current,
+          targets: current.targets.map((item) => (item.id === targetID ? updated : item)).sort((a, b) => a.sort_order - b.sort_order),
+          current_target:
+            current.current_target?.id === targetID
+              ? {
+                  ...current.current_target,
+                  source: updated.source,
+                  report_enabled: updated.report_enabled,
+                  last_discovered_at: updated.last_discovered_at,
+                  has_data: updated.has_data,
+                  updated_at: updated.updated_at
+                }
+              : current.current_target
+        };
+      });
+    } catch (targetUpdateError) {
+      setLocalDetail(previousDetail);
+      if (targetUpdateError instanceof UnauthorizedError) {
+        props.onUnauthorized();
+        return;
+      }
+      setTargetError(targetUpdateError instanceof Error ? targetUpdateError.message : "更新目标 IP 状态失败");
     } finally {
       setTargetSaving(false);
     }
@@ -690,6 +840,7 @@ function NodeReportConfigDialog(props: {
       onReorderTargets={(sourceID, destinationID) => void handleReorderTargets(sourceID, destinationID)}
       onSelectTarget={(targetID) => setSelectedTargetID(targetID)}
       onTargetInputChange={setTargetInput}
+      onUpdateTarget={(targetID, enabled) => void handleUpdateTarget(targetID, enabled)}
       open={true}
       targetError={targetError}
       targetInput={targetInput}

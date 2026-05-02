@@ -60,6 +60,7 @@ func Run() error {
 		api.GET("/report/install-config/:installToken", reportHandler.InstallConfigByToken)
 		api.GET("/report/nodes/:uuid/install.sh", reportHandler.InstallScript)
 		api.GET("/report/nodes/:uuid/install-config", reportHandler.InstallConfig)
+		api.POST("/report/nodes/:uuid/plan", reportHandler.Plan)
 		api.POST("/report/nodes/:uuid", reportHandler.Report)
 
 		admin := api.Group("/admin")
@@ -85,6 +86,7 @@ func Run() error {
 			nodes.POST("/:uuid/history/:historyID/favorite", nodeHandler.FavoriteHistory)
 			nodes.DELETE("/:uuid/history/:historyID/favorite", nodeHandler.UnfavoriteHistory)
 			nodes.POST("/:uuid/targets", nodeHandler.AddTarget)
+			nodes.PATCH("/:uuid/targets/:targetID", nodeHandler.UpdateTarget)
 			nodes.DELETE("/:uuid/targets/:targetID", nodeHandler.DeleteTarget)
 			nodes.POST("/:uuid/targets/reorder", nodeHandler.ReorderTargets)
 			nodes.GET("/:uuid/report-config/preview", nodeHandler.PreviewReportConfig)

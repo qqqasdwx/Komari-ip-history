@@ -20,7 +20,14 @@ IPQUALITY_SAMPLE_PATHS = [
 DEFAULT_IPQ_DB_PATH = ROOT_DIR / "data" / "ipq" / "ipq.db"
 SEED_BASE_TIME = dt.datetime(2026, 4, 2, 0, 0, 0, tzinfo=dt.timezone.utc)
 NAME_PREFIX = "开发种子-"
-LEGACY_DEV_NODE_NAMES = {"测试节点", "通信样式测试"}
+LEGACY_DEV_NODE_NAMES = {"测试节点", "通信样式测试", "test", "test2", "真实上报-Debian自动发现"}
+TRANSIENT_NODE_PREFIXES = (
+    "Playwright Real User ",
+    "Playwright Default ",
+    "Playwright PurCarte ",
+    "Docker Debian Install Test ",
+    "Docker Debian Auto Discovery Test ",
+)
 
 
 def build_opener():
@@ -276,13 +283,13 @@ def cleanup_prefixed_nodes(komari_opener, komari_base, ipq_opener, ipq_base):
     ipq_nodes = list_ipq_nodes(ipq_opener, ipq_base)
     for node in ipq_nodes:
         name = node.get("name") or ""
-        if name.startswith(NAME_PREFIX) or name in LEGACY_DEV_NODE_NAMES:
+        if name.startswith(NAME_PREFIX) or name in LEGACY_DEV_NODE_NAMES or any(name.startswith(prefix) for prefix in TRANSIENT_NODE_PREFIXES):
             remove_ipq_node(ipq_opener, ipq_base, node["komari_node_uuid"])
 
     komari_nodes = list_komari_nodes(komari_opener, komari_base)
     for node in komari_nodes:
         name = node.get("name") or ""
-        if name.startswith(NAME_PREFIX) or name in LEGACY_DEV_NODE_NAMES:
+        if name.startswith(NAME_PREFIX) or name in LEGACY_DEV_NODE_NAMES or any(name.startswith(prefix) for prefix in TRANSIENT_NODE_PREFIXES):
             remove_komari_node(komari_opener, komari_base, node["uuid"])
 
 
@@ -399,30 +406,6 @@ def main():
             "description": "有目标 IP 但没有当前结果和历史，用于验证目标级空状态。",
         },
         {
-            "name": f"{NAME_PREFIX}单IP无历史",
-            "ips": ["203.0.113.40"],
-            "history": [],
-            "clear_history_ips": ["203.0.113.40"],
-            "description": "有当前结果但没有历史快照，用于验证历史空状态。",
-        },
-        {
-            "name": f"{NAME_PREFIX}单IP历史",
-            "ips": ["203.0.113.10"],
-            "history": [
-                {"variant": 0, "summary": "初始快照", "ips": ["203.0.113.10"]},
-                {"variant": 1, "summary": "第二次上报", "ips": ["203.0.113.10"]},
-                {"variant": 2, "summary": "第三次上报", "ips": ["203.0.113.10"]},
-                {"variant": 3, "summary": "第四次上报", "ips": ["203.0.113.10"]},
-                {"variant": 4, "summary": "第五次上报", "ips": ["203.0.113.10"]},
-                {"variant": 5, "summary": "第六次上报", "ips": ["203.0.113.10"]},
-                {"variant": 6, "summary": "第七次上报", "ips": ["203.0.113.10"]},
-                {"variant": 7, "summary": "第八次上报", "ips": ["203.0.113.10"]},
-            ],
-            "favorite_history_index": 1,
-            "favorite_target_ip": "203.0.113.10",
-            "description": "单 IP 当前结果和历史对比。",
-        },
-        {
             "name": f"{NAME_PREFIX}多IP历史",
             "ips": ["198.51.100.20", "2001:db8::20"],
             "reorder": ["198.51.100.20", "2001:db8::20"],
@@ -460,23 +443,6 @@ def main():
             "favorite_history_index": 0,
             "favorite_target_ip": "203.0.113.50",
             "description": "多条快照、收藏快照和差异对比。",
-        },
-        {
-            "name": f"{NAME_PREFIX}长名称与密集数据节点-用于验证移动端换行和卡片布局稳定性-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-            "ips": ["198.51.100.60", "198.51.100.61", "2001:db8::60"],
-            "reorder": ["198.51.100.60", "198.51.100.61", "2001:db8::60"],
-            "history": [
-                {"variant": 0, "summary": "密集 IPv4 A 初始", "ips": ["198.51.100.60"]},
-                {"variant": 1, "summary": "密集 IPv4 A 第二次", "ips": ["198.51.100.60"]},
-                {"variant": 2, "summary": "密集 IPv4 A 第三次", "ips": ["198.51.100.60"]},
-                {"variant": 3, "summary": "密集 IPv4 B 初始", "ips": ["198.51.100.61"]},
-                {"variant": 4, "summary": "密集 IPv4 B 第二次", "ips": ["198.51.100.61"]},
-                {"variant": 5, "summary": "密集 IPv4 B 第三次", "ips": ["198.51.100.61"]},
-                {"variant": 6, "summary": "密集 IPv6 初始", "ips": ["2001:db8::60"]},
-                {"variant": 7, "summary": "密集 IPv6 第二次", "ips": ["2001:db8::60"]},
-                {"variant": 8, "summary": "密集 IPv6 第三次", "ips": ["2001:db8::60"]},
-            ],
-            "description": "长节点名、多目标、多历史，用于验证响应式和密集数据布局。",
         },
     ]
 

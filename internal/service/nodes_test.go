@@ -70,6 +70,156 @@ func TestAddNodeTargetRejectsEquivalentIPv6Forms(t *testing.T) {
 	}
 }
 
+func TestReporterPlanReturnsEnabledManualTargetsWithEmptyCandidates(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{KomariNodeUUID: "node-plan-manual", Name: "node-plan-manual", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	target, err := AddNodeTarget(db, config.Config{}, node.KomariNodeUUID, AddNodeTargetInput{IP: "198.51.100.10"})
+	if err != nil {
+		t.Fatalf("add manual target: %v", err)
+	}
+
+	plan, err := GetNodeReporterPlan(db, node.KomariNodeUUID, node.ReporterToken, ReporterPlanInput{})
+	if err != nil {
+		t.Fatalf("get reporter plan: %v", err)
+	}
+	if got, want := strings.Join(plan.TargetIPs, ","), target.IP; got != want {
+		t.Fatalf("unexpected empty-candidate plan: got %q want %q", got, want)
+	}
+}
+
+func TestReporterPlanDiscoversAutoTargetsAndSkipsDisabledTargets(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{KomariNodeUUID: "node-plan-auto", Name: "node-plan-auto", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	manual, err := AddNodeTarget(db, config.Config{}, node.KomariNodeUUID, AddNodeTargetInput{IP: "198.51.100.20"})
+	if err != nil {
+		t.Fatalf("add manual target: %v", err)
+	}
+
+	plan, err := GetNodeReporterPlan(db, node.KomariNodeUUID, node.ReporterToken, ReporterPlanInput{
+		CandidateIPs: []string{"203.0.113.20", "2001:0db8:0:0:0:0:0:1", "203.0.113.20"},
+	})
+	if err != nil {
+		t.Fatalf("get reporter plan: %v", err)
+	}
+	expectedPlan := []string{manual.IP, "203.0.113.20", "2001:db8::1"}
+	if got, want := strings.Join(plan.TargetIPs, ","), strings.Join(expectedPlan, ","); got != want {
+		t.Fatalf("unexpected discovered plan: got %q want %q", got, want)
+	}
+
+	var autoTarget models.NodeTarget
+	if err := db.First(&autoTarget, "node_id = ? AND target_ip = ?", node.ID, "203.0.113.20").Error; err != nil {
+		t.Fatalf("load auto target: %v", err)
+	}
+	if autoTarget.TargetSource != targetSourceAuto {
+		t.Fatalf("expected auto source, got %q", autoTarget.TargetSource)
+	}
+	if !autoTarget.ReportEnabled {
+		t.Fatalf("expected auto target to be enabled by default")
+	}
+	if autoTarget.LastDiscoveredAt == nil {
+		t.Fatalf("expected auto target to record last_discovered_at")
+	}
+
+	emptyCandidatePlan, err := GetNodeReporterPlan(db, node.KomariNodeUUID, node.ReporterToken, ReporterPlanInput{})
+	if err != nil {
+		t.Fatalf("get empty-candidate plan after discovery: %v", err)
+	}
+	if got, want := strings.Join(emptyCandidatePlan.TargetIPs, ","), manual.IP; got != want {
+		t.Fatalf("expected stale auto target to be skipped without current candidate, got %q want %q", got, want)
+	}
+
+	if _, err := UpdateNodeTarget(db, node.KomariNodeUUID, autoTarget.ID, UpdateNodeTargetInput{ReportEnabled: false}); err != nil {
+		t.Fatalf("disable auto target: %v", err)
+	}
+	disabledAutoPlan, err := GetNodeReporterPlan(db, node.KomariNodeUUID, node.ReporterToken, ReporterPlanInput{
+		CandidateIPs: []string{"203.0.113.20"},
+	})
+	if err != nil {
+		t.Fatalf("get plan with disabled auto target: %v", err)
+	}
+	if got, want := strings.Join(disabledAutoPlan.TargetIPs, ","), manual.IP; got != want {
+		t.Fatalf("expected disabled auto target to be skipped, got %q want %q", got, want)
+	}
+
+	if _, err := UpdateNodeTarget(db, node.KomariNodeUUID, manual.ID, UpdateNodeTargetInput{ReportEnabled: false}); err != nil {
+		t.Fatalf("disable manual target: %v", err)
+	}
+	allDisabledPlan, err := GetNodeReporterPlan(db, node.KomariNodeUUID, node.ReporterToken, ReporterPlanInput{
+		CandidateIPs: []string{"203.0.113.20"},
+	})
+	if err != nil {
+		t.Fatalf("get plan with all targets disabled: %v", err)
+	}
+	if len(allDisabledPlan.TargetIPs) != 0 {
+		t.Fatalf("expected no approved targets when all targets are disabled, got %#v", allDisabledPlan.TargetIPs)
+	}
+}
+
+func TestReportNodeRejectsDisabledTargetAndAllowsAfterReenable(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{KomariNodeUUID: "node-disabled-report", Name: "node-disabled-report", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	target, err := AddNodeTarget(db, config.Config{}, node.KomariNodeUUID, AddNodeTargetInput{IP: "198.51.100.30"})
+	if err != nil {
+		t.Fatalf("add target: %v", err)
+	}
+	if _, err := UpdateNodeTarget(db, node.KomariNodeUUID, target.ID, UpdateNodeTargetInput{ReportEnabled: false}); err != nil {
+		t.Fatalf("disable target: %v", err)
+	}
+
+	err = ReportNode(db, node.KomariNodeUUID, node.ReporterToken, ReportNodeInput{
+		TargetIP: target.IP,
+		Summary:  "disabled",
+		Result: map[string]any{
+			"Head": map[string]any{"IP": target.IP},
+		},
+	})
+	if err == nil || err.Error() != "target ip disabled" {
+		t.Fatalf("expected target ip disabled, got %v", err)
+	}
+
+	var historyCount int64
+	if err := db.Model(&models.NodeTargetHistory{}).Where("node_target_id = ?", target.ID).Count(&historyCount).Error; err != nil {
+		t.Fatalf("count history after disabled report: %v", err)
+	}
+	if historyCount != 0 {
+		t.Fatalf("expected disabled target to reject report without history, got %d history rows", historyCount)
+	}
+
+	if _, err := UpdateNodeTarget(db, node.KomariNodeUUID, target.ID, UpdateNodeTargetInput{ReportEnabled: true}); err != nil {
+		t.Fatalf("reenable target: %v", err)
+	}
+	if err := ReportNode(db, node.KomariNodeUUID, node.ReporterToken, ReportNodeInput{
+		TargetIP: target.IP,
+		Summary:  "reenabled",
+		Result: map[string]any{
+			"Head": map[string]any{"IP": target.IP},
+		},
+	}); err != nil {
+		t.Fatalf("report reenabled target: %v", err)
+	}
+	if err := db.Model(&models.NodeTargetHistory{}).Where("node_target_id = ?", target.ID).Count(&historyCount).Error; err != nil {
+		t.Fatalf("count history after reenabled report: %v", err)
+	}
+	if historyCount != 1 {
+		t.Fatalf("expected reenabled target to accept report, got %d history rows", historyCount)
+	}
+}
+
 func TestReportNodeMatchesEquivalentIPv6Forms(t *testing.T) {
 	db := openNodesServiceTestDB(t)
 

@@ -850,7 +850,12 @@ async function configureTargetsFromUI(appPage, scenarioDir, targets, uuid) {
   for (const ip of targets) {
     await targetInput.fill(ip);
     await appPage.getByRole("button", { name: "添加 IP" }).click();
-    await appPage.locator("button").filter({ hasText: ip }).first().waitFor({ state: "visible", timeout: 10000 });
+    const targetRow = appPage.locator(`[data-report-target-row="true"][data-target-ip="${ip}"]`);
+    await targetRow.waitFor({ state: "visible", timeout: 10000 });
+    const rowText = await targetRow.innerText();
+    if (!rowText.includes("手动添加") || !rowText.includes("已启用")) {
+      throw new Error(`manual target row did not show source and enabled state for ${ip}: ${rowText}`);
+    }
   }
   await appPage.getByLabel("Cron").fill("*/30 * * * *");
   await appPage.getByLabel("解析时区").selectOption("Asia/Shanghai");
@@ -869,6 +874,76 @@ async function configureTargetsFromUI(appPage, scenarioDir, targets, uuid) {
   if (!reporterToken) {
     throw new Error("reporter token missing after UI save");
   }
+
+  const firstTarget = detail.targets?.find((target) => target.ip === targets[0]);
+  if (!firstTarget) {
+    throw new Error(`first manual target missing after UI configuration: ${targets[0]}`);
+  }
+  const firstTargetRow = appPage.locator(`[data-report-target-row="true"][data-target-id="${firstTarget.id}"]`);
+  await firstTargetRow.getByRole("button", { name: "停用" }).click();
+  await firstTargetRow.getByText("已停用", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  const disabledDetail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${uuid}`, undefined, "load node after disabling target");
+  const disabledTarget = disabledDetail.targets?.find((target) => target.id === firstTarget.id);
+  if (!disabledTarget || disabledTarget.report_enabled !== false) {
+    throw new Error(`target disable state was not persisted for ${targets[0]}`);
+  }
+  const disabledPlan = await apiOK(
+    appPage,
+    `${appBaseURL}/api/v1/report/nodes/${uuid}/plan`,
+    {
+      method: "POST",
+      headers: { "X-IPQ-Reporter-Token": reporterToken },
+      body: JSON.stringify({ candidate_ips: targets })
+    },
+    "load reporter plan after disabling target"
+  );
+  if ((disabledPlan.target_ips || []).includes(targets[0])) {
+    throw new Error("disabled manual target should not be returned by reporter plan");
+  }
+  await firstTargetRow.getByRole("button", { name: "启用" }).click();
+  await firstTargetRow.getByText("已启用", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  const enabledPlan = await apiOK(
+    appPage,
+    `${appBaseURL}/api/v1/report/nodes/${uuid}/plan`,
+    {
+      method: "POST",
+      headers: { "X-IPQ-Reporter-Token": reporterToken },
+      body: JSON.stringify({ candidate_ips: targets })
+    },
+    "load reporter plan after reenabling target"
+  );
+  if (!(enabledPlan.target_ips || []).includes(targets[0])) {
+    throw new Error("reenabled manual target should be returned by reporter plan");
+  }
+
+  const autoCandidate = "203.0.113.240";
+  const autoPlan = await apiOK(
+    appPage,
+    `${appBaseURL}/api/v1/report/nodes/${uuid}/plan`,
+    {
+      method: "POST",
+      headers: { "X-IPQ-Reporter-Token": reporterToken },
+      body: JSON.stringify({ candidate_ips: [autoCandidate] })
+    },
+    "load reporter plan with auto-discovered target"
+  );
+  if (!(autoPlan.target_ips || []).includes(autoCandidate)) {
+    throw new Error("auto-discovered target should be returned by reporter plan");
+  }
+  const detailAfterAutoDiscovery = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${uuid}`, undefined, "load node after auto discovery");
+  const autoTarget = detailAfterAutoDiscovery.targets?.find((target) => target.ip === autoCandidate);
+  if (!autoTarget || autoTarget.source !== "auto" || autoTarget.report_enabled !== true || !autoTarget.last_discovered_at) {
+    throw new Error(`auto-discovered target was not persisted with source/state/discovery time: ${JSON.stringify(autoTarget)}`);
+  }
+  await appPage.reload({ waitUntil: "networkidle" });
+  await appPage.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
+  const autoTargetRow = appPage.locator(`[data-report-target-row="true"][data-target-ip="${autoCandidate}"]`);
+  await autoTargetRow.waitFor({ state: "visible", timeout: 10000 });
+  const autoTargetRowText = await autoTargetRow.innerText();
+  if (!autoTargetRowText.includes("自动发现") || !autoTargetRowText.includes("已启用")) {
+    throw new Error(`auto target row did not show source and enabled state: ${autoTargetRowText}`);
+  }
+
   const installConfig = await apiOK(
     appPage,
     `${appBaseURL}/api/v1/report/nodes/${uuid}/install-config`,

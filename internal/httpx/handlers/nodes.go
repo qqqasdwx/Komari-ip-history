@@ -133,6 +133,25 @@ func (h NodeHandler) DeleteTarget(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }
 
+func (h NodeHandler) UpdateTarget(c *gin.Context) {
+	targetIDValue, err := strconv.ParseUint(c.Param("targetID"), 10, 64)
+	if err != nil || targetIDValue == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid target id"})
+		return
+	}
+	var req service.UpdateNodeTargetInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	item, updateErr := service.UpdateNodeTarget(h.DB, c.Param("uuid"), uint(targetIDValue), req)
+	if updateErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "target not found"})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
 func (h NodeHandler) ReorderTargets(c *gin.Context) {
 	var req service.ReorderNodeTargetsInput
 	if err := c.ShouldBindJSON(&req); err != nil {

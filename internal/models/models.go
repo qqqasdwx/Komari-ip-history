@@ -66,6 +66,9 @@ type NodeTarget struct {
 	NodeID                 uint       `gorm:"uniqueIndex:idx_node_target_ip;index;not null" json:"node_id"`
 	Node                   Node       `gorm:"constraint:OnDelete:CASCADE" json:"-"`
 	TargetIP               string     `gorm:"size:64;uniqueIndex:idx_node_target_ip;not null" json:"target_ip"`
+	TargetSource           string     `gorm:"size:16;not null;default:'manual'" json:"target_source"`
+	ReportEnabled          bool       `gorm:"not null;default:true" json:"report_enabled"`
+	LastDiscoveredAt       *time.Time `json:"last_discovered_at"`
 	SortOrder              int        `gorm:"index;not null;default:0" json:"sort_order"`
 	HasData                bool       `gorm:"not null;default:false" json:"has_data"`
 	CurrentSummary         string     `gorm:"size:512" json:"current_summary"`

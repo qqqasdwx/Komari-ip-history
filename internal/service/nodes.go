@@ -16,6 +16,9 @@ import (
 	"gorm.io/gorm"
 )
 
+const targetSourceManual = "manual"
+const targetSourceAuto = "auto"
+
 type RegisterNodeInput struct {
 	KomariNodeUUID string `json:"uuid"`
 	Name           string `json:"name"`
@@ -35,6 +38,10 @@ type AddNodeTargetInput struct {
 	IP string `json:"ip"`
 }
 
+type UpdateNodeTargetInput struct {
+	ReportEnabled bool `json:"report_enabled"`
+}
+
 type ReorderNodeTargetsInput struct {
 	TargetIDs []uint `json:"target_ids"`
 }
@@ -49,19 +56,25 @@ type NodeListItem struct {
 }
 
 type NodeTargetListItem struct {
-	ID        uint       `json:"id"`
-	IP        string     `json:"ip"`
-	HasData   bool       `json:"has_data"`
-	UpdatedAt *time.Time `json:"updated_at"`
-	SortOrder int        `json:"sort_order"`
+	ID               uint       `json:"id"`
+	IP               string     `json:"ip"`
+	Source           string     `json:"source"`
+	ReportEnabled    bool       `json:"report_enabled"`
+	LastDiscoveredAt *time.Time `json:"last_discovered_at"`
+	HasData          bool       `json:"has_data"`
+	UpdatedAt        *time.Time `json:"updated_at"`
+	SortOrder        int        `json:"sort_order"`
 }
 
 type NodeTargetDetail struct {
-	ID        uint           `json:"id"`
-	IP        string         `json:"ip"`
-	HasData   bool           `json:"has_data"`
-	UpdatedAt *time.Time     `json:"updated_at"`
-	Result    map[string]any `json:"current_result"`
+	ID               uint           `json:"id"`
+	IP               string         `json:"ip"`
+	Source           string         `json:"source"`
+	ReportEnabled    bool           `json:"report_enabled"`
+	LastDiscoveredAt *time.Time     `json:"last_discovered_at"`
+	HasData          bool           `json:"has_data"`
+	UpdatedAt        *time.Time     `json:"updated_at"`
+	Result           map[string]any `json:"current_result"`
 }
 
 type PublicTargetListItem struct {
@@ -100,6 +113,14 @@ type NodeInstallConfig struct {
 	ScheduleTimezone string   `json:"schedule_timezone"`
 	RunImmediately   bool     `json:"run_immediately"`
 	TargetIPs        []string `json:"target_ips"`
+}
+
+type ReporterPlanInput struct {
+	CandidateIPs []string `json:"candidate_ips"`
+}
+
+type ReporterPlan struct {
+	TargetIPs []string `json:"target_ips"`
 }
 
 type NodeDetail struct {
@@ -301,13 +322,7 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	targetItems := make([]NodeTargetListItem, 0, len(targets))
 	reportIPs := make([]string, 0, len(targets))
 	for _, target := range targets {
-		targetItems = append(targetItems, NodeTargetListItem{
-			ID:        target.ID,
-			IP:        target.TargetIP,
-			HasData:   target.HasData,
-			UpdatedAt: target.CurrentResultUpdatedAt,
-			SortOrder: target.SortOrder,
-		})
+		targetItems = append(targetItems, nodeTargetListItem(target))
 		reportIPs = append(reportIPs, target.TargetIP)
 	}
 
@@ -329,11 +344,14 @@ func GetNodeDetail(db *gorm.DB, uuid string, selectedTargetID *uint) (NodeDetail
 	if selected != nil {
 		detail.SelectedTargetID = &selected.ID
 		detail.CurrentTarget = &NodeTargetDetail{
-			ID:        selected.ID,
-			IP:        selected.TargetIP,
-			HasData:   selected.HasData,
-			UpdatedAt: selected.CurrentResultUpdatedAt,
-			Result:    decodeResultJSON(selected.CurrentResultJSON),
+			ID:               selected.ID,
+			IP:               selected.TargetIP,
+			Source:           normalizeTargetSource(selected.TargetSource),
+			ReportEnabled:    selected.ReportEnabled,
+			LastDiscoveredAt: selected.LastDiscoveredAt,
+			HasData:          selected.HasData,
+			UpdatedAt:        selected.CurrentResultUpdatedAt,
+			Result:           decodeResultJSON(selected.CurrentResultJSON),
 		}
 	}
 
@@ -549,9 +567,11 @@ func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTar
 		}
 
 		created = models.NodeTarget{
-			NodeID:    node.ID,
-			TargetIP:  ip,
-			SortOrder: sortOrder,
+			NodeID:        node.ID,
+			TargetIP:      ip,
+			TargetSource:  targetSourceManual,
+			ReportEnabled: true,
+			SortOrder:     sortOrder,
 		}
 
 		if cfg.IsDevelopment() {
@@ -586,13 +606,34 @@ func AddNodeTarget(db *gorm.DB, cfg config.Config, uuid string, input AddNodeTar
 		return NodeTargetListItem{}, err
 	}
 
-	return NodeTargetListItem{
-		ID:        created.ID,
-		IP:        created.TargetIP,
-		HasData:   created.HasData,
-		UpdatedAt: created.CurrentResultUpdatedAt,
-		SortOrder: created.SortOrder,
-	}, nil
+	return nodeTargetListItem(created), nil
+}
+
+func UpdateNodeTarget(db *gorm.DB, uuid string, targetID uint, input UpdateNodeTargetInput) (NodeTargetListItem, error) {
+	if targetID == 0 {
+		return NodeTargetListItem{}, errors.New("target id is required")
+	}
+
+	var updated models.NodeTarget
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		node, err := loadNodeByUUID(tx, uuid)
+		if err != nil {
+			return err
+		}
+
+		if err := tx.First(&updated, "id = ? AND node_id = ?", targetID, node.ID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&updated).Update("report_enabled", input.ReportEnabled).Error; err != nil {
+			return err
+		}
+		updated.ReportEnabled = input.ReportEnabled
+		return nil
+	}); err != nil {
+		return NodeTargetListItem{}, err
+	}
+
+	return nodeTargetListItem(updated), nil
 }
 
 func DeleteNodeTarget(db *gorm.DB, uuid string, targetID uint) error {
@@ -749,10 +790,6 @@ func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, sc
 	if node.ReporterToken == "" || token != node.ReporterToken {
 		return "", errors.New("invalid reporter token")
 	}
-	if len(targets) == 0 {
-		return "", errors.New("no target ip configured")
-	}
-
 	targetIPs := make([]string, 0, len(targets))
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
@@ -787,10 +824,6 @@ func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (N
 	if node.ReporterToken == "" || token != node.ReporterToken {
 		return NodeInstallConfig{}, errors.New("invalid reporter token")
 	}
-	if len(targets) == 0 {
-		return NodeInstallConfig{}, errors.New("no target ip configured")
-	}
-
 	targetIPs := make([]string, 0, len(targets))
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
@@ -829,10 +862,6 @@ func GetNodeInstallConfigByInstallToken(db *gorm.DB, installToken, reportBaseURL
 	if err := db.Where("node_id = ?", node.ID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
 		return NodeInstallConfig{}, err
 	}
-	if len(targets) == 0 {
-		return NodeInstallConfig{}, errors.New("no target ip configured")
-	}
-
 	targetIPs := make([]string, 0, len(targets))
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
@@ -853,6 +882,48 @@ func GetNodeInstallConfigByInstallToken(db *gorm.DB, installToken, reportBaseURL
 		RunImmediately:   runImmediately,
 		TargetIPs:        targetIPs,
 	}, nil
+}
+
+func GetNodeReporterPlan(db *gorm.DB, uuid, token string, input ReporterPlanInput) (ReporterPlan, error) {
+	if strings.TrimSpace(token) == "" {
+		return ReporterPlan{}, errors.New("missing reporter token")
+	}
+
+	node, err := loadNodeByUUID(db, uuid)
+	if err != nil {
+		return ReporterPlan{}, err
+	}
+	if node.ReporterToken == "" || token != node.ReporterToken {
+		return ReporterPlan{}, errors.New("invalid reporter token")
+	}
+
+	candidateIPs, err := normalizeCandidateIPs(input.CandidateIPs)
+	if err != nil {
+		return ReporterPlan{}, err
+	}
+	candidateSet := make(map[string]struct{}, len(candidateIPs))
+	for _, ip := range candidateIPs {
+		candidateSet[ip] = struct{}{}
+	}
+
+	var allowed []string
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		if err := upsertDiscoveredTargets(tx, node.ID, candidateIPs, now); err != nil {
+			return err
+		}
+
+		var targets []models.NodeTarget
+		if err := tx.Where("node_id = ?", node.ID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+			return err
+		}
+		allowed = allowedReporterTargets(targets, candidateSet)
+		return nil
+	}); err != nil {
+		return ReporterPlan{}, err
+	}
+
+	return ReporterPlan{TargetIPs: allowed}, nil
 }
 
 func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
@@ -883,6 +954,9 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 			return errors.New("target ip not configured")
 		}
 		return err
+	}
+	if !target.ReportEnabled {
+		return errors.New("target ip disabled")
 	}
 
 	recordedAt := time.Now().UTC()
@@ -1050,6 +1124,28 @@ func publicTargetLabel(index int) string {
 	return "IP " + strconv.Itoa(index+1)
 }
 
+func nodeTargetListItem(target models.NodeTarget) NodeTargetListItem {
+	return NodeTargetListItem{
+		ID:               target.ID,
+		IP:               target.TargetIP,
+		Source:           normalizeTargetSource(target.TargetSource),
+		ReportEnabled:    target.ReportEnabled,
+		LastDiscoveredAt: target.LastDiscoveredAt,
+		HasData:          target.HasData,
+		UpdatedAt:        target.CurrentResultUpdatedAt,
+		SortOrder:        target.SortOrder,
+	}
+}
+
+func normalizeTargetSource(source string) string {
+	switch strings.TrimSpace(source) {
+	case targetSourceAuto:
+		return targetSourceAuto
+	default:
+		return targetSourceManual
+	}
+}
+
 func normalizeTargetIP(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 	parsed := net.ParseIP(value)
@@ -1060,6 +1156,23 @@ func normalizeTargetIP(raw string) (string, error) {
 		return ipv4.String(), nil
 	}
 	return parsed.String(), nil
+}
+
+func normalizeCandidateIPs(raw []string) ([]string, error) {
+	result := make([]string, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, item := range raw {
+		ip, err := normalizeTargetIP(item)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[ip]; ok {
+			continue
+		}
+		seen[ip] = struct{}{}
+		result = append(result, ip)
+	}
+	return result, nil
 }
 
 func findNodeTargetByNormalizedIP(db *gorm.DB, nodeID uint, targetIP string) (*models.NodeTarget, error) {
@@ -1077,6 +1190,79 @@ func findNodeTargetByNormalizedIP(db *gorm.DB, nodeID uint, targetIP string) (*m
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func upsertDiscoveredTargets(tx *gorm.DB, nodeID uint, candidateIPs []string, discoveredAt time.Time) error {
+	if len(candidateIPs) == 0 {
+		return nil
+	}
+
+	var targets []models.NodeTarget
+	if err := tx.Where("node_id = ?", nodeID).Order("sort_order ASC").Order("id ASC").Find(&targets).Error; err != nil {
+		return err
+	}
+
+	targetByIP := make(map[string]models.NodeTarget, len(targets))
+	maxSortOrder := -1
+	for _, target := range targets {
+		normalized, err := normalizeTargetIP(target.TargetIP)
+		if err == nil {
+			targetByIP[normalized] = target
+		}
+		if target.SortOrder > maxSortOrder {
+			maxSortOrder = target.SortOrder
+		}
+	}
+
+	for _, ip := range candidateIPs {
+		if target, ok := targetByIP[ip]; ok {
+			if err := tx.Model(&models.NodeTarget{}).
+				Where("id = ?", target.ID).
+				Update("last_discovered_at", discoveredAt).
+				Error; err != nil {
+				return err
+			}
+			continue
+		}
+
+		maxSortOrder++
+		target := models.NodeTarget{
+			NodeID:           nodeID,
+			TargetIP:         ip,
+			TargetSource:     targetSourceAuto,
+			ReportEnabled:    true,
+			LastDiscoveredAt: &discoveredAt,
+			SortOrder:        maxSortOrder,
+		}
+		if err := tx.Create(&target).Error; err != nil {
+			return err
+		}
+		targetByIP[ip] = target
+	}
+
+	return nil
+}
+
+func allowedReporterTargets(targets []models.NodeTarget, candidateSet map[string]struct{}) []string {
+	result := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if !target.ReportEnabled {
+			continue
+		}
+		source := normalizeTargetSource(target.TargetSource)
+		normalized, err := normalizeTargetIP(target.TargetIP)
+		if err != nil {
+			continue
+		}
+		if source == targetSourceManual {
+			result = append(result, target.TargetIP)
+			continue
+		}
+		if _, ok := candidateSet[normalized]; ok {
+			result = append(result, target.TargetIP)
+		}
+	}
+	return result
 }
 
 func nextNodeTargetSortOrder(db *gorm.DB, nodeID uint) (int, error) {
@@ -1181,23 +1367,75 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	builder.WriteString("  exit 1\n")
 	builder.WriteString("fi\n\n")
 	builder.WriteString("install_dependencies() {\n")
-	builder.WriteString("  if command -v curl >/dev/null 2>&1; then\n")
+	builder.WriteString("  local need_curl=0\n")
+	builder.WriteString("  local need_cron=0\n")
+	builder.WriteString("  local need_jq=0\n")
+	builder.WriteString("  local need_bc=0\n")
+	builder.WriteString("  local need_netcat=0\n")
+	builder.WriteString("  local need_dnsutils=0\n")
+	builder.WriteString("  local need_iproute=0\n")
+	builder.WriteString("  if ! command -v curl >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_curl=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v crontab >/dev/null 2>&1 && ! command -v cron >/dev/null 2>&1 && ! command -v crond >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_cron=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v jq >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_jq=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v bc >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_bc=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v nc >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_netcat=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v dig >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_dnsutils=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if ! command -v ip >/dev/null 2>&1; then\n")
+	builder.WriteString("    need_iproute=1\n")
+	builder.WriteString("  fi\n")
+	builder.WriteString("  if [ \"$need_curl\" -eq 0 ] && [ \"$need_cron\" -eq 0 ] && [ \"$need_jq\" -eq 0 ] && [ \"$need_bc\" -eq 0 ] && [ \"$need_netcat\" -eq 0 ] && [ \"$need_dnsutils\" -eq 0 ] && [ \"$need_iproute\" -eq 0 ]; then\n")
 	builder.WriteString("    return\n")
 	builder.WriteString("  fi\n")
 	builder.WriteString("  if command -v apt >/dev/null 2>&1; then\n")
 	builder.WriteString("    apt update\n")
-	builder.WriteString("    apt install -y curl\n")
+	builder.WriteString("    local packages=()\n")
+	builder.WriteString("    [ \"$need_curl\" -eq 1 ] && packages+=(\"curl\")\n")
+	builder.WriteString("    [ \"$need_cron\" -eq 1 ] && packages+=(\"cron\")\n")
+	builder.WriteString("    [ \"$need_jq\" -eq 1 ] && packages+=(\"jq\")\n")
+	builder.WriteString("    [ \"$need_bc\" -eq 1 ] && packages+=(\"bc\")\n")
+	builder.WriteString("    [ \"$need_netcat\" -eq 1 ] && packages+=(\"netcat-openbsd\")\n")
+	builder.WriteString("    [ \"$need_dnsutils\" -eq 1 ] && packages+=(\"dnsutils\")\n")
+	builder.WriteString("    [ \"$need_iproute\" -eq 1 ] && packages+=(\"iproute2\")\n")
+	builder.WriteString("    apt install -y \"${packages[@]}\"\n")
 	builder.WriteString("    return\n")
 	builder.WriteString("  fi\n")
 	builder.WriteString("  if command -v yum >/dev/null 2>&1; then\n")
-	builder.WriteString("    yum install -y curl\n")
+	builder.WriteString("    local packages=()\n")
+	builder.WriteString("    [ \"$need_curl\" -eq 1 ] && packages+=(\"curl\")\n")
+	builder.WriteString("    [ \"$need_cron\" -eq 1 ] && packages+=(\"cronie\")\n")
+	builder.WriteString("    [ \"$need_jq\" -eq 1 ] && packages+=(\"jq\")\n")
+	builder.WriteString("    [ \"$need_bc\" -eq 1 ] && packages+=(\"bc\")\n")
+	builder.WriteString("    [ \"$need_netcat\" -eq 1 ] && packages+=(\"nmap-ncat\")\n")
+	builder.WriteString("    [ \"$need_dnsutils\" -eq 1 ] && packages+=(\"bind-utils\")\n")
+	builder.WriteString("    [ \"$need_iproute\" -eq 1 ] && packages+=(\"iproute\")\n")
+	builder.WriteString("    yum install -y \"${packages[@]}\"\n")
 	builder.WriteString("    return\n")
 	builder.WriteString("  fi\n")
 	builder.WriteString("  if command -v apk >/dev/null 2>&1; then\n")
-	builder.WriteString("    apk add --no-cache curl\n")
+	builder.WriteString("    local packages=()\n")
+	builder.WriteString("    [ \"$need_curl\" -eq 1 ] && packages+=(\"curl\")\n")
+	builder.WriteString("    [ \"$need_cron\" -eq 1 ] && packages+=(\"dcron\")\n")
+	builder.WriteString("    [ \"$need_jq\" -eq 1 ] && packages+=(\"jq\")\n")
+	builder.WriteString("    [ \"$need_bc\" -eq 1 ] && packages+=(\"bc\")\n")
+	builder.WriteString("    [ \"$need_netcat\" -eq 1 ] && packages+=(\"netcat-openbsd\")\n")
+	builder.WriteString("    [ \"$need_dnsutils\" -eq 1 ] && packages+=(\"bind-tools\")\n")
+	builder.WriteString("    [ \"$need_iproute\" -eq 1 ] && packages+=(\"iproute2\")\n")
+	builder.WriteString("    apk add --no-cache \"${packages[@]}\"\n")
 	builder.WriteString("    return\n")
 	builder.WriteString("  fi\n")
-	builder.WriteString("  echo \"curl is required, and no supported package manager was found.\" >&2\n")
+	builder.WriteString("  echo \"curl, cron, jq, bc, netcat, dnsutils, and iproute are required, and no supported package manager was found.\" >&2\n")
 	builder.WriteString("  exit 1\n")
 	builder.WriteString("}\n\n")
 	builder.WriteString("install_dependencies\n\n")
@@ -1215,19 +1453,39 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	builder.WriteString("set -euo pipefail\n\n")
 	builder.WriteString("REPORT_ENDPOINT=" + shellQuote(reportEndpointURL) + "\n")
 	builder.WriteString("REPORTER_TOKEN=" + shellQuote(node.ReporterToken) + "\n")
-	builder.WriteString("TARGET_IPS=(")
-	for index, ip := range targetIPs {
-		if index > 0 {
-			builder.WriteString(" ")
-		}
-		builder.WriteString(shellQuote(ip))
-	}
-	builder.WriteString(")\n\n")
+	builder.WriteString("PLAN_ENDPOINT=\"${REPORT_ENDPOINT%/}/plan\"\n\n")
 	builder.WriteString("WORKDIR=$(mktemp -d)\n")
 	builder.WriteString("cleanup() {\n")
 	builder.WriteString("  rm -rf \"$WORKDIR\"\n")
 	builder.WriteString("}\n")
 	builder.WriteString("trap cleanup EXIT\n\n")
+	builder.WriteString("collect_candidate_ips() {\n")
+	builder.WriteString("  if command -v ip >/dev/null 2>&1; then\n")
+	builder.WriteString("    ip -o -4 addr show scope global 2>/dev/null | awk '{split($4, a, \"/\"); print a[1]}'\n")
+	builder.WriteString("    ip -o -6 addr show scope global 2>/dev/null | awk '{split($4, a, \"/\"); if (a[1] !~ /^fe80:/) print a[1]}'\n")
+	builder.WriteString("  elif command -v hostname >/dev/null 2>&1; then\n")
+	builder.WriteString("    hostname -I 2>/dev/null | tr ' ' '\\n'\n")
+	builder.WriteString("  fi | awk 'NF && !seen[$0]++'\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("request_report_plan() {\n")
+	builder.WriteString("  local candidate_file=\"$WORKDIR/candidate_ips.txt\"\n")
+	builder.WriteString("  local plan_file=\"$WORKDIR/plan.json\"\n")
+	builder.WriteString("  collect_candidate_ips >\"$candidate_file\" || true\n")
+	builder.WriteString("  jq -n --rawfile ips \"$candidate_file\" '{candidate_ips: ($ips | split(\"\\n\") | map(select(length > 0)))}' \\\n")
+	builder.WriteString("    | curl -fsS -X POST \\\n")
+	builder.WriteString("        -H 'Content-Type: application/json' \\\n")
+	builder.WriteString("        -H \"X-IPQ-Reporter-Token: ${REPORTER_TOKEN}\" \\\n")
+	builder.WriteString("        --data-binary @- \\\n")
+	builder.WriteString("        \"$PLAN_ENDPOINT\" >\"$plan_file\"\n")
+	builder.WriteString("  jq -r '.target_ips[]?' \"$plan_file\"\n")
+	builder.WriteString("}\n\n")
+	builder.WriteString("PLAN_TARGET_FILE=\"$WORKDIR/target_ips.txt\"\n")
+	builder.WriteString("request_report_plan >\"$PLAN_TARGET_FILE\"\n")
+	builder.WriteString("mapfile -t TARGET_IPS <\"$PLAN_TARGET_FILE\"\n")
+	builder.WriteString("if [ \"${#TARGET_IPS[@]}\" -eq 0 ]; then\n")
+	builder.WriteString("  echo \"No target IPs approved by IPQ for this run.\"\n")
+	builder.WriteString("  exit 0\n")
+	builder.WriteString("fi\n\n")
 	builder.WriteString("for TARGET_IP in \"${TARGET_IPS[@]}\"; do\n")
 	builder.WriteString("  SAFE_NAME=$(printf '%s' \"$TARGET_IP\" | tr ':/' '__')\n")
 	builder.WriteString("  RESULT_FILE=\"$WORKDIR/$SAFE_NAME.json\"\n")

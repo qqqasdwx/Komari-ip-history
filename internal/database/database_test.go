@@ -187,6 +187,7 @@ CREATE TABLE node_targets (
   updated_at datetime
 );
 CREATE UNIQUE INDEX idx_node_target_ip ON node_targets(node_id, target_ip);
+INSERT INTO node_targets (node_id, target_ip, sort_order) VALUES (1, '203.0.113.50', 0);
 CREATE TABLE node_histories (
   id integer primary key autoincrement,
   node_id integer not null,
@@ -247,5 +248,21 @@ CREATE TABLE app_settings (
 	}
 	if !reopened.Migrator().HasColumn(&models.Node{}, "ReporterScheduleTimezone") {
 		t.Fatalf("expected reporter_schedule_timezone column after migration")
+	}
+	for _, column := range []string{"TargetSource", "ReportEnabled", "LastDiscoveredAt"} {
+		if !reopened.Migrator().HasColumn(&models.NodeTarget{}, column) {
+			t.Fatalf("expected node_targets column %s after migration", column)
+		}
+	}
+
+	var target models.NodeTarget
+	if err := reopened.First(&target, "target_ip = ?", "203.0.113.50").Error; err != nil {
+		t.Fatalf("load migrated target: %v", err)
+	}
+	if target.TargetSource != "manual" {
+		t.Fatalf("expected legacy target source to default to manual, got %q", target.TargetSource)
+	}
+	if !target.ReportEnabled {
+		t.Fatalf("expected legacy target report_enabled to default to true")
 	}
 }

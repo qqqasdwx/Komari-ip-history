@@ -99,6 +99,22 @@ func ensureSchemaColumns(db *gorm.DB) error {
 		}
 	}
 
+	nodeTargetColumns := []string{"TargetSource", "ReportEnabled", "LastDiscoveredAt"}
+	for _, column := range nodeTargetColumns {
+		if db.Migrator().HasColumn(&models.NodeTarget{}, column) {
+			continue
+		}
+		if err := db.Migrator().AddColumn(&models.NodeTarget{}, column); err != nil {
+			return err
+		}
+	}
+	if err := db.Model(&models.NodeTarget{}).
+		Where("target_source = '' OR target_source IS NULL").
+		Update("target_source", "manual").
+		Error; err != nil {
+		return err
+	}
+
 	if !db.Migrator().HasColumn(&models.NodeTargetHistory{}, "IsFavorite") {
 		if err := db.Migrator().AddColumn(&models.NodeTargetHistory{}, "IsFavorite"); err != nil {
 			return err
