@@ -53,6 +53,40 @@ export function formatDateTime(value?: string) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+export function formatDateTimeInTimeZone(value: string | undefined, timeZone: string) {
+  if (!value) {
+    return "N/A";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  try {
+    const formatted = date.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZone
+    });
+    const timeZoneName = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      timeZone,
+      timeZoneName: "shortOffset"
+    })
+      .formatToParts(date)
+      .find((part) => part.type === "timeZoneName")?.value;
+    return timeZoneName ? `${formatted} (${timeZoneName})` : formatted;
+  } catch {
+    return formatDateTime(value);
+  }
+}
+
 export function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

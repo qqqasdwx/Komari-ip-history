@@ -67,6 +67,21 @@ async function apiOK(page, url, options, label) {
   return parseJSON(await jsonFetch(page, url, options), label);
 }
 
+async function waitForNodeReportConfig(page, uuid, predicate, label) {
+  let lastDetail = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const result = await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${uuid}?_=${Date.now()}`);
+    if (result.status >= 200 && result.status < 300) {
+      lastDetail = JSON.parse(result.text);
+      if (predicate(lastDetail.report_config || {})) {
+        return lastDetail;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`${label}: ${JSON.stringify(lastDetail?.report_config || null)}`);
+}
+
 async function loginIPQ(page) {
   log(`login IPQ at ${appBaseURL}`);
   await page.goto(`${appBaseURL}/#/login`, { waitUntil: "domcontentloaded", timeout: 30000 });
@@ -829,7 +844,7 @@ async function openReportConfigFromUI(appPage, uuid, nodeName, scenarioDir) {
   await appPage.screenshot({ path: path.join(scenarioDir, "04-ipq-report-config-empty.png"), fullPage: true });
 }
 
-async function configureTargetsFromUI(appPage, scenarioDir, targets) {
+async function configureTargetsFromUI(appPage, scenarioDir, targets, uuid) {
   log(`configure targets from UI: ${targets.join(", ")}`);
   const targetInput = appPage.getByPlaceholder("例如 1.1.1.1 或 2606:4700:4700::1111");
   for (const ip of targets) {
@@ -838,6 +853,35 @@ async function configureTargetsFromUI(appPage, scenarioDir, targets) {
     await appPage.locator("button").filter({ hasText: ip }).first().waitFor({ state: "visible", timeout: 10000 });
   }
   await appPage.getByLabel("Cron").fill("*/30 * * * *");
+  await appPage.getByLabel("解析时区").selectOption("Asia/Shanghai");
+  await appPage.getByText("当前 Cron 按 Asia/Shanghai 解析。", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  await appPage.getByText("时区：Asia/Shanghai", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  const detail = await waitForNodeReportConfig(
+    appPage,
+    uuid,
+    (config) =>
+      config.schedule_cron === "*/30 * * * *" &&
+      config.schedule_timezone === "Asia/Shanghai" &&
+      config.run_immediately === true,
+    "report config did not persist cron, timezone, and immediate-run settings"
+  );
+  const reporterToken = detail.report_config?.reporter_token;
+  if (!reporterToken) {
+    throw new Error("reporter token missing after UI save");
+  }
+  const installConfig = await apiOK(
+    appPage,
+    `${appBaseURL}/api/v1/report/nodes/${uuid}/install-config`,
+    { headers: { "X-IPQ-Reporter-Token": reporterToken } },
+    "load install config after UI save"
+  );
+  if (
+    installConfig.schedule_cron !== "*/30 * * * *" ||
+    installConfig.schedule_timezone !== "Asia/Shanghai" ||
+    installConfig.run_immediately !== true
+  ) {
+    throw new Error(`install config did not reflect saved cron, timezone, and immediate-run settings: ${JSON.stringify(installConfig)}`);
+  }
   await appPage.getByText("接入命令", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "05-ipq-report-config-multi-ip.png"), fullPage: true });
 }
@@ -942,7 +986,7 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
   const standaloneURL = await connectNodeFromKomari(komariPage, baseURL, node, scenarioDir);
 
   await openReportConfigFromUI(appPage, node.uuid, nodeName, scenarioDir);
-  await configureTargetsFromUI(appPage, scenarioDir, targets);
+  await configureTargetsFromUI(appPage, scenarioDir, targets, node.uuid);
   await seedTargetReports(appPage, node.uuid, targets);
   await verifyHomeEntryButtons(komariPage, baseURL, theme, node, pendingNode, scenarioDir);
 

@@ -70,6 +70,7 @@ export type NodeDetail = {
     install_token: string;
     target_ips: string[];
     schedule_cron: string;
+    schedule_timezone: string;
     run_immediately: boolean;
     next_runs: string[];
   };
@@ -77,6 +78,7 @@ export type NodeDetail = {
 
 export type NodeReportConfigPreview = {
   schedule_cron: string;
+  schedule_timezone: string;
   run_immediately: boolean;
   next_runs: string[];
 };

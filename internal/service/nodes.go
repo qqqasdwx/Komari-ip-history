@@ -81,23 +81,25 @@ type PublicTargetDetail struct {
 }
 
 type NodeReportConfig struct {
-	EndpointPath   string      `json:"endpoint_path"`
-	InstallerPath  string      `json:"installer_path"`
-	ReporterToken  string      `json:"reporter_token"`
-	InstallToken   string      `json:"install_token"`
-	TargetIPs      []string    `json:"target_ips"`
-	ScheduleCron   string      `json:"schedule_cron"`
-	RunImmediately bool        `json:"run_immediately"`
-	NextRuns       []time.Time `json:"next_runs"`
+	EndpointPath     string      `json:"endpoint_path"`
+	InstallerPath    string      `json:"installer_path"`
+	ReporterToken    string      `json:"reporter_token"`
+	InstallToken     string      `json:"install_token"`
+	TargetIPs        []string    `json:"target_ips"`
+	ScheduleCron     string      `json:"schedule_cron"`
+	ScheduleTimezone string      `json:"schedule_timezone"`
+	RunImmediately   bool        `json:"run_immediately"`
+	NextRuns         []time.Time `json:"next_runs"`
 }
 
 type NodeInstallConfig struct {
-	NodeUUID       string   `json:"node_uuid"`
-	ReportEndpoint string   `json:"report_endpoint"`
-	ReporterToken  string   `json:"reporter_token"`
-	ScheduleCron   string   `json:"schedule_cron"`
-	RunImmediately bool     `json:"run_immediately"`
-	TargetIPs      []string `json:"target_ips"`
+	NodeUUID         string   `json:"node_uuid"`
+	ReportEndpoint   string   `json:"report_endpoint"`
+	ReporterToken    string   `json:"reporter_token"`
+	ScheduleCron     string   `json:"schedule_cron"`
+	ScheduleTimezone string   `json:"schedule_timezone"`
+	RunImmediately   bool     `json:"run_immediately"`
+	TargetIPs        []string `json:"target_ips"`
 }
 
 type NodeDetail struct {
@@ -731,15 +733,11 @@ func RotateNodeReporterToken(db *gorm.DB, uuid string) (NodeReportConfig, error)
 		targetIPs = append(targetIPs, target.TargetIP)
 	}
 
-	return NodeReportConfig{
-		EndpointPath:  "/api/v1/report/nodes/" + nodeRouteUUID(node),
-		InstallerPath: "/api/v1/report/nodes/" + nodeRouteUUID(node) + "/install.sh",
-		ReporterToken: token,
-		TargetIPs:     targetIPs,
-	}, nil
+	node.ReporterToken = token
+	return buildNodeReportConfig(node, targetIPs)
 }
 
-func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, scheduleCronOverride string, runImmediatelyOverride *bool) (string, error) {
+func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, scheduleCronOverride string, scheduleTimezoneOverride string, runImmediatelyOverride *bool) (string, error) {
 	if strings.TrimSpace(token) == "" {
 		return "", errors.New("missing reporter token")
 	}
@@ -759,19 +757,22 @@ func GetNodeInstallScript(db *gorm.DB, uuid, token, reportEndpointURL string, sc
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
 	}
-	scheduleCron, runImmediately := normalizeReporterSchedule(node)
+	scheduleCron, scheduleTimezone, runImmediately := normalizeReporterSchedule(node)
 	if strings.TrimSpace(scheduleCronOverride) != "" {
 		scheduleCron = scheduleCronOverride
+	}
+	if strings.TrimSpace(scheduleTimezoneOverride) != "" {
+		scheduleTimezone = scheduleTimezoneOverride
 	}
 	if runImmediatelyOverride != nil {
 		runImmediately = *runImmediatelyOverride
 	}
-	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	normalizedCron, normalizedTimezone, _, _, err := parseReporterSchedule(scheduleCron, scheduleTimezone)
 	if err != nil {
 		return "", err
 	}
 
-	return buildNodeInstallScript(node, targetIPs, nodeReportEndpointURL(reportEndpointURL, node), normalizedCron, runImmediately), nil
+	return buildNodeInstallScript(node, targetIPs, nodeReportEndpointURL(reportEndpointURL, node), normalizedCron, normalizedTimezone, runImmediately), nil
 }
 
 func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (NodeInstallConfig, error) {
@@ -794,19 +795,20 @@ func GetNodeInstallConfig(db *gorm.DB, uuid, token, reportEndpointURL string) (N
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
 	}
-	scheduleCron, runImmediately := normalizeReporterSchedule(node)
-	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	scheduleCron, scheduleTimezone, runImmediately := normalizeReporterSchedule(node)
+	normalizedCron, normalizedTimezone, _, _, err := parseReporterSchedule(scheduleCron, scheduleTimezone)
 	if err != nil {
 		return NodeInstallConfig{}, err
 	}
 
 	return NodeInstallConfig{
-		NodeUUID:       nodeRouteUUID(node),
-		ReportEndpoint: nodeReportEndpointURL(reportEndpointURL, node),
-		ReporterToken:  node.ReporterToken,
-		ScheduleCron:   normalizedCron,
-		RunImmediately: runImmediately,
-		TargetIPs:      targetIPs,
+		NodeUUID:         nodeRouteUUID(node),
+		ReportEndpoint:   nodeReportEndpointURL(reportEndpointURL, node),
+		ReporterToken:    node.ReporterToken,
+		ScheduleCron:     normalizedCron,
+		ScheduleTimezone: normalizedTimezone,
+		RunImmediately:   runImmediately,
+		TargetIPs:        targetIPs,
 	}, nil
 }
 
@@ -835,20 +837,21 @@ func GetNodeInstallConfigByInstallToken(db *gorm.DB, installToken, reportBaseURL
 	for _, target := range targets {
 		targetIPs = append(targetIPs, target.TargetIP)
 	}
-	scheduleCron, runImmediately := normalizeReporterSchedule(node)
-	normalizedCron, _, err := parseReporterSchedule(scheduleCron)
+	scheduleCron, scheduleTimezone, runImmediately := normalizeReporterSchedule(node)
+	normalizedCron, normalizedTimezone, _, _, err := parseReporterSchedule(scheduleCron, scheduleTimezone)
 	if err != nil {
 		return NodeInstallConfig{}, err
 	}
 
 	reportEndpointURL := strings.TrimRight(reportBaseURL, "/") + "/api/v1/report/nodes/" + nodeRouteUUID(node)
 	return NodeInstallConfig{
-		NodeUUID:       nodeRouteUUID(node),
-		ReportEndpoint: reportEndpointURL,
-		ReporterToken:  node.ReporterToken,
-		ScheduleCron:   normalizedCron,
-		RunImmediately: runImmediately,
-		TargetIPs:      targetIPs,
+		NodeUUID:         nodeRouteUUID(node),
+		ReportEndpoint:   reportEndpointURL,
+		ReporterToken:    node.ReporterToken,
+		ScheduleCron:     normalizedCron,
+		ScheduleTimezone: normalizedTimezone,
+		RunImmediately:   runImmediately,
+		TargetIPs:        targetIPs,
 	}, nil
 }
 
@@ -1161,7 +1164,7 @@ func applyHistoryRange(query *gorm.DB, startAt, endAt *time.Time) *gorm.DB {
 	return query
 }
 
-func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL, scheduleCron string, runImmediately bool) string {
+func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpointURL, scheduleCron string, scheduleTimezone string, runImmediately bool) string {
 	var builder strings.Builder
 	unitName := "ipq-reporter-" + node.KomariNodeUUID
 	installDir := "/opt/" + unitName
@@ -1258,6 +1261,8 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	builder.WriteString("cat > " + shellQuote(cronPath) + " <<'IPQ_REPORTER_CRON'\n")
 	builder.WriteString("SHELL=/bin/bash\n")
 	builder.WriteString("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
+	builder.WriteString("CRON_TZ=" + scheduleTimezone + "\n")
+	builder.WriteString("TZ=" + scheduleTimezone + "\n")
 	builder.WriteString(scheduleCron + " root " + scriptPath + "\n")
 	builder.WriteString("IPQ_REPORTER_CRON\n\n")
 	builder.WriteString("chmod 0644 " + shellQuote(cronPath) + "\n")
@@ -1277,6 +1282,7 @@ func buildNodeInstallScript(node models.Node, targetIPs []string, reportEndpoint
 	}
 	builder.WriteString("echo " + shellQuote("Installed "+unitName+" with "+strconv.Itoa(len(targetIPs))+" target IP(s).") + "\n")
 	builder.WriteString("echo " + shellQuote("Schedule: "+scheduleCron) + "\n")
+	builder.WriteString("echo " + shellQuote("Schedule timezone: "+scheduleTimezone) + "\n")
 	if runImmediately {
 		builder.WriteString("echo " + shellQuote("Immediate execution: enabled") + "\n")
 	} else {

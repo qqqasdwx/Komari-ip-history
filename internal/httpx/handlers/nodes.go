@@ -169,9 +169,9 @@ func (h NodeHandler) PreviewReportConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid run_immediately"})
 		return
 	}
-	preview, previewErr := service.GetNodeReportConfigPreview(h.DB, c.Param("uuid"), c.Query("cron"), runImmediately)
+	preview, previewErr := service.GetNodeReportConfigPreview(h.DB, c.Param("uuid"), c.Query("cron"), c.Query("timezone"), runImmediately)
 	if previewErr != nil {
-		if previewErr.Error() == "invalid cron expression" {
+		if previewErr.Error() == "invalid cron expression" || previewErr.Error() == "invalid timezone" {
 			c.JSON(http.StatusBadRequest, gin.H{"message": previewErr.Error()})
 			return
 		}
@@ -189,7 +189,7 @@ func (h NodeHandler) UpdateReportConfig(c *gin.Context) {
 	}
 	config, updateErr := service.UpdateNodeReportConfig(h.DB, c.Param("uuid"), req)
 	if updateErr != nil {
-		if updateErr.Error() == "invalid cron expression" {
+		if updateErr.Error() == "invalid cron expression" || updateErr.Error() == "invalid timezone" {
 			c.JSON(http.StatusBadRequest, gin.H{"message": updateErr.Error()})
 			return
 		}

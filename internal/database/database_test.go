@@ -245,4 +245,7 @@ CREATE TABLE app_settings (
 	if !reopened.Migrator().HasIndex(&models.Node{}, "idx_nodes_node_uuid") {
 		t.Fatalf("expected node_uuid index after migration")
 	}
+	if !reopened.Migrator().HasColumn(&models.Node{}, "ReporterScheduleTimezone") {
+		t.Fatalf("expected reporter_schedule_timezone column after migration")
+	}
 }

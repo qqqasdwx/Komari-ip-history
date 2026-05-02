@@ -186,12 +186,53 @@ func TestReportConfigUsesNodeUUIDPathsWhenAvailable(t *testing.T) {
 		t.Fatalf("expected legacy route install config to return node_uuid endpoint, got %s", legacyEndpointConfig.ReportEndpoint)
 	}
 
-	script, err := GetNodeInstallScript(db, node.KomariNodeUUID, node.ReporterToken, "https://example.test/api/v1/report/nodes/"+node.KomariNodeUUID, "", nil)
+	script, err := GetNodeInstallScript(db, node.KomariNodeUUID, node.ReporterToken, "https://example.test/api/v1/report/nodes/"+node.KomariNodeUUID, "", "", nil)
 	if err != nil {
 		t.Fatalf("get install script by legacy route: %v", err)
 	}
 	if !strings.Contains(script, "REPORT_ENDPOINT='https://example.test/api/v1/report/nodes/"+node.NodeUUID+"'") {
 		t.Fatalf("expected legacy route install script to use node_uuid endpoint")
+	}
+}
+
+func TestUpdateNodeReportConfigPersistsTimezoneForInstallConfig(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{NodeUUID: "ipq-report-timezone", KomariNodeUUID: "komari-report-timezone", Name: "node-report-timezone", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	target := models.NodeTarget{NodeID: node.ID, TargetIP: "1.1.1.1", SortOrder: 0}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	updated, err := UpdateNodeReportConfig(db, node.KomariNodeUUID, UpdateNodeReportConfigInput{
+		ScheduleCron:     "15 8 * * *",
+		ScheduleTimezone: "Asia/Shanghai",
+		RunImmediately:   false,
+	})
+	if err != nil {
+		t.Fatalf("update report config: %v", err)
+	}
+	if updated.ScheduleCron != "15 8 * * *" || updated.ScheduleTimezone != "Asia/Shanghai" || updated.RunImmediately {
+		t.Fatalf("unexpected updated report config: %#v", updated)
+	}
+
+	var stored models.Node
+	if err := db.First(&stored, node.ID).Error; err != nil {
+		t.Fatalf("load stored node: %v", err)
+	}
+	if stored.ReporterScheduleCron != "15 8 * * *" || stored.ReporterScheduleTimezone != "Asia/Shanghai" || stored.ReporterRunImmediately {
+		t.Fatalf("report config was not persisted on node: %#v", stored)
+	}
+
+	installConfig, err := GetNodeInstallConfigByInstallToken(db, stored.InstallToken, "https://example.test")
+	if err != nil {
+		t.Fatalf("get install config: %v", err)
+	}
+	if installConfig.ScheduleCron != "15 8 * * *" || installConfig.ScheduleTimezone != "Asia/Shanghai" || installConfig.RunImmediately {
+		t.Fatalf("install config did not reflect saved report config: %#v", installConfig)
 	}
 }
 

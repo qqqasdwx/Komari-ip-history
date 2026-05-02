@@ -3,10 +3,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 
 const appBaseURL = (process.env.IPQ_PUBLIC_BASE_URL || 'http://localhost:8090').replace(/\/$/, '');
 const outputDir = '/workspace/web/playwright-output';
+const expectedBrowserTimeZone = 'Asia/Shanghai';
 mkdirSync(outputDir, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
+const context = await browser.newContext({
+  timezoneId: expectedBrowserTimeZone,
+  viewport: { width: 1440, height: 1200 }
+});
 const page = await context.newPage();
 
 async function jsonFetch(page, url, options) {
@@ -25,6 +29,21 @@ async function jsonFetch(page, url, options) {
     },
     { url, options }
   );
+}
+
+async function waitForNodeReportConfig(page, uuid, predicate, label) {
+  let lastDetail = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const result = await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${uuid}?_=${Date.now()}`);
+    if (result.status >= 200 && result.status < 300) {
+      lastDetail = JSON.parse(result.text);
+      if (predicate(lastDetail.report_config || {})) {
+        return lastDetail;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`${label}: ${JSON.stringify(lastDetail?.report_config || null)}`);
 }
 
 await page.goto(`${appBaseURL}/#/login`);
@@ -72,7 +91,8 @@ if (rowCount > 0) {
   }
 
   await chosenRow.getByRole('button', { name: '上报设置' }).click();
-  await page.locator('[data-node-report-config="true"]').waitFor({ state: 'visible', timeout: 10000 });
+  const reportConfigModal = page.locator('[data-node-report-config="true"]');
+  await reportConfigModal.waitFor({ state: 'visible', timeout: 10000 });
   if ((await page.getByText('接入命令', { exact: true }).count()) === 0) {
     await page.getByPlaceholder('例如 1.1.1.1 或 2606:4700:4700::1111').fill('203.0.113.10');
     await page.getByRole('button', { name: '添加 IP' }).click();
@@ -82,7 +102,23 @@ if (rowCount > 0) {
   if (reportConfigCount === 0) {
     throw new Error('react node list modal missing report config');
   }
-  const configText = await page.locator('[data-node-report-config="true"]').innerText();
+  const timezoneSelect = page.locator('#report-config-timezone');
+  await timezoneSelect.waitFor({ state: 'visible', timeout: 10000 });
+  await timezoneSelect.selectOption(expectedBrowserTimeZone);
+  const runImmediatelyCheckbox = reportConfigModal.locator('input[type="checkbox"]').first();
+  if (!(await runImmediatelyCheckbox.isChecked())) {
+    await runImmediatelyCheckbox.check();
+  }
+  await page.getByText(`当前 Cron 按 ${expectedBrowserTimeZone} 解析。`, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByText(`时区：${expectedBrowserTimeZone}`, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const detailAfterConfig = await waitForNodeReportConfig(
+    page,
+    firstUUID,
+    (config) => config.schedule_timezone === expectedBrowserTimeZone && config.run_immediately === true,
+    'report config timezone and immediate-run were not persisted'
+  );
+
+  const configText = await reportConfigModal.innerText();
   const installCommandCount = await page.getByText('接入命令', { exact: true }).count();
   if (installCommandCount === 0) {
     throw new Error('react node list modal missing install command');
@@ -96,8 +132,51 @@ if (rowCount > 0) {
   if (!configText.includes('Cron') || !configText.includes('最近 10 次执行时间')) {
     throw new Error('react detail page missing schedule controls');
   }
+  if (!configText.includes('解析时区') || !configText.includes(`当前 Cron 按 ${expectedBrowserTimeZone} 解析。`)) {
+    throw new Error('react detail page missing schedule timezone controls');
+  }
+  if (!configText.includes('(GMT+8)')) {
+    throw new Error('react detail page schedule preview should render timezone at the end, for example 2026/5/3 0:00:00 (GMT+8)');
+  }
   if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh')) {
     throw new Error('react node list modal install command is not using GitHub raw install script');
+  }
+
+  if (detailAfterConfig.report_config?.schedule_timezone !== expectedBrowserTimeZone) {
+    throw new Error(`report config timezone was not persisted: ${detailAfterConfig.report_config?.schedule_timezone}`);
+  }
+  const configReporterToken = detailAfterConfig.report_config?.reporter_token;
+  if (!configReporterToken) {
+    throw new Error('reporter token missing after report config save');
+  }
+
+  const installConfigResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/install-config`, {
+    headers: { 'X-IPQ-Reporter-Token': configReporterToken }
+  });
+  if (installConfigResponse.status < 200 || installConfigResponse.status >= 300) {
+    throw new Error(`install config request failed: ${installConfigResponse.status} ${installConfigResponse.text}`);
+  }
+  const installConfig = JSON.parse(installConfigResponse.text);
+  if (installConfig.schedule_timezone !== expectedBrowserTimeZone || installConfig.run_immediately !== true) {
+    throw new Error('install config did not include the saved timezone and immediate-run setting');
+  }
+
+  const installScriptResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/install.sh?timezone=${encodeURIComponent(expectedBrowserTimeZone)}`, {
+    headers: { 'X-IPQ-Reporter-Token': configReporterToken }
+  });
+  if (installScriptResponse.status < 200 || installScriptResponse.status >= 300) {
+    throw new Error(`install script request failed: ${installScriptResponse.status} ${installScriptResponse.text}`);
+  }
+  if (!installScriptResponse.text.includes(`CRON_TZ=${expectedBrowserTimeZone}`) || !installScriptResponse.text.includes(`TZ=${expectedBrowserTimeZone}`)) {
+    throw new Error('install script did not include explicit cron timezone settings');
+  }
+
+  const invalidTimezoneURL = new URL(`${appBaseURL}/api/v1/nodes/${firstUUID}/report-config/preview`);
+  invalidTimezoneURL.searchParams.set('cron', '0 0 * * *');
+  invalidTimezoneURL.searchParams.set('timezone', 'Mars/Base');
+  const invalidTimezoneResponse = await jsonFetch(page, invalidTimezoneURL.toString());
+  if (invalidTimezoneResponse.status !== 400 || !invalidTimezoneResponse.text.includes('invalid timezone')) {
+    throw new Error(`invalid timezone preview did not return a clear 400 error: ${invalidTimezoneResponse.status} ${invalidTimezoneResponse.text}`);
   }
   await page.getByRole('button', { name: '关闭' }).click();
 
