@@ -833,13 +833,14 @@ async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendi
 }
 
 async function openReportConfigFromUI(appPage, uuid, nodeName, scenarioDir) {
-  log(`open IPQ report config from UI: ${nodeName}`);
+  log(`open IPQ node settings from UI: ${nodeName}`);
   await appPage.goto(`${appBaseURL}/#/nodes`);
   await appPage.getByPlaceholder("搜索节点名称").fill(nodeName);
   await appPage.getByPlaceholder("搜索节点名称").press("Enter");
   const row = appPage.locator(`[data-node-row="true"][data-node-uuid="${uuid}"]`);
   await row.waitFor({ state: "visible", timeout: 15000 });
   await row.getByRole("button", { name: "上报设置" }).click();
+  await appPage.waitForURL(`**/#/nodes/${uuid}/settings**`, { timeout: 10000 });
   await appPage.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "04-ipq-report-config-empty.png"), fullPage: true });
 }
@@ -1007,7 +1008,7 @@ async function seedTargetReports(appPage, uuid, targets) {
 }
 
 async function verifyConfiguredNode(appPage, uuid, targets, scenarioDir) {
-  log(`verify detail/history/compare pages for ${uuid}`);
+  log(`verify detail/history/snapshot pages for ${uuid}`);
   const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${uuid}`, undefined, "load configured node");
   const firstTarget = detail.targets?.find((target) => target.ip === targets[0]);
   const secondTarget = detail.targets?.find((target) => target.ip === targets[1]);
@@ -1026,7 +1027,7 @@ async function verifyConfiguredNode(appPage, uuid, targets, scenarioDir) {
   await appPage.locator('[data-history-change-row="true"]').first().waitFor({ state: "visible", timeout: 15000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "07-ipq-history.png"), fullPage: true });
 
-  await appPage.goto(`${appBaseURL}/#/nodes/${uuid}/compare?target_id=${firstTarget.id}`);
+  await appPage.goto(`${appBaseURL}/#/nodes/${uuid}/snapshots?target_id=${firstTarget.id}`);
   await appPage.getByText("时间范围", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   await appPage.locator(".compare-timeline-panel").waitFor({ state: "visible", timeout: 15000 });
   await appPage.getByRole("button", { name: /收藏快照|取消收藏/ }).first().waitFor({

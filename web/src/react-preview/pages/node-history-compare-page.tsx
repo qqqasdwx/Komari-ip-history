@@ -273,7 +273,7 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
   if (error || !detail) {
     return (
       <NodePageError
-        title="快照对比"
+        title="快照"
         subtitle={error || "节点不存在"}
         backTo="/nodes"
         error={error || "节点不存在。"}
@@ -339,7 +339,7 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
   return (
     <section className="space-y-6">
       <PageHeader
-        title={`${detail.name} 快照对比`}
+        title={`${detail.name} 快照`}
         subtitle={detail.current_target ? `当前查看 ${detail.current_target.ip}` : "请选择一个目标 IP"}
         backTo={detailBackTo}
       />
@@ -349,7 +349,7 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
           <div className="flex items-center justify-between gap-3">
             <div className="space-y-1">
               <h2 className="text-base font-semibold text-slate-900">目标 IP</h2>
-              <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的独立快照对比。</p>
+              <p className="text-sm text-slate-500">切换标签可查看不同目标 IP 的快照变化。</p>
             </div>
             <Button
               className="h-9 rounded-full border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
@@ -390,7 +390,7 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
         ) : orderedHistory.length < 2 ? (
           <div className="section">
             <div className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-              当前目标 IP 至少需要两条历史记录，才能进行快照对比。
+              当前目标 IP 至少需要两条历史记录，才能查看快照变化。
             </div>
           </div>
         ) : (

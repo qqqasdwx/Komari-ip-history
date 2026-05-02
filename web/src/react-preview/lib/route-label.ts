@@ -3,8 +3,11 @@ export function routeLabel(pathname: string) {
     return "节点结果";
   }
   if (pathname.startsWith("/nodes/")) {
-    if (pathname.endsWith("/compare")) {
-      return "快照对比";
+    if (pathname.endsWith("/settings")) {
+      return "节点设置";
+    }
+    if (pathname.endsWith("/snapshots") || pathname.endsWith("/compare")) {
+      return "快照";
     }
     if (pathname.endsWith("/history")) {
       return "历史记录";

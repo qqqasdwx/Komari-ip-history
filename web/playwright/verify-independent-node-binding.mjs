@@ -70,23 +70,22 @@ async function createIndependentNodeFromUI(page, name) {
   await page.getByRole("button", { name: "新建节点" }).click();
   await page.getByLabel("节点名称").fill(name);
   await page.getByRole("button", { name: /^创建$/ }).click();
-  const modal = page.locator('[data-node-report-config="true"]');
-  await modal.waitFor({ state: "visible", timeout: 10000 });
+  await page.locator('[data-node-settings-page="true"]').waitFor({ state: "visible", timeout: 10000 });
+  const settings = page.locator('[data-node-report-config="true"]');
+  await settings.waitFor({ state: "visible", timeout: 10000 });
   const url = new URL(page.url());
-  const nodeUUID = url.hash.includes("?")
-    ? new URLSearchParams(url.hash.slice(url.hash.indexOf("?") + 1)).get("report_config")
-    : "";
+  const nodeUUID = url.hash.match(/#\/nodes\/([^/]+)\/settings/)?.[1] || "";
   if (!nodeUUID) {
-    throw new Error(`created node report_config UUID missing from URL: ${page.url()}`);
+    throw new Error(`created node settings UUID missing from URL: ${page.url()}`);
   }
-  return { nodeUUID, modal };
+  return { nodeUUID, settings };
 }
 
-async function addTargetAndVerifyInstallCommand(page, nodeUUID, modal) {
+async function addTargetAndVerifyInstallCommand(page, nodeUUID, settings) {
   await page.getByPlaceholder("例如 1.1.1.1 或 2606:4700:4700::1111").fill("198.51.100.251");
   await page.getByRole("button", { name: "添加 IP" }).click();
-  await modal.locator('[data-report-target-row="true"][data-target-ip="198.51.100.251"]').waitFor({ state: "visible", timeout: 10000 });
-  const text = await modal.innerText();
+  await settings.locator('[data-report-target-row="true"][data-target-ip="198.51.100.251"]').waitFor({ state: "visible", timeout: 10000 });
+  const text = await settings.innerText();
   if (!text.includes("接入命令") || !text.includes("198.51.100.251") || !text.includes("raw.githubusercontent.com")) {
     throw new Error(`independent node report config is incomplete: ${text.slice(0, 800)}`);
   }
@@ -107,21 +106,32 @@ async function createPendingKomariCandidate(page) {
   }
 }
 
-async function renameNodeFromDetail(page, nodeUUID) {
-  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}`, { waitUntil: "domcontentloaded" });
+async function renameNodeFromSettings(page, nodeUUID) {
+  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}/settings`, { waitUntil: "domcontentloaded" });
   await page.getByText("当前是独立节点", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
-  await page.getByRole("button", { name: "重命名" }).click();
   await page.getByLabel("节点名称").fill(renamedNodeName);
-  await page.getByRole("button", { name: "保存" }).click();
-  await page.getByRole("heading", { name: renamedNodeName }).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("button", { name: "保存名称" }).click();
+  await page.getByRole("heading", { name: `${renamedNodeName} 设置` }).waitFor({ state: "visible", timeout: 10000 });
   const detail = await apiOK(page, `${appBaseURL}/api/v1/nodes/${nodeUUID}`, undefined, "load renamed node detail");
   if (detail.name !== renamedNodeName) {
     throw new Error(`rename did not persist: ${JSON.stringify(detail)}`);
   }
 }
 
-async function bindPendingCandidateFromDetail(page, nodeUUID) {
-  await page.getByRole("button", { name: "绑定 Komari" }).click();
+async function assertDetailIsReadOnly(page, nodeUUID) {
+  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}`, { waitUntil: "domcontentloaded" });
+  await page.locator('[data-node-readonly-state="true"]').waitFor({ state: "visible", timeout: 10000 });
+  const forbidden = ["保存名称", "选择 Komari 节点", "解除绑定", "添加 IP", "接入命令"];
+  for (const label of forbidden) {
+    if ((await page.getByText(label, { exact: true }).count()) > 0) {
+      throw new Error(`detail page should be read-only but still shows ${label}`);
+    }
+  }
+}
+
+async function bindPendingCandidateFromSettings(page, nodeUUID) {
+  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}/settings`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "选择 Komari 节点" }).click();
   const candidates = page.locator('[data-komari-binding-candidates="true"]');
   await candidates.waitFor({ state: "visible", timeout: 10000 });
   const candidate = candidates.locator(`[data-komari-binding-candidate="true"][data-komari-binding-candidate-available="true"]`).filter({
@@ -139,9 +149,8 @@ async function bindPendingCandidateFromDetail(page, nodeUUID) {
 
 async function assertOccupiedCandidateConflict(page) {
   const { nodeUUID: secondNodeUUID } = await createIndependentNodeFromUI(page, secondNodeName);
-  await page.getByRole("button", { name: "关闭" }).click();
-  await page.goto(`${appBaseURL}/#/nodes/${secondNodeUUID}`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "绑定 Komari" }).click();
+  await page.goto(`${appBaseURL}/#/nodes/${secondNodeUUID}/settings`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "选择 Komari 节点" }).click();
   const occupied = page.locator('[data-komari-binding-candidate="true"]').filter({ hasText: pendingKomariName });
   await occupied.waitFor({ state: "visible", timeout: 10000 });
   const occupiedText = await occupied.innerText();
@@ -155,11 +164,10 @@ async function assertOccupiedCandidateConflict(page) {
   if (conflict.status !== 409) {
     throw new Error(`duplicate Komari binding should return 409, got ${conflict.status} ${conflict.text}`);
   }
-  await page.getByRole("button", { name: "关闭" }).click();
 }
 
 async function unbindAndVerifyNodeRemains(page, nodeUUID) {
-  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${appBaseURL}/#/nodes/${nodeUUID}/settings`, { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "解除绑定" }).click();
   await page.getByText("当前是独立节点", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   const detail = await apiOK(page, `${appBaseURL}/api/v1/nodes/${nodeUUID}`, undefined, "load unbound node detail");
@@ -178,12 +186,12 @@ page.setDefaultNavigationTimeout(25000);
 try {
   await loginIPQ(page);
   await cleanupStep5Nodes(page);
-  const { nodeUUID, modal } = await createIndependentNodeFromUI(page, nodeName);
-  await addTargetAndVerifyInstallCommand(page, nodeUUID, modal);
-  await page.getByRole("button", { name: "关闭" }).click();
+  const { nodeUUID, settings } = await createIndependentNodeFromUI(page, nodeName);
+  await addTargetAndVerifyInstallCommand(page, nodeUUID, settings);
   await createPendingKomariCandidate(page);
-  await renameNodeFromDetail(page, nodeUUID);
-  await bindPendingCandidateFromDetail(page, nodeUUID);
+  await renameNodeFromSettings(page, nodeUUID);
+  await assertDetailIsReadOnly(page, nodeUUID);
+  await bindPendingCandidateFromSettings(page, nodeUUID);
   await assertOccupiedCandidateConflict(page);
   await unbindAndVerifyNodeRemains(page, nodeUUID);
   writeFileSync(

@@ -389,7 +389,7 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
 
   const detailBackTo = `/nodes/${uuid}${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
   const compareTargetID = selectedTargetID ?? detail.current_target?.id ?? null;
-  const historyPathForCompare = `/nodes/${uuid}/compare${compareTargetID ? `?target_id=${compareTargetID}` : ""}`;
+  const historyPathForSnapshots = `/nodes/${uuid}/snapshots${compareTargetID ? `?target_id=${compareTargetID}` : ""}`;
   const currentHistoryPage = historyTotalPages > 0 ? Math.min(Math.max(historyPage, 1), historyTotalPages) : 1;
   const currentPageItems = changeEvents.map((item) => ({
     id: item.id,
@@ -415,7 +415,7 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
               asChild
               className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
             >
-              <Link to={historyPathForCompare}>快照对比</Link>
+              <Link to={historyPathForSnapshots}>快照</Link>
             </Button>
           ) : undefined
         }

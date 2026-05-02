@@ -400,8 +400,8 @@ try {
   await standalonePage.waitForLoadState("domcontentloaded");
   await waitForStandaloneReportConfig(standalonePage, "logged-in pending");
   const standaloneURL = standalonePage.url();
-  if (!standaloneURL.includes("report_config=") || !standaloneURL.includes("from_komari=1")) {
-    throw new Error(`logged-in pending scenario did not open report config URL: ${standaloneURL}`);
+  if (!standaloneURL.includes("#/nodes/") || !standaloneURL.includes("/settings") || !standaloneURL.includes("from_komari=1")) {
+    throw new Error(`logged-in pending scenario did not open node settings URL: ${standaloneURL}`);
   }
   await standalonePage.locator('[data-komari-return-hint="true"]').waitFor({ state: "visible", timeout: 10000 });
   await standalonePage.close();

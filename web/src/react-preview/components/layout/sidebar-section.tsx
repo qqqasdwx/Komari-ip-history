@@ -5,6 +5,7 @@ export type NavItem = {
   to: string;
   label: string;
   icon: ReactNode;
+  end?: boolean;
 };
 
 export function SidebarSection(props: { title: string; items: NavItem[]; onNavigate?: () => void }) {
@@ -15,6 +16,7 @@ export function SidebarSection(props: { title: string; items: NavItem[]; onNavig
         {props.items.map((item) => (
           <NavLink
             key={item.to}
+            end={item.end}
             to={item.to}
             className={({ isActive }) =>
               [

@@ -98,13 +98,14 @@ async function tryOpenDetailWithData(page) {
 async function assertReportConfigShowsAutoTarget(page) {
   const row = await openFixedNodeRow(page);
   await row.getByRole("button", { name: "上报设置" }).click();
-  const modal = page.locator('[data-node-report-config="true"]');
-  await modal.waitFor({ state: "visible", timeout: 10000 });
-  const text = await modal.innerText();
+  await page.waitForURL("**/#/nodes/**/settings**", { timeout: 10000 });
+  const panel = page.locator('[data-node-report-config="true"]');
+  await panel.waitFor({ state: "visible", timeout: 10000 });
+  const text = await panel.innerText();
   if (!text.includes("接入命令") || !text.includes("自动发现") || !text.includes("已启用")) {
     throw new Error(`fixed reporter config does not show command and enabled auto target: ${text.slice(0, 800)}`);
   }
-  const autoRow = modal.locator('[data-report-target-row="true"][data-target-source="auto"]').first();
+  const autoRow = panel.locator('[data-report-target-row="true"][data-target-source="auto"]').first();
   await autoRow.waitFor({ state: "visible", timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, "06-ipq-fixed-node-report-config.png"), fullPage: true });
 }
