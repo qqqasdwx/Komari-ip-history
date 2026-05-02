@@ -62,7 +62,7 @@ const rowLocator = page.locator('[data-node-row="true"]');
 const rowCount = await rowLocator.count();
 
 if (rowCount > 0) {
-  const preferredNodeNames = ['开发种子-多IP历史', '开发种子-单IP历史', '通信样式测试'];
+  const preferredNodeNames = ['开发种子-多IP历史', '开发种子-多快照对比', '真实上报-Debian页面接入'];
   let chosenRow = rowLocator.first();
   for (const name of preferredNodeNames) {
     const candidate = rowLocator.filter({ hasText: name }).first();
@@ -93,9 +93,14 @@ if (rowCount > 0) {
   await chosenRow.getByRole('button', { name: '上报设置' }).click();
   const reportConfigModal = page.locator('[data-node-report-config="true"]');
   await reportConfigModal.waitFor({ state: 'visible', timeout: 10000 });
-  if ((await page.getByText('接入命令', { exact: true }).count()) === 0) {
+  let modalDetail = JSON.parse((await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}?_=${Date.now()}`)).text);
+  if (!Array.isArray(modalDetail.targets) || modalDetail.targets.length === 0) {
     await page.getByPlaceholder('例如 1.1.1.1 或 2606:4700:4700::1111').fill('203.0.113.10');
     await page.getByRole('button', { name: '添加 IP' }).click();
+    await reportConfigModal
+      .locator('[data-report-target-row="true"][data-target-ip="203.0.113.10"]')
+      .waitFor({ state: 'visible', timeout: 10000 });
+    modalDetail = JSON.parse((await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}?_=${Date.now()}`)).text);
   }
 
   const reportConfigCount = await page.locator('[data-node-report-config="true"]').count();
@@ -123,8 +128,14 @@ if (rowCount > 0) {
   if (installCommandCount === 0) {
     throw new Error('react node list modal missing install command');
   }
-  if (!configText.includes('当前命令会顺序探查以下 IP') && !configText.includes('请先添加目标 IP，添加后才会生成接入命令。')) {
-    throw new Error('react detail page missing monitored IP hint');
+  if (!configText.includes('节点执行时会先请求上报计划') && !configText.includes('可以先安装脚本')) {
+    throw new Error('react detail page missing reporter plan hint');
+  }
+  if (!configText.includes('手动添加') && !configText.includes('自动发现')) {
+    throw new Error('react detail page missing target source labels');
+  }
+  if (!configText.includes('已启用') && !configText.includes('已停用')) {
+    throw new Error('react detail page missing target enabled state labels');
   }
   if (configText.includes('上报地址') || configText.includes('Reporter Token')) {
     throw new Error('react detail page still exposes report endpoint or token');
@@ -150,6 +161,55 @@ if (rowCount > 0) {
     throw new Error('reporter token missing after report config save');
   }
 
+  let toggleTarget = (detailAfterConfig.targets || []).find((target) => target.report_enabled) || (detailAfterConfig.targets || [])[0];
+  if (!toggleTarget) {
+    throw new Error('report config should have at least one target after setup');
+  }
+  const toggleTargetRow = reportConfigModal.locator(`[data-report-target-row="true"][data-target-id="${toggleTarget.id}"]`);
+  await toggleTargetRow.waitFor({ state: 'visible', timeout: 10000 });
+  const toggleTargetRowText = await toggleTargetRow.innerText();
+  if (!toggleTargetRowText.includes(toggleTarget.source === 'auto' ? '自动发现' : '手动添加')) {
+    throw new Error('target row did not render the expected source label');
+  }
+  if (!toggleTarget.report_enabled) {
+    await toggleTargetRow.getByRole('button', { name: '启用' }).click();
+    await toggleTargetRow.getByText('已启用', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+    toggleTarget = { ...toggleTarget, report_enabled: true };
+  }
+  await toggleTargetRow.getByRole('button', { name: '停用' }).click();
+  await toggleTargetRow.getByText('已停用', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const disabledDetail = JSON.parse((await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}?_=${Date.now()}`)).text);
+  const disabledTarget = disabledDetail.targets.find((target) => target.id === toggleTarget.id);
+  if (!disabledTarget || disabledTarget.report_enabled !== false) {
+    throw new Error('target disable action was not persisted');
+  }
+  const disabledPlanResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/plan`, {
+    method: 'POST',
+    headers: { 'X-IPQ-Reporter-Token': configReporterToken },
+    body: JSON.stringify({ candidate_ips: [toggleTarget.ip] })
+  });
+  if (disabledPlanResponse.status < 200 || disabledPlanResponse.status >= 300) {
+    throw new Error(`disabled target plan request failed: ${disabledPlanResponse.status} ${disabledPlanResponse.text}`);
+  }
+  const disabledPlan = JSON.parse(disabledPlanResponse.text);
+  if ((disabledPlan.target_ips || []).includes(toggleTarget.ip)) {
+    throw new Error('disabled target should not be returned by reporter plan');
+  }
+  await toggleTargetRow.getByRole('button', { name: '启用' }).click();
+  await toggleTargetRow.getByText('已启用', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  const enabledPlanResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/plan`, {
+    method: 'POST',
+    headers: { 'X-IPQ-Reporter-Token': configReporterToken },
+    body: JSON.stringify({ candidate_ips: [toggleTarget.ip] })
+  });
+  if (enabledPlanResponse.status < 200 || enabledPlanResponse.status >= 300) {
+    throw new Error(`enabled target plan request failed: ${enabledPlanResponse.status} ${enabledPlanResponse.text}`);
+  }
+  const enabledPlan = JSON.parse(enabledPlanResponse.text);
+  if (!(enabledPlan.target_ips || []).includes(toggleTarget.ip)) {
+    throw new Error('reenabled target should be returned by reporter plan');
+  }
+
   const installConfigResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/install-config`, {
     headers: { 'X-IPQ-Reporter-Token': configReporterToken }
   });
@@ -169,6 +229,9 @@ if (rowCount > 0) {
   }
   if (!installScriptResponse.text.includes(`CRON_TZ=${expectedBrowserTimeZone}`) || !installScriptResponse.text.includes(`TZ=${expectedBrowserTimeZone}`)) {
     throw new Error('install script did not include explicit cron timezone settings');
+  }
+  if (!installScriptResponse.text.includes('PLAN_ENDPOINT="${REPORT_ENDPOINT%/}/plan"') || !installScriptResponse.text.includes('request_report_plan >"$PLAN_TARGET_FILE"')) {
+    throw new Error('install script should request reporter plan before probing target IPs');
   }
 
   const invalidTimezoneURL = new URL(`${appBaseURL}/api/v1/nodes/${firstUUID}/report-config/preview`);

@@ -81,26 +81,37 @@ if [[ "$LEGACY_INLINE_MODE" -eq 0 && -z "$INSTALL_TOKEN" && ( -z "$NODE_UUID" ||
   exit 1
 fi
 
-if [[ ${#TARGET_IPS[@]} -eq 0 && "$LEGACY_INLINE_MODE" -eq 1 ]]; then
-  echo "At least one --target-ip is required." >&2
-  exit 1
-fi
-
 install_dependencies() {
   local need_curl=0
   local need_cron=0
   local need_jq=0
+  local need_bc=0
+  local need_netcat=0
+  local need_dnsutils=0
+  local need_iproute=0
 
   if ! command -v curl >/dev/null 2>&1; then
     need_curl=1
   fi
-  if ! command -v crontab >/dev/null 2>&1 && [ ! -d /etc/cron.d ]; then
+  if ! command -v crontab >/dev/null 2>&1 && ! command -v cron >/dev/null 2>&1 && ! command -v crond >/dev/null 2>&1; then
     need_cron=1
   fi
   if ! command -v jq >/dev/null 2>&1; then
     need_jq=1
   fi
-  if [ "$need_curl" -eq 0 ] && [ "$need_cron" -eq 0 ] && [ "$need_jq" -eq 0 ]; then
+  if ! command -v bc >/dev/null 2>&1; then
+    need_bc=1
+  fi
+  if ! command -v nc >/dev/null 2>&1; then
+    need_netcat=1
+  fi
+  if ! command -v dig >/dev/null 2>&1; then
+    need_dnsutils=1
+  fi
+  if ! command -v ip >/dev/null 2>&1; then
+    need_iproute=1
+  fi
+  if [ "$need_curl" -eq 0 ] && [ "$need_cron" -eq 0 ] && [ "$need_jq" -eq 0 ] && [ "$need_bc" -eq 0 ] && [ "$need_netcat" -eq 0 ] && [ "$need_dnsutils" -eq 0 ] && [ "$need_iproute" -eq 0 ]; then
     return
   fi
 
@@ -110,6 +121,10 @@ install_dependencies() {
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("cron")
     [ "$need_jq" -eq 1 ] && packages+=("jq")
+    [ "$need_bc" -eq 1 ] && packages+=("bc")
+    [ "$need_netcat" -eq 1 ] && packages+=("netcat-openbsd")
+    [ "$need_dnsutils" -eq 1 ] && packages+=("dnsutils")
+    [ "$need_iproute" -eq 1 ] && packages+=("iproute2")
     apt install -y "${packages[@]}"
     return
   fi
@@ -119,6 +134,10 @@ install_dependencies() {
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("cronie")
     [ "$need_jq" -eq 1 ] && packages+=("jq")
+    [ "$need_bc" -eq 1 ] && packages+=("bc")
+    [ "$need_netcat" -eq 1 ] && packages+=("nmap-ncat")
+    [ "$need_dnsutils" -eq 1 ] && packages+=("bind-utils")
+    [ "$need_iproute" -eq 1 ] && packages+=("iproute")
     yum install -y "${packages[@]}"
     return
   fi
@@ -128,11 +147,15 @@ install_dependencies() {
     [ "$need_curl" -eq 1 ] && packages+=("curl")
     [ "$need_cron" -eq 1 ] && packages+=("dcron")
     [ "$need_jq" -eq 1 ] && packages+=("jq")
+    [ "$need_bc" -eq 1 ] && packages+=("bc")
+    [ "$need_netcat" -eq 1 ] && packages+=("netcat-openbsd")
+    [ "$need_dnsutils" -eq 1 ] && packages+=("bind-tools")
+    [ "$need_iproute" -eq 1 ] && packages+=("iproute2")
     apk add --no-cache "${packages[@]}"
     return
   fi
 
-  echo "Missing required dependencies (curl/cron/jq), and no supported package manager was found." >&2
+  echo "Missing required dependencies (curl/cron/jq/bc/netcat/dnsutils/iproute), and no supported package manager was found." >&2
   exit 1
 }
 
@@ -168,13 +191,9 @@ if [[ "$LEGACY_INLINE_MODE" -eq 0 ]]; then
   else
     RUN_IMMEDIATELY="0"
   fi
-  mapfile -t TARGET_IPS < <(jq -er '.target_ips[]' "$CONFIG_FILE")
+  mapfile -t TARGET_IPS < <(jq -r '.target_ips[]?' "$CONFIG_FILE")
   if [[ -z "${REPORT_ENDPOINT:-}" ]]; then
     echo "Install config did not include report_endpoint." >&2
-    exit 1
-  fi
-  if [[ ${#TARGET_IPS[@]} -eq 0 ]]; then
-    echo "Install config did not include any target IPs." >&2
     exit 1
   fi
 fi
@@ -197,27 +216,49 @@ fi
 rm -f "$LEGACY_SERVICE_PATH" "$LEGACY_TIMER_PATH" "$LEGACY_SCRIPT_PATH" "$CRON_PATH"
 mkdir -p "$INSTALL_DIR"
 
-target_ip_literals=""
-for target_ip in "${TARGET_IPS[@]}"; do
-  if [[ -n "$target_ip_literals" ]]; then
-    target_ip_literals="${target_ip_literals} "
-  fi
-  target_ip_literals="${target_ip_literals}'${target_ip//\'/\'\"\'\"\'}'"
-done
-
 cat > "$SCRIPT_PATH" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
 REPORT_ENDPOINT='${REPORT_ENDPOINT//\'/\'\"\'\"\'}'
 REPORTER_TOKEN='${REPORTER_TOKEN//\'/\'\"\'\"\'}'
-TARGET_IPS=(${target_ip_literals})
+PLAN_ENDPOINT="\${REPORT_ENDPOINT%/}/plan"
 
 WORKDIR=\$(mktemp -d)
 cleanup() {
   rm -rf "\$WORKDIR"
 }
 trap cleanup EXIT
+
+collect_candidate_ips() {
+  if command -v ip >/dev/null 2>&1; then
+    ip -o -4 addr show scope global 2>/dev/null | awk '{split(\$4, a, "/"); print a[1]}'
+    ip -o -6 addr show scope global 2>/dev/null | awk '{split(\$4, a, "/"); if (a[1] !~ /^fe80:/) print a[1]}'
+  elif command -v hostname >/dev/null 2>&1; then
+    hostname -I 2>/dev/null | tr ' ' '\n'
+  fi | awk 'NF && !seen[\$0]++'
+}
+
+request_report_plan() {
+  local candidate_file="\$WORKDIR/candidate_ips.txt"
+  local plan_file="\$WORKDIR/plan.json"
+  collect_candidate_ips >"\$candidate_file" || true
+  jq -n --rawfile ips "\$candidate_file" '{candidate_ips: (\$ips | split("\n") | map(select(length > 0)))}' \
+    | curl -fsS -X POST \
+        -H 'Content-Type: application/json' \
+        -H "X-IPQ-Reporter-Token: \${REPORTER_TOKEN}" \
+        --data-binary @- \
+        "\$PLAN_ENDPOINT" >"\$plan_file"
+  jq -r '.target_ips[]?' "\$plan_file"
+}
+
+PLAN_TARGET_FILE="\$WORKDIR/target_ips.txt"
+request_report_plan >"\$PLAN_TARGET_FILE"
+mapfile -t TARGET_IPS <"\$PLAN_TARGET_FILE"
+if [ "\${#TARGET_IPS[@]}" -eq 0 ]; then
+  echo "No target IPs approved by IPQ for this run."
+  exit 0
+fi
 
 for TARGET_IP in "\${TARGET_IPS[@]}"; do
   SAFE_NAME=\$(printf '%s' "\$TARGET_IP" | tr ':/' '__')

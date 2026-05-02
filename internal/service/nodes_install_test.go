@@ -18,7 +18,14 @@ func TestBuildNodeInstallScriptReplacesExistingReporterConfiguration(t *testing.
 
 	expectedSnippets := []string{
 		"install_dependencies() {",
-		"apt install -y curl",
+		"apt install -y \"${packages[@]}\"",
+		"! command -v crontab >/dev/null 2>&1 && ! command -v cron >/dev/null 2>&1 && ! command -v crond >/dev/null 2>&1",
+		"[ \"$need_cron\" -eq 1 ] && packages+=(\"cron\")",
+		"[ \"$need_jq\" -eq 1 ] && packages+=(\"jq\")",
+		"[ \"$need_bc\" -eq 1 ] && packages+=(\"bc\")",
+		"[ \"$need_netcat\" -eq 1 ] && packages+=(\"netcat-openbsd\")",
+		"[ \"$need_dnsutils\" -eq 1 ] && packages+=(\"dnsutils\")",
+		"[ \"$need_iproute\" -eq 1 ] && packages+=(\"iproute2\")",
 		"if command -v systemctl >/dev/null 2>&1; then",
 		"systemctl stop 'ipq-reporter-node-uuid.timer' >/dev/null 2>&1 || true",
 		"systemctl disable 'ipq-reporter-node-uuid.service' >/dev/null 2>&1 || true",
@@ -31,7 +38,12 @@ func TestBuildNodeInstallScriptReplacesExistingReporterConfiguration(t *testing.
 		"chmod 0644 '/etc/cron.d/ipq-reporter-node-uuid'",
 		"Running the reporter immediately once after installation.",
 		"Schedule timezone: Asia/Shanghai",
-		"TARGET_IPS=('1.1.1.1' '2606:4700:4700::1111')",
+		"PLAN_ENDPOINT=\"${REPORT_ENDPOINT%/}/plan\"",
+		"collect_candidate_ips() {",
+		"request_report_plan() {",
+		"request_report_plan >\"$PLAN_TARGET_FILE\"",
+		"mapfile -t TARGET_IPS <\"$PLAN_TARGET_FILE\"",
+		"No target IPs approved by IPQ for this run.",
 		"REPORTER_TOKEN='secret-token'",
 	}
 

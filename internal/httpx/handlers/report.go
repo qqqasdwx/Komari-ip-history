@@ -30,7 +30,7 @@ func (h ReportHandler) Report(c *gin.Context) {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "result is required", "invalid target ip", "target ip not configured":
+		case "result is required", "invalid target ip", "target ip not configured", "target ip disabled":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -43,6 +43,35 @@ func (h ReportHandler) Report(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "reported"})
+}
+
+func (h ReportHandler) Plan(c *gin.Context) {
+	var req service.ReporterPlanInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+
+	token := extractReporterToken(c)
+	plan, err := service.GetNodeReporterPlan(h.DB, c.Param("uuid"), token, req)
+	if err != nil {
+		switch err.Error() {
+		case "missing reporter token", "invalid reporter token":
+			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
+		case "invalid ip":
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		default:
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to build reporter plan"})
+		}
+		return
+	}
+
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, plan)
 }
 
 func (h ReportHandler) InstallScript(c *gin.Context) {

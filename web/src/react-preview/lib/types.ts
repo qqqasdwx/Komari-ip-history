@@ -41,6 +41,9 @@ export type NodeListItem = {
 export type NodeTargetListItem = {
   id: number;
   ip: string;
+  source: string;
+  report_enabled: boolean;
+  last_discovered_at?: string | null;
   has_data: boolean;
   updated_at?: string | null;
   sort_order: number;
@@ -49,6 +52,9 @@ export type NodeTargetListItem = {
 export type NodeTargetDetail = {
   id: number;
   ip: string;
+  source: string;
+  report_enabled: boolean;
+  last_discovered_at?: string | null;
   has_data: boolean;
   updated_at?: string | null;
   current_result: Record<string, unknown>;
