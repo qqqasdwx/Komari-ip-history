@@ -8,10 +8,6 @@ export function buildConnectPath(uuid: string, name: string, options?: { returnT
   return `/connect?${params.toString()}`;
 }
 
-export function buildReportConfigListPath(uuid: string, options?: { fromKomari?: boolean; nodeName?: string }) {
-  return buildNodeSettingsPath(uuid, options);
-}
-
 export function buildNodeSettingsPath(uuid: string, options?: { fromKomari?: boolean; nodeName?: string }) {
   const params = new URLSearchParams();
   if (options?.fromKomari) {

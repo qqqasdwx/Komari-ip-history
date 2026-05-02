@@ -4,7 +4,7 @@ import {
   useParams,
   useSearchParams
 } from "react-router-dom";
-import { buildReportConfigListPath } from "../lib/embed-navigation";
+import { buildNodeSettingsPath } from "../lib/embed-navigation";
 import { formatDateTime } from "../lib/format";
 import { CurrentReportView } from "../lib/report";
 import { usePublicNodePageData } from "../hooks/node-data";
@@ -36,11 +36,11 @@ export function PublicNodeDetailPage() {
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
-  function goToReportConfig() {
+  function goToNodeSettings() {
     if (isEmbed) {
       return;
     }
-    const path = buildReportConfigListPath(uuid);
+    const path = buildNodeSettingsPath(uuid);
     navigate(path);
   }
 
@@ -84,7 +84,7 @@ export function PublicNodeDetailPage() {
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>管理员还没有配置可查看的目标 IP。</span>
               {!isEmbed ? (
-                <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
+                <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToNodeSettings} type="button">
                   去接入
                 </Button>
               ) : null}

@@ -165,7 +165,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
     }), { replace: true });
   }, [navigate, searchParams]);
 
-  function openReportConfig(uuid: string) {
+  function openNodeSettings(uuid: string) {
     navigate(buildNodeSettingsPath(uuid));
   }
 
@@ -349,7 +349,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                       data-node-report-settings="true"
                       onClick={(event) => {
                         event.stopPropagation();
-                        openReportConfig(routeID);
+                        openNodeSettings(routeID);
                       }}
                       type="button"
                     >

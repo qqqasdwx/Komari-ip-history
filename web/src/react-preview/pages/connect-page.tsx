@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../components/layout/page-header";
 import { NodePageError } from "../components/node/node-page-error";
 import { apiRequest, UnauthorizedError } from "../lib/api";
-import { buildReportConfigListPath } from "../lib/embed-navigation";
+import { buildNodeSettingsPath } from "../lib/embed-navigation";
 
 export function ConnectPage(props: { onUnauthorized: () => void }) {
   const navigate = useNavigate();
@@ -37,7 +37,7 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
         }
 
         if (returnTo) {
-          navigate(buildReportConfigListPath(uuid, { fromKomari: true, nodeName: name }), { replace: true });
+          navigate(buildNodeSettingsPath(uuid, { fromKomari: true, nodeName: name }), { replace: true });
           return;
         }
 
