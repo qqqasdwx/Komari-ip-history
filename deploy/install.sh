@@ -6,6 +6,7 @@ SERVER_BASE_URL=""
 INSTALL_TOKEN=""
 REPORTER_TOKEN=""
 SCHEDULE_CRON="0 0 * * *"
+SCHEDULE_TIMEZONE="UTC"
 RUN_IMMEDIATELY="1"
 TARGET_IPS=()
 
@@ -37,6 +38,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --cron)
       SCHEDULE_CRON="${2:-}"
+      shift 2
+      ;;
+    --timezone|--schedule-timezone)
+      SCHEDULE_TIMEZONE="${2:-}"
       shift 2
       ;;
     --run-immediately)
@@ -157,6 +162,7 @@ if [[ "$LEGACY_INLINE_MODE" -eq 0 ]]; then
   REPORT_ENDPOINT="$(jq -er '.report_endpoint' "$CONFIG_FILE")"
   REPORTER_TOKEN="$(jq -er '.reporter_token' "$CONFIG_FILE")"
   SCHEDULE_CRON="$(jq -er '.schedule_cron' "$CONFIG_FILE")"
+  SCHEDULE_TIMEZONE="$(jq -er '.schedule_timezone // "UTC"' "$CONFIG_FILE")"
   if jq -e '.run_immediately == true' "$CONFIG_FILE" >/dev/null 2>&1; then
     RUN_IMMEDIATELY="1"
   else
@@ -247,6 +253,8 @@ chmod +x "$SCRIPT_PATH"
 cat > "$CRON_PATH" <<EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CRON_TZ=${SCHEDULE_TIMEZONE}
+TZ=${SCHEDULE_TIMEZONE}
 ${SCHEDULE_CRON} root ${SCRIPT_PATH}
 EOF
 
@@ -271,6 +279,7 @@ fi
 
 echo "Installed ${UNIT_NAME} with ${#TARGET_IPS[@]} target IP(s)."
 echo "Schedule: ${SCHEDULE_CRON}"
+echo "Schedule timezone: ${SCHEDULE_TIMEZONE}"
 if [[ "$RUN_IMMEDIATELY" == "1" || "$RUN_IMMEDIATELY" == "true" ]]; then
   echo "Immediate execution: enabled"
 else

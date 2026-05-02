@@ -25,20 +25,21 @@ type Session struct {
 }
 
 type Node struct {
-	ID                     uint       `gorm:"primaryKey" json:"id"`
-	NodeUUID               string     `gorm:"size:48;not null;default:''" json:"node_uuid"`
-	KomariNodeUUID         string     `gorm:"size:64;uniqueIndex;not null" json:"komari_node_uuid"`
-	Name                   string     `gorm:"size:255;not null" json:"name"`
-	HasData                bool       `gorm:"not null;default:false" json:"has_data"`
-	CurrentSummary         string     `gorm:"size:512" json:"current_summary"`
-	CurrentResultJSON      string     `gorm:"type:longtext" json:"-"`
-	CurrentResultUpdatedAt *time.Time `json:"current_result_updated_at"`
-	ReporterToken          string     `gorm:"size:128" json:"-"`
-	InstallToken           string     `gorm:"size:48;index;not null;default:''" json:"-"`
-	ReporterScheduleCron   string     `gorm:"size:64;not null;default:'0 0 * * *'" json:"-"`
-	ReporterRunImmediately bool       `gorm:"not null;default:true" json:"-"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
+	ID                       uint       `gorm:"primaryKey" json:"id"`
+	NodeUUID                 string     `gorm:"size:48;not null;default:''" json:"node_uuid"`
+	KomariNodeUUID           string     `gorm:"size:64;uniqueIndex;not null" json:"komari_node_uuid"`
+	Name                     string     `gorm:"size:255;not null" json:"name"`
+	HasData                  bool       `gorm:"not null;default:false" json:"has_data"`
+	CurrentSummary           string     `gorm:"size:512" json:"current_summary"`
+	CurrentResultJSON        string     `gorm:"type:longtext" json:"-"`
+	CurrentResultUpdatedAt   *time.Time `json:"current_result_updated_at"`
+	ReporterToken            string     `gorm:"size:128" json:"-"`
+	InstallToken             string     `gorm:"size:48;index;not null;default:''" json:"-"`
+	ReporterScheduleCron     string     `gorm:"size:64;not null;default:'0 0 * * *'" json:"-"`
+	ReporterScheduleTimezone string     `gorm:"size:64;not null;default:''" json:"-"`
+	ReporterRunImmediately   bool       `gorm:"not null;default:true" json:"-"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
 }
 
 func (n *Node) BeforeCreate(_ *gorm.DB) error {

@@ -89,7 +89,7 @@ func ensureDefaultAdmin(db *gorm.DB, cfg config.Config) error {
 }
 
 func ensureSchemaColumns(db *gorm.DB) error {
-	nodeColumns := []string{"NodeUUID", "ReporterScheduleCron", "ReporterRunImmediately", "InstallToken"}
+	nodeColumns := []string{"NodeUUID", "ReporterScheduleCron", "ReporterScheduleTimezone", "ReporterRunImmediately", "InstallToken"}
 	for _, column := range nodeColumns {
 		if db.Migrator().HasColumn(&models.Node{}, column) {
 			continue

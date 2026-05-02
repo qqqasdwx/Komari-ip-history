@@ -15,7 +15,7 @@ import {
 } from "react-router-dom";
 import { apiRequest, RequestError, UnauthorizedError } from "../lib/api";
 import { copyText } from "../lib/clipboard";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime, formatDateTimeInTimeZone } from "../lib/format";
 import { useNodePageData } from "../hooks/node-data";
 import type {
   MeResponse,
@@ -34,6 +34,39 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 
 const githubRawInstallScriptURL = "https://raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh";
+const fallbackTimeZones = [
+  "UTC",
+  "Asia/Shanghai",
+  "Asia/Hong_Kong",
+  "Asia/Taipei",
+  "Asia/Tokyo",
+  "Asia/Singapore",
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles"
+];
+
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function supportedTimeZones(current: string) {
+  const intlWithSupportedValues = Intl as typeof Intl & {
+    supportedValuesOf?: (key: "timeZone") => string[];
+  };
+  const supported =
+    typeof intlWithSupportedValues.supportedValuesOf === "function"
+      ? intlWithSupportedValues.supportedValuesOf("timeZone")
+      : fallbackTimeZones;
+  return Array.from(new Set([current, ...fallbackTimeZones, ...supported])).filter(Boolean).sort();
+}
 
 function resolvePublicBaseURL(me: MeResponse) {
   const publicBaseURL = (me.effective_public_base_url ?? me.public_base_url ?? "").replace(/\/$/, "");
@@ -70,18 +103,25 @@ function ReportConfigSection(props: {
   onReorderTargets: (sourceID: number, destinationID: number) => void;
 }) {
   const publicBaseURL = resolvePublicBaseURL(props.me);
+  const storedScheduleTimezone = props.detail.report_config.schedule_timezone.trim();
+  const defaultScheduleTimezone = storedScheduleTimezone || browserTimeZone();
+  const defaultNextRuns = storedScheduleTimezone ? props.detail.report_config.next_runs : [];
+  const timeZoneOptions = supportedTimeZones(defaultScheduleTimezone);
   const [scheduleCron, setScheduleCron] = useState(props.detail.report_config.schedule_cron);
+  const [scheduleTimezone, setScheduleTimezone] = useState(defaultScheduleTimezone);
   const [runImmediately, setRunImmediately] = useState(props.detail.report_config.run_immediately);
   const [preview, setPreview] = useState<NodeReportConfigPreview>({
     schedule_cron: props.detail.report_config.schedule_cron,
+    schedule_timezone: defaultScheduleTimezone,
     run_immediately: props.detail.report_config.run_immediately,
-    next_runs: props.detail.report_config.next_runs
+    next_runs: defaultNextRuns
   });
   const [previewError, setPreviewError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [persistedConfig, setPersistedConfig] = useState({
     scheduleCron: props.detail.report_config.schedule_cron,
+    scheduleTimezone: props.detail.report_config.schedule_timezone,
     runImmediately: props.detail.report_config.run_immediately
   });
   const installCommand = buildInstallCommand(
@@ -94,15 +134,20 @@ function ReportConfigSection(props: {
     if (!props.open) {
       return;
     }
+    const nextStoredScheduleTimezone = props.detail.report_config.schedule_timezone.trim();
+    const nextScheduleTimezone = nextStoredScheduleTimezone || browserTimeZone();
     setScheduleCron(props.detail.report_config.schedule_cron);
+    setScheduleTimezone(nextScheduleTimezone);
     setRunImmediately(props.detail.report_config.run_immediately);
     setPreview({
       schedule_cron: props.detail.report_config.schedule_cron,
+      schedule_timezone: nextScheduleTimezone,
       run_immediately: props.detail.report_config.run_immediately,
-      next_runs: props.detail.report_config.next_runs
+      next_runs: nextStoredScheduleTimezone ? props.detail.report_config.next_runs : []
     });
     setPersistedConfig({
       scheduleCron: props.detail.report_config.schedule_cron,
+      scheduleTimezone: props.detail.report_config.schedule_timezone,
       runImmediately: props.detail.report_config.run_immediately
     });
     setPreviewError("");
@@ -112,7 +157,8 @@ function ReportConfigSection(props: {
     props.open,
     props.detail.report_config.next_runs,
     props.detail.report_config.run_immediately,
-    props.detail.report_config.schedule_cron
+    props.detail.report_config.schedule_cron,
+    props.detail.report_config.schedule_timezone
   ]);
 
   useEffect(() => {
@@ -124,6 +170,7 @@ function ReportConfigSection(props: {
       try {
         const search = new URLSearchParams();
         search.set("cron", scheduleCron);
+        search.set("timezone", scheduleTimezone);
         search.set("run_immediately", runImmediately ? "1" : "0");
         const data = await apiRequest<NodeReportConfigPreview>(`/nodes/${routeUUID}/report-config/preview?${search.toString()}`, {
           signal: controller.signal
@@ -145,15 +192,17 @@ function ReportConfigSection(props: {
       controller.abort();
       window.clearTimeout(timeoutID);
     };
-  }, [props.open, routeUUID, runImmediately, scheduleCron]);
+  }, [props.open, routeUUID, runImmediately, scheduleCron, scheduleTimezone]);
 
   useEffect(() => {
     if (!props.open || previewError) {
       return undefined;
     }
     const normalizedCron = preview.schedule_cron.trim();
+    const normalizedTimezone = preview.schedule_timezone.trim();
     if (
       normalizedCron === persistedConfig.scheduleCron &&
+      normalizedTimezone === persistedConfig.scheduleTimezone &&
       runImmediately === persistedConfig.runImmediately
     ) {
       return undefined;
@@ -168,6 +217,7 @@ function ReportConfigSection(props: {
           method: "PUT",
           body: JSON.stringify({
             schedule_cron: normalizedCron,
+            schedule_timezone: normalizedTimezone,
             run_immediately: runImmediately
           })
         });
@@ -176,12 +226,15 @@ function ReportConfigSection(props: {
         }
         setPersistedConfig({
           scheduleCron: config.schedule_cron,
+          scheduleTimezone: config.schedule_timezone,
           runImmediately: config.run_immediately
         });
         setScheduleCron(config.schedule_cron);
+        setScheduleTimezone(config.schedule_timezone);
         setRunImmediately(config.run_immediately);
         setPreview({
           schedule_cron: config.schedule_cron,
+          schedule_timezone: config.schedule_timezone,
           run_immediately: config.run_immediately,
           next_runs: config.next_runs
         });
@@ -207,7 +260,9 @@ function ReportConfigSection(props: {
   }, [
     persistedConfig.runImmediately,
     persistedConfig.scheduleCron,
+    persistedConfig.scheduleTimezone,
     preview.schedule_cron,
+    preview.schedule_timezone,
     previewError,
     props.onSaved,
     props.open,
@@ -322,6 +377,24 @@ function ReportConfigSection(props: {
             />
             <p className="text-xs text-slate-500">默认每天 0 点执行，使用标准 5 段 cron 表达式。</p>
           </div>
+          <div className="space-y-1">
+            <Label className="text-slate-900" htmlFor="report-config-timezone">
+              解析时区
+            </Label>
+            <select
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+              id="report-config-timezone"
+              onChange={(event) => setScheduleTimezone(event.target.value)}
+              value={scheduleTimezone}
+            >
+              {timeZoneOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500">新节点默认使用当前浏览器时区。</p>
+          </div>
           <label className="space-y-1 text-sm text-slate-700">
             <span className="font-medium text-slate-900">安装后立即执行一次</span>
             <span className="flex h-11 items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -339,16 +412,22 @@ function ReportConfigSection(props: {
               {previewError ? "请先修正 Cron" : saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已自动保存" : "自动保存"}
             </span>
           </div>
+          <p className="text-xs text-slate-500">当前 Cron 按 {preview.schedule_timezone || scheduleTimezone} 解析。</p>
           <div className="report-config-next-runs">
             {preview.next_runs.map((value) => (
               <div key={value} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                {formatDateTime(value)}
+                {formatDateTimeInTimeZone(value, preview.schedule_timezone || scheduleTimezone)}
               </div>
             ))}
           </div>
         </div>
         {props.detail.report_config.target_ips.length > 0 ? (
           <>
+            <div className="grid gap-2 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 sm:grid-cols-3">
+              <span>计划：{preview.schedule_cron}</span>
+              <span>时区：{preview.schedule_timezone || scheduleTimezone}</span>
+              <span>立即执行：{runImmediately ? "启用" : "关闭"}</span>
+            </div>
             <div className="summary-section">
               <div className="summary-head">
                 <strong>接入命令</strong>
@@ -411,7 +490,11 @@ function NodeReportConfigDialog(props: {
           ? {
               ...current,
               targets: [...current.targets, created].sort((a, b) => a.sort_order - b.sort_order),
-              selected_target_id: created.id
+              selected_target_id: created.id,
+              report_config: {
+                ...current.report_config,
+                target_ips: [...current.targets, created].sort((a, b) => a.sort_order - b.sort_order).map((item) => item.ip)
+              }
             }
           : current
       );

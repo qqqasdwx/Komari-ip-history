@@ -69,12 +69,12 @@ func (h ReportHandler) InstallScript(c *gin.Context) {
 	}
 
 	reportEndpointURL := strings.TrimRight(publicBaseURL, "/") + h.Cfg.APIBase() + "/report/nodes/" + c.Param("uuid")
-	script, err := service.GetNodeInstallScript(h.DB, c.Param("uuid"), token, reportEndpointURL, c.Query("cron"), runImmediately)
+	script, err := service.GetNodeInstallScript(h.DB, c.Param("uuid"), token, reportEndpointURL, c.Query("cron"), c.Query("timezone"), runImmediately)
 	if err != nil {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "no target ip configured", "invalid cron expression":
+		case "no target ip configured", "invalid cron expression", "invalid timezone":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -114,7 +114,7 @@ func (h ReportHandler) InstallConfig(c *gin.Context) {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "no target ip configured":
+		case "no target ip configured", "invalid cron expression", "invalid timezone":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -151,7 +151,7 @@ func (h ReportHandler) InstallConfigByToken(c *gin.Context) {
 		switch err.Error() {
 		case "missing install token", "invalid install token":
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
-		case "no target ip configured":
+		case "no target ip configured", "invalid cron expression", "invalid timezone":
 			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		default:
 			if errors.Is(err, gorm.ErrRecordNotFound) {

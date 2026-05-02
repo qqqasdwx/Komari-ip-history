@@ -14,7 +14,7 @@ func TestBuildNodeInstallScriptReplacesExistingReporterConfiguration(t *testing.
 		ReporterToken:  "secret-token",
 	}
 
-	script := buildNodeInstallScript(node, []string{"1.1.1.1", "2606:4700:4700::1111"}, "https://ipq.example.com/api/v1/report/nodes/node-uuid", "0 0 * * *", true)
+	script := buildNodeInstallScript(node, []string{"1.1.1.1", "2606:4700:4700::1111"}, "https://ipq.example.com/api/v1/report/nodes/node-uuid", "0 0 * * *", "Asia/Shanghai", true)
 
 	expectedSnippets := []string{
 		"install_dependencies() {",
@@ -25,9 +25,12 @@ func TestBuildNodeInstallScriptReplacesExistingReporterConfiguration(t *testing.
 		"rm -f '/etc/systemd/system/ipq-reporter-node-uuid.service' '/etc/systemd/system/ipq-reporter-node-uuid.timer' '/etc/cron.d/ipq-reporter-node-uuid' '/usr/local/bin/ipq-reporter-node-uuid.sh'",
 		"mkdir -p '/opt/ipq-reporter-node-uuid'",
 		"cat > '/etc/cron.d/ipq-reporter-node-uuid' <<'IPQ_REPORTER_CRON'",
+		"CRON_TZ=Asia/Shanghai",
+		"TZ=Asia/Shanghai",
 		"0 0 * * * root /opt/ipq-reporter-node-uuid/run.sh",
 		"chmod 0644 '/etc/cron.d/ipq-reporter-node-uuid'",
 		"Running the reporter immediately once after installation.",
+		"Schedule timezone: Asia/Shanghai",
 		"TARGET_IPS=('1.1.1.1' '2606:4700:4700::1111')",
 		"REPORTER_TOKEN='secret-token'",
 	}
