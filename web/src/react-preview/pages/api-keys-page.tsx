@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useState } from "react";
-import { Copy, KeyRound, PauseCircle, PlayCircle, Trash2 } from "lucide-react";
+import { BookOpen, Copy, KeyRound, PauseCircle, PlayCircle, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { apiRequest, UnauthorizedError } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import { formatDateTime } from "../lib/format";
@@ -148,7 +149,21 @@ export function APIKeysPage(props: { onUnauthorized: () => void }) {
 
   return (
     <section className="space-y-6">
-      <PageHeader title="开放 API" subtitle="管理外部系统读取节点结果所需的访问密钥。" />
+      <PageHeader
+        title="开放 API"
+        subtitle="管理外部系统读取节点结果所需的访问密钥。"
+        actions={
+          <Button
+            asChild
+            className="rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 hover:bg-slate-50"
+          >
+            <Link to="/settings/api-keys/docs">
+              <BookOpen className="size-4" />
+              <span>查看接口文档</span>
+            </Link>
+          </Button>
+        }
+      />
 
       {error ? <Card className="border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</Card> : null}
 
