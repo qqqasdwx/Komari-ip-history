@@ -4,6 +4,7 @@ import {
   Clock3,
   History,
   Info,
+  KeyRound,
   LogOut,
   Menu,
   Plug,
@@ -24,6 +25,7 @@ import {
 import { routeLabel } from "../../lib/route-label";
 import type { MeResponse } from "../../lib/types";
 import { AdminPage } from "../../pages/admin-page";
+import { APIKeysPage } from "../../pages/api-keys-page";
 import { ConnectPage } from "../../pages/connect-page";
 import { HistoryRetentionPage } from "../../pages/history-retention-page";
 import { IntegrationPage } from "../../pages/integration-page";
@@ -41,6 +43,7 @@ const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <S
 const settingsNavItems: NavItem[] = [
   { to: "/settings/integration", label: "接入配置", icon: <Plug /> },
   { to: "/settings/history-retention", label: "历史保留", icon: <Clock3 /> },
+  { to: "/settings/api-keys", label: "开放 API", icon: <KeyRound /> },
   { to: "/settings/user", label: "用户", icon: <UserCog /> }
 ];
 
@@ -114,6 +117,7 @@ export function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>;
       <Route path="/nodes/:uuid/changes" element={<Navigate to="../history" relative="path" replace />} />
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/history-retention" element={<HistoryRetentionPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/api-keys" element={<APIKeysPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />
       <Route path="/settings/admin" element={<Navigate to="/settings/user" replace />} />
       <Route

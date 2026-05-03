@@ -40,7 +40,9 @@ func Run() error {
 	nodeHandler := handlers.NodeHandler{DB: db, Cfg: cfg}
 	embedHandler := handlers.EmbedHandler{DB: db, Cfg: cfg}
 	publicHandler := handlers.PublicHandler{DB: db, Cfg: cfg}
+	publicAPIHandler := handlers.PublicAPIHandler{DB: db, Cfg: cfg}
 	reportHandler := handlers.ReportHandler{DB: db, Cfg: cfg}
+	apiKeyLimiter := middleware.NewAPIKeyRateLimiter(cfg.APIRateLimitPerMinute, time.Minute)
 
 	api := router.Group(cfg.APIBase())
 	{
@@ -71,8 +73,24 @@ func Run() error {
 			admin.PUT("/integration", adminHandler.PutIntegrationSettings)
 			admin.GET("/history-retention", adminHandler.GetHistoryRetentionSettings)
 			admin.PUT("/history-retention", adminHandler.PutHistoryRetentionSettings)
+			admin.GET("/api-keys", adminHandler.ListAPIKeys)
+			admin.POST("/api-keys", adminHandler.CreateAPIKey)
+			admin.PATCH("/api-keys/:id", adminHandler.UpdateAPIKey)
+			admin.DELETE("/api-keys/:id", adminHandler.DeleteAPIKey)
+			admin.GET("/api-access-logs", adminHandler.ListAPIAccessLogs)
 			admin.PUT("/profile", adminHandler.UpdateProfile)
 			admin.GET("/header-preview", adminHandler.HeaderPreview)
+		}
+
+		publicAPI := api.Group("/public-api")
+		publicAPI.Use(middleware.RequireAPIKey(db, apiKeyLimiter))
+		{
+			publicAPI.GET("/nodes", publicAPIHandler.ListNodes)
+			publicAPI.GET("/nodes/:uuid", publicAPIHandler.NodeDetail)
+			publicAPI.GET("/nodes/:uuid/targets", publicAPIHandler.NodeTargets)
+			publicAPI.GET("/nodes/:uuid/targets/:targetID/current", publicAPIHandler.TargetCurrent)
+			publicAPI.GET("/nodes/:uuid/history", publicAPIHandler.NodeHistory)
+			publicAPI.GET("/nodes/:uuid/history/events", publicAPIHandler.NodeHistoryEvents)
 		}
 
 		nodes := api.Group("/nodes")

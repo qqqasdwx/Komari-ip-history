@@ -3,37 +3,40 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	AppName           string
-	AppEnv            string
-	ListenAddr        string
-	BasePath          string
-	DatabasePath      string
-	SessionCookieName string
-	SessionTTL        time.Duration
-	DefaultAdminUser  string
-	DefaultAdminPass  string
-	PublicBaseURL     string
-	CookieSecure      bool
+	AppName               string
+	AppEnv                string
+	ListenAddr            string
+	BasePath              string
+	DatabasePath          string
+	SessionCookieName     string
+	SessionTTL            time.Duration
+	DefaultAdminUser      string
+	DefaultAdminPass      string
+	PublicBaseURL         string
+	CookieSecure          bool
+	APIRateLimitPerMinute int
 }
 
 func Load() Config {
 	return Config{
-		AppName:           env("IPQ_APP_NAME", "Komari IP Quality"),
-		AppEnv:            env("IPQ_APP_ENV", "production"),
-		ListenAddr:        env("IPQ_LISTEN", ":8090"),
-		BasePath:          normalizeBasePath(env("IPQ_BASE_PATH", "")),
-		DatabasePath:      filepath.Clean(env("IPQ_DB_PATH", "./data/ipq.db")),
-		SessionCookieName: env("IPQ_SESSION_COOKIE", "ipq_session"),
-		SessionTTL:        30 * 24 * time.Hour,
-		DefaultAdminUser:  env("IPQ_DEFAULT_ADMIN_USERNAME", "admin"),
-		DefaultAdminPass:  env("IPQ_DEFAULT_ADMIN_PASSWORD", "admin"),
-		PublicBaseURL:     strings.TrimRight(env("IPQ_PUBLIC_BASE_URL", ""), "/"),
-		CookieSecure:      strings.EqualFold(env("IPQ_COOKIE_SECURE", "false"), "true"),
+		AppName:               env("IPQ_APP_NAME", "Komari IP Quality"),
+		AppEnv:                env("IPQ_APP_ENV", "production"),
+		ListenAddr:            env("IPQ_LISTEN", ":8090"),
+		BasePath:              normalizeBasePath(env("IPQ_BASE_PATH", "")),
+		DatabasePath:          filepath.Clean(env("IPQ_DB_PATH", "./data/ipq.db")),
+		SessionCookieName:     env("IPQ_SESSION_COOKIE", "ipq_session"),
+		SessionTTL:            30 * 24 * time.Hour,
+		DefaultAdminUser:      env("IPQ_DEFAULT_ADMIN_USERNAME", "admin"),
+		DefaultAdminPass:      env("IPQ_DEFAULT_ADMIN_PASSWORD", "admin"),
+		PublicBaseURL:         strings.TrimRight(env("IPQ_PUBLIC_BASE_URL", ""), "/"),
+		CookieSecure:          strings.EqualFold(env("IPQ_COOKIE_SECURE", "false"), "true"),
+		APIRateLimitPerMinute: envInt("IPQ_API_RATE_LIMIT_PER_MINUTE", 60),
 	}
 }
 
@@ -61,4 +64,16 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
