@@ -54,6 +54,13 @@ async function assertNoVisibleUUID(page, label) {
   }
 }
 
+async function assertNoHeaderBackButton(page, label) {
+  const pageHeaderBackLinks = await page.locator("main section > header").locator("a", { hasText: "返回" }).count();
+  if (pageHeaderBackLinks !== 0) {
+    fail(`${label} still has a duplicate rounded back button`);
+  }
+}
+
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
 const page = await context.newPage();
@@ -85,23 +92,27 @@ try {
   if (komariBoundNode) {
     const boundRow = page.locator(`[data-node-uuid="${komariBoundNode.node_uuid || komariBoundNode.komari_node_uuid}"]`);
     const sourcePill = boundRow.locator('[data-node-binding-label="true"]');
-    const sourceText = ((await sourcePill.innerText()) || "").trim();
+    const sourceText = ((await sourcePill.locator("span").first().innerText()) || "").trim();
     if (sourceText !== "已绑定 Komari") {
       fail(`bound node source label should be concise, got: ${sourceText}`);
     }
-    const sourceTitle = await sourcePill.getAttribute("title");
-    if (sourceTitle !== komariBoundNode.komari_node_name) {
+    if (await sourcePill.getAttribute("title")) {
+      fail("bound node source should not use the delayed native title tooltip");
+    }
+    await sourcePill.hover();
+    const tooltip = sourcePill.locator('[data-node-binding-tooltip="true"]');
+    await tooltip.waitFor({ state: "visible", timeout: 1000 });
+    const tooltipText = ((await tooltip.innerText()) || "").trim();
+    if (tooltipText !== komariBoundNode.komari_node_name) {
       fail("bound node source tooltip should contain the full Komari node name");
     }
+    await page.mouse.move(12, 12);
   }
   await page.screenshot({ path: path.join(outputDir, "nodes-page.png"), fullPage: true });
 
   await page.goto(`${appBaseURL}/#/nodes/${routeID}`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: historyNode.name }).waitFor({ state: "visible", timeout: 10000 });
-  const pageHeaderBackLinks = await page.locator("main section > header").locator("a", { hasText: "返回" }).count();
-  if (pageHeaderBackLinks !== 0) {
-    fail("node detail page still has a duplicate rounded back button");
-  }
+  await assertNoHeaderBackButton(page, "node detail page");
   await assertNoVisibleUUID(page, "node detail page");
   await page.screenshot({ path: path.join(outputDir, "detail-page.png"), fullPage: true });
   await page.getByRole("link", { name: /设置/ }).click();
@@ -116,16 +127,28 @@ try {
 
   await page.goto(`${appBaseURL}/#/nodes/${routeID}/history?target_id=${targetID}`, { waitUntil: "domcontentloaded" });
   await page.locator('[data-history-change-row="true"]').first().waitFor({ state: "visible", timeout: 10000 });
+  await assertNoHeaderBackButton(page, "history page");
   await assertNoVisibleUUID(page, "history page");
-  const historyGridColumnCount = await page.locator('[data-history-change-row="true"]').first().evaluate((row) => {
-    const valueGrid = row.children.item(1);
+  const historyTopLevelColumnCount = await page.locator('[data-history-change-row="true"]').first().evaluate((row) =>
+    window.getComputedStyle(row).gridTemplateColumns.split(" ").filter(Boolean).length
+  );
+  if (historyTopLevelColumnCount < 3) {
+    fail(`history row should split time, IP, and values into separate columns, got ${historyTopLevelColumnCount}`);
+  }
+  const historyValueGridColumnCount = await page.locator('[data-history-change-row="true"]').first().evaluate((row) => {
+    const valueGrid = row.children.item(2);
     if (!valueGrid) return 0;
     return window.getComputedStyle(valueGrid).gridTemplateColumns.split(" ").filter(Boolean).length;
   });
-  if (historyGridColumnCount < 4) {
-    fail(`history row should use a wide four-column value layout, got ${historyGridColumnCount}`);
+  if (historyValueGridColumnCount < 4) {
+    fail(`history row should use a wide four-column value layout, got ${historyValueGridColumnCount}`);
   }
   await page.screenshot({ path: path.join(outputDir, "history-page.png"), fullPage: true });
+
+  await page.goto(`${appBaseURL}/#/nodes/${routeID}/snapshots?target_id=${targetID}`, { waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: `${historyNode.name} 快照` }).waitFor({ state: "visible", timeout: 10000 });
+  await assertNoHeaderBackButton(page, "snapshot page");
+  await assertNoVisibleUUID(page, "snapshot page");
 
   writeFileSync(
     path.join(outputDir, "summary.json"),

@@ -284,7 +284,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
             </div>
           </div>
         ) : (
-          <div className="mt-4 overflow-hidden rounded-[18px] border border-slate-200">
+          <div className="mt-4 rounded-[18px] border border-slate-200">
             <div className="react-node-list-head bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
               <span>节点</span>
               <span className="text-center">来源</span>
@@ -319,15 +319,22 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                   <div className="flex min-w-0 justify-center">
                     <span
                       className={[
-                        "inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+                        "group/source relative inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-xs font-medium",
                         item.binding_state === "komari_bound"
                           ? "border-indigo-200 bg-indigo-50 text-indigo-700"
                           : "border-slate-200 bg-slate-50 text-slate-600"
                       ].join(" ")}
                       data-node-binding-label="true"
-                      title={item.binding_state === "komari_bound" && item.komari_node_name ? item.komari_node_name : undefined}
                     >
                       <span className="truncate">{nodeBindingLabel(item)}</span>
+                      {item.binding_state === "komari_bound" && item.komari_node_name ? (
+                        <span
+                          className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden max-w-[320px] -translate-x-1/2 whitespace-nowrap rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-xs font-medium text-white shadow-lg group-hover/source:block"
+                          data-node-binding-tooltip="true"
+                        >
+                          {item.komari_node_name}
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <div className="flex min-w-0 justify-center">

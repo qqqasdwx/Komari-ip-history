@@ -245,13 +245,13 @@ function HistoryChangeList(props: {
         {props.items.map((item) => (
           <div
             key={item.id}
-            className="grid gap-4 px-4 py-4 xl:grid-cols-[180px_minmax(0,1fr)]"
+            className="grid gap-4 px-4 py-4 xl:grid-cols-[170px_140px_minmax(0,1fr)]"
             data-history-change-row="true"
           >
-            <div className="flex flex-wrap items-center gap-2 xl:block xl:space-y-2 xl:pt-1">
-              <div className="text-sm text-slate-500">{formatDateTime(item.recordedAt)}</div>
-              <span className="inline-flex min-h-7 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
-                {item.targetIP}
+            <div className="text-sm text-slate-500 xl:pt-1">{formatDateTime(item.recordedAt)}</div>
+            <div className="min-w-0 xl:pt-0.5">
+              <span className="inline-flex min-h-7 max-w-full items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
+                <span className="truncate">{item.targetIP}</span>
               </span>
             </div>
             <div className="grid min-w-0 gap-3 text-sm leading-6 text-slate-700 xl:grid-cols-[minmax(180px,0.85fr)_minmax(160px,1fr)_28px_minmax(160px,1fr)] xl:items-center">
@@ -391,7 +391,6 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
     );
   }
 
-  const detailBackTo = `/nodes/${uuid}${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
   const compareTargetID = selectedTargetID ?? detail.current_target?.id ?? null;
   const historyPathForSnapshots = `/nodes/${uuid}/snapshots${compareTargetID ? `?target_id=${compareTargetID}` : ""}`;
   const currentHistoryPage = historyTotalPages > 0 ? Math.min(Math.max(historyPage, 1), historyTotalPages) : 1;
@@ -412,7 +411,6 @@ export function NodeHistoryPage(props: { onUnauthorized: () => void }) {
       <PageHeader
         title={`${detail.name} 历史记录`}
         subtitle={selectedTargetID ? `当前查看 ${detail.current_target?.ip ?? "目标 IP"}` : "当前查看所有目标 IP 的变化"}
-        backTo={detailBackTo}
         actions={
           compareTargetID ? (
             <Button

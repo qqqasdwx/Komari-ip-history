@@ -293,8 +293,6 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
         .flatMap((row) => mapDisplayPathToReportPaths(row.path))
     )
   );
-  const detailBackTo = `/nodes/${uuid}/history${detail.current_target?.id ? `?target_id=${detail.current_target.id}` : ""}`;
-
   async function toggleSnapshotFavorite(entry: NodeHistoryEntry) {
     setFavoriteSavingIDs((current) => (current.includes(entry.id) ? current : [...current, entry.id]));
     const nextFavorite = !entry.is_favorite;
@@ -341,7 +339,6 @@ export function NodeHistoryComparePage(props: { onUnauthorized: () => void }) {
       <PageHeader
         title={`${detail.name} 快照`}
         subtitle={detail.current_target ? `当前查看 ${detail.current_target.ip}` : "请选择一个目标 IP"}
-        backTo={detailBackTo}
       />
 
       <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
