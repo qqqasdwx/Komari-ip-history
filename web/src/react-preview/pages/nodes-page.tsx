@@ -1,8 +1,7 @@
 import {
   Plus,
   RotateCcw,
-  Server,
-  Settings
+  Server
 } from "lucide-react";
 import {
   type FormEvent,
@@ -34,9 +33,7 @@ function nodeRouteID(item: Pick<NodeListItem, "node_uuid" | "komari_node_uuid">)
 }
 
 function nodeBindingLabel(item: Pick<NodeListItem, "binding_state" | "komari_node_name">) {
-  return item.binding_state === "komari_bound"
-    ? `已绑定 Komari${item.komari_node_name ? `：${item.komari_node_name}` : ""}`
-    : "独立节点";
+  return item.binding_state === "komari_bound" ? "已绑定 Komari" : "独立节点";
 }
 
 function CreateIndependentNodeDialog(props: {
@@ -164,10 +161,6 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
       nodeName: searchParams.get("node_name")?.trim() || undefined
     }), { replace: true });
   }, [navigate, searchParams]);
-
-  function openNodeSettings(uuid: string) {
-    navigate(buildNodeSettingsPath(uuid));
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -297,7 +290,6 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
               <span className="text-center">来源</span>
               <span className="text-center">状态</span>
               <span className="text-center">最近更新</span>
-              <span className="text-center">操作</span>
             </div>
             <div className="react-node-list-body">
               {nodes.map((item) => {
@@ -323,7 +315,6 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                     <strong className="block truncate text-sm font-semibold text-slate-900" data-node-name="true">
                       {item.name}
                     </strong>
-                    <span className="mt-1 block truncate text-xs text-slate-400">IPQ ID：{item.node_uuid}</span>
                   </div>
                   <div className="flex min-w-0 justify-center">
                     <span
@@ -334,6 +325,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                           : "border-slate-200 bg-slate-50 text-slate-600"
                       ].join(" ")}
                       data-node-binding-label="true"
+                      title={item.binding_state === "komari_bound" && item.komari_node_name ? item.komari_node_name : undefined}
                     >
                       <span className="truncate">{nodeBindingLabel(item)}</span>
                     </span>
@@ -342,21 +334,6 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
                     <StatusPill hasData={item.has_data} />
                   </div>
                   <div className="min-w-0 text-center text-sm text-slate-500">{formatDateTime(item.updated_at ?? undefined)}</div>
-                  <div className="flex items-center justify-center gap-2">
-                    <Button
-                      aria-label="上报设置"
-                      className="h-9 w-9 rounded-xl border border-slate-200 bg-white p-0 text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
-                      data-node-report-settings="true"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openNodeSettings(routeID);
-                      }}
-                      type="button"
-                    >
-                      <Settings className="size-4" />
-                    </Button>
-                    <span className="text-sm font-semibold text-indigo-600">查看</span>
-                  </div>
                 </div>
                 );
               })}

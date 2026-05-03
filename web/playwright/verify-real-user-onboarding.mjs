@@ -839,7 +839,8 @@ async function openNodeSettingsFromUI(appPage, uuid, nodeName, scenarioDir) {
   await appPage.getByPlaceholder("搜索节点名称").press("Enter");
   const row = appPage.locator(`[data-node-row="true"][data-node-uuid="${uuid}"]`);
   await row.waitFor({ state: "visible", timeout: 15000 });
-  await row.getByRole("button", { name: "上报设置" }).click();
+  await row.click();
+  await appPage.getByRole("link", { name: "设置" }).first().click();
   await appPage.waitForURL(`**/#/nodes/${uuid}/settings**`, { timeout: 10000 });
   await appPage.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "04-ipq-report-config-empty.png"), fullPage: true });

@@ -21,7 +21,7 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
 
     async function connectNode() {
       if (!uuid) {
-        setError("缺少节点 UUID，无法继续接入。");
+        setError("缺少节点信息，无法继续接入。");
         setLoading(false);
         return;
       }

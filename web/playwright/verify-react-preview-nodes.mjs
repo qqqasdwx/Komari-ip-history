@@ -90,7 +90,9 @@ if (rowCount > 0) {
     await page.waitForLoadState('networkidle');
   }
 
-  await chosenRow.getByRole('button', { name: '上报设置' }).click();
+  await chosenRow.click();
+  await page.waitForURL(`**/#/nodes/${firstUUID}`, { timeout: 10000 });
+  await page.getByRole('link', { name: '设置' }).first().click();
   await page.waitForURL(`**/#/nodes/${firstUUID}/settings**`, { timeout: 10000 });
   await page.locator('[data-node-settings-page="true"]').waitFor({ state: 'visible', timeout: 10000 });
   const reportConfigPanel = page.locator('[data-node-report-config="true"]');

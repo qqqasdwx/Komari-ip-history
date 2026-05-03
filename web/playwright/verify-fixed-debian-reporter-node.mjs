@@ -97,7 +97,8 @@ async function tryOpenDetailWithData(page) {
 
 async function assertNodeSettingsShowsAutoTarget(page) {
   const row = await openFixedNodeRow(page);
-  await row.getByRole("button", { name: "上报设置" }).click();
+  await row.click();
+  await page.getByRole("link", { name: "设置" }).first().click();
   await page.waitForURL("**/#/nodes/**/settings**", { timeout: 10000 });
   const panel = page.locator('[data-node-report-config="true"]');
   await panel.waitFor({ state: "visible", timeout: 10000 });

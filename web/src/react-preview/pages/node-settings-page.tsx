@@ -392,12 +392,9 @@ function KomariBindingSection(props: {
           <h2 className="text-base font-semibold text-slate-900">Komari 绑定</h2>
           <p className="text-sm text-slate-500" data-node-binding-state="true">
             {props.detail.binding_state === "komari_bound"
-              ? `已绑定：${props.detail.komari_node_name || props.detail.komari_node_uuid}`
+              ? `已绑定：${props.detail.komari_node_name || "Komari 节点"}`
               : "当前是独立节点"}
           </p>
-          {props.detail.binding_state === "komari_bound" ? (
-            <p className="truncate text-xs text-slate-400">{props.detail.komari_node_uuid}</p>
-          ) : null}
         </div>
         {props.detail.binding_state === "komari_bound" ? (
           <Button
@@ -440,14 +437,15 @@ function KomariBindingSection(props: {
                 key={item.komari_node_uuid}
               >
                 <div className="min-w-0 space-y-1">
-                  <strong className="block truncate text-slate-900">{item.komari_node_name || item.komari_node_uuid}</strong>
-                  <p className="truncate text-xs text-slate-400">{item.komari_node_uuid}</p>
+                  <strong className="block truncate text-slate-900">{item.komari_node_name || "未命名 Komari 节点"}</strong>
                   <p className="text-xs text-slate-500">
                     {item.current
                       ? "当前绑定"
                       : item.available
                         ? "可绑定"
-                        : `已被 ${item.bound_node_name || item.bound_node_uuid} 使用`}
+                        : item.bound_node_name
+                          ? `已被 ${item.bound_node_name} 使用`
+                          : "已被其他节点使用"}
                   </p>
                 </div>
                 <Button

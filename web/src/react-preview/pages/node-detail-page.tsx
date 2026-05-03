@@ -80,7 +80,6 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
       <PageHeader
         title={detail.name}
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
-        backTo={isEmbed ? undefined : "/nodes"}
       />
 
       {!isEmbed ? (
@@ -92,12 +91,9 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
             <h2 className="text-sm font-semibold text-slate-900">只读视图</h2>
             <p className="text-sm text-slate-500" data-node-binding-state="true">
               {detail.binding_state === "komari_bound"
-                ? `已绑定：${detail.komari_node_name || detail.komari_node_uuid}`
+                ? `已绑定：${detail.komari_node_name || "Komari 节点"}`
                 : "当前是独立节点"}
             </p>
-            {detail.binding_state === "komari_bound" ? (
-              <p className="truncate text-xs text-slate-400">{detail.komari_node_uuid}</p>
-            ) : null}
             <p className="text-xs text-slate-400">节点名称、绑定关系、目标 IP、上报计划和接入命令在设置页管理。</p>
           </div>
         </section>

@@ -80,7 +80,7 @@ function HistoryChangeFiltersBar(props: {
 
   return (
     <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
-      <div className="grid gap-3 xl:grid-cols-[minmax(360px,1.8fr)_minmax(180px,220px)_minmax(220px,1fr)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(180px,220px)_minmax(0,1fr)]">
         <div className="relative" ref={rangePanelRef}>
           <Button
             data-history-range-trigger="true"
@@ -178,9 +178,9 @@ function HistoryChangeFiltersBar(props: {
             </div>
           ) : null}
         </div>
-        <label className="grid gap-2 text-sm text-slate-700">
+        <label className="grid min-w-0 gap-2 text-sm text-slate-700">
           <select
-            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            className="h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
             value={props.selectedTargetID ?? ""}
             onChange={(event) => {
               const value = event.target.value.trim();
@@ -195,9 +195,9 @@ function HistoryChangeFiltersBar(props: {
             ))}
           </select>
         </label>
-        <label className="grid gap-2 text-sm text-slate-700">
+        <label className="grid min-w-0 gap-2 text-sm text-slate-700">
           <select
-            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+            className="h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
             value={props.selectedFieldID}
             onChange={(event) => props.onFieldChange(event.target.value)}
           >
@@ -245,18 +245,23 @@ function HistoryChangeList(props: {
         {props.items.map((item) => (
           <div
             key={item.id}
-            className="grid grid-cols-[160px_minmax(0,1fr)] gap-4 px-4 py-4"
+            className="grid gap-4 px-4 py-4 xl:grid-cols-[180px_minmax(0,1fr)]"
             data-history-change-row="true"
           >
-            <div className="pt-1 text-sm text-slate-500">{formatDateTime(item.recordedAt)}</div>
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-sm leading-6 text-slate-700">
-                <span className="inline-flex min-h-7 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
-                  {item.targetIP}
+            <div className="flex flex-wrap items-center gap-2 xl:block xl:space-y-2 xl:pt-1">
+              <div className="text-sm text-slate-500">{formatDateTime(item.recordedAt)}</div>
+              <span className="inline-flex min-h-7 items-center rounded-full border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600">
+                {item.targetIP}
+              </span>
+            </div>
+            <div className="grid min-w-0 gap-3 text-sm leading-6 text-slate-700 xl:grid-cols-[minmax(180px,0.85fr)_minmax(160px,1fr)_28px_minmax(160px,1fr)] xl:items-center">
+              <div className="min-w-0">
+                <span className="block truncate font-medium text-slate-900" title={[...item.groupPath, item.fieldLabel].filter(Boolean).join(" / ")}>
+                  {[...item.groupPath, item.fieldLabel].filter(Boolean).join(" / ")}
                 </span>
-                <span className="font-medium text-slate-900">
-                  {[...item.groupPath, item.fieldLabel].filter(Boolean).join(" / ")}：
-                </span>
+              </div>
+              <div className="min-w-0">
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400 xl:hidden">旧值</p>
                 {renderDisplayValueBadge({
                   id: "",
                   path: "",
@@ -266,7 +271,10 @@ function HistoryChangeList(props: {
                   tone: item.previous.tone as "good" | "bad" | "warn" | "muted" | "neutral",
                   missingKind: item.previous.missingKind
                 })}
-                <span className="font-medium text-slate-300">-&gt;</span>
+              </div>
+              <span className="hidden text-center font-medium text-slate-300 xl:block">-&gt;</span>
+              <div className="min-w-0">
+                <p className="mb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400 xl:hidden">新值</p>
                 {renderDisplayValueBadge({
                   id: "",
                   path: "",
@@ -276,10 +284,6 @@ function HistoryChangeList(props: {
                   tone: item.current.tone as "good" | "bad" | "warn" | "muted" | "neutral",
                   missingKind: item.current.missingKind
                 })}
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
-                <span>旧值时间 {formatDateTime(item.previousRecordedAt)}</span>
-                <span>新值时间 {formatDateTime(item.recordedAt)}</span>
               </div>
             </div>
           </div>
