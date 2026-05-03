@@ -35,6 +35,8 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 		&models.NodeHistory{},
 		&models.NodeTargetHistory{},
 		&models.AppSetting{},
+		&models.APIKey{},
+		&models.APIAccessLog{},
 	); err != nil {
 		return nil, err
 	}

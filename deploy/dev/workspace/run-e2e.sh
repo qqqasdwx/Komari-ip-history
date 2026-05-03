@@ -17,6 +17,7 @@ export KOMARI_PURCARTE_BASE_URL="${KOMARI_PURCARTE_BASE_URL:-http://proxy:8081}"
 node playwright/verify-real-user-onboarding.mjs
 node playwright/verify-react-preview-nodes.mjs
 node playwright/verify-independent-node-binding.mjs
+node playwright/verify-public-api-api-key.mjs
 
 KOMARI_BASE_URL="${KOMARI_DEFAULT_BASE_URL}" \
 KOMARI_THEME_SCENARIO=default \

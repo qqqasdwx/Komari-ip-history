@@ -104,3 +104,28 @@ type AppSetting struct {
 	Value     string    `gorm:"type:longtext;not null" json:"value"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type APIKey struct {
+	ID         uint           `gorm:"primaryKey" json:"id"`
+	Name       string         `gorm:"size:128;not null" json:"name"`
+	KeyPrefix  string         `gorm:"size:16;index;not null" json:"key_prefix"`
+	KeyHash    string         `gorm:"size:64;uniqueIndex;not null" json:"-"`
+	Enabled    bool           `gorm:"not null;default:true" json:"enabled"`
+	LastUsedAt *time.Time     `json:"last_used_at"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type APIAccessLog struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	APIKeyID   *uint     `gorm:"index" json:"api_key_id"`
+	APIKey     APIKey    `gorm:"constraint:OnDelete:SET NULL" json:"-"`
+	KeyPrefix  string    `gorm:"size:16;index;not null;default:''" json:"key_prefix"`
+	KeyName    string    `gorm:"size:128;not null;default:''" json:"key_name"`
+	Method     string    `gorm:"size:16;not null" json:"method"`
+	Path       string    `gorm:"size:2048;not null" json:"path"`
+	StatusCode int       `gorm:"index;not null" json:"status_code"`
+	RemoteIP   string    `gorm:"size:64;not null;default:''" json:"remote_ip"`
+	CreatedAt  time.Time `gorm:"index" json:"created_at"`
+}

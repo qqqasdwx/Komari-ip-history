@@ -29,6 +29,41 @@ export type HistoryRetentionSettings = {
   estimated_is_unbounded: boolean;
 };
 
+export type APIKeyItem = {
+  id: number;
+  name: string;
+  key_prefix: string;
+  enabled: boolean;
+  last_used_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  plaintext_key?: string;
+};
+
+export type APIKeyListResponse = {
+  items: APIKeyItem[];
+};
+
+export type APIAccessLogItem = {
+  id: number;
+  api_key_id?: number | null;
+  key_prefix: string;
+  key_name: string;
+  method: string;
+  path: string;
+  status_code: number;
+  remote_ip: string;
+  created_at: string;
+};
+
+export type APIAccessLogResponse = {
+  items: APIAccessLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
 export type NodeListItem = {
   node_uuid: string;
   komari_node_uuid: string;
