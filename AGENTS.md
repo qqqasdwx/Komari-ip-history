@@ -38,6 +38,12 @@ For UI refactors, capture Playwright screenshots before and after changes, inspe
 
 When changing Komari injected pages, loader behavior, iframe embed pages, or embedded theme styles, treat adaptation to the current Komari theme as a first-class requirement. The iframe page must not depend on transparent backgrounds inheriting the parent Komari page, because the iframe is a separate document; it must render or explicitly carry its own background, cards, borders, text, buttons, and states from the host theme context. PurCarte-style glass themes should preserve glass-colored gaps between embedded cards; if cross-origin iframe transparency exposes a browser white canvas in dark mode, use the host theme canvas instead of letting it show white. The loader should pass enough host theme context for the iframe to render itself consistently with the active theme, and verification must cover default and PurCarte themes, light and dark appearances, configurable theme/accent colors, connected data pages, connected empty pages, unconnected "go connect" flows, guest-allowed flows, guest-blocked flows, and IPQ-login bridge flows. Use Playwright screenshots plus visual or pixel-level checks to confirm the embedded content adapts to the current theme rather than merely avoiding a specific background color.
 
+## Product Copy Guidelines
+
+User-facing copy must describe the user's task or the system state, not the implementation history or internal design. Avoid wording that only makes sense because of a recent refactor, such as "global", "only keep one", "no longer", "controlled elsewhere", or other explanatory implementation context. If a hint is necessary, make it actionable and self-contained for a first-time user; if the UI is already clear, remove the hint.
+
+Before finishing any frontend or embedded-flow change, scan new or touched UI text for implementation-centered language, internal keys such as UUIDs, ambiguous product names, and duplicate controls explained by copy. Prefer concise labels like "发送器", "通知开关", and "请求体"; use helper text only to answer a real user question, for example which variables can be used or where a setting takes effect.
+
 ## Commit & Pull Request Guidelines
 
 Recent commits use short, imperative messages such as `clean dead code and trim frontend dependencies`. Keep commits focused and avoid bundling unrelated backend, frontend, and documentation changes.
