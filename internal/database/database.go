@@ -37,6 +37,9 @@ func Open(cfg config.Config) (*gorm.DB, error) {
 		&models.AppSetting{},
 		&models.APIKey{},
 		&models.APIAccessLog{},
+		&models.NotificationChannel{},
+		&models.NotificationRule{},
+		&models.NotificationDeliveryLog{},
 	); err != nil {
 		return nil, err
 	}

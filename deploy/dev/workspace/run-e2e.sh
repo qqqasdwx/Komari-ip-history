@@ -18,6 +18,7 @@ node playwright/verify-real-user-onboarding.mjs
 node playwright/verify-react-preview-nodes.mjs
 node playwright/verify-independent-node-binding.mjs
 node playwright/verify-public-api-api-key.mjs
+node playwright/verify-notifications.mjs
 
 KOMARI_BASE_URL="${KOMARI_DEFAULT_BASE_URL}" \
 KOMARI_THEME_SCENARIO=default \

@@ -25,7 +25,7 @@ func (h ReportHandler) Report(c *gin.Context) {
 	}
 
 	token := extractReporterToken(c)
-	err := service.ReportNode(h.DB, c.Param("uuid"), token, req)
+	err := service.ReportNodeWithConfig(h.DB, h.Cfg, c.Param("uuid"), token, req)
 	if err != nil {
 		switch err.Error() {
 		case "missing reporter token", "invalid reporter token":

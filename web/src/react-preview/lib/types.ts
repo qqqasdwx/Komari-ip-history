@@ -64,6 +64,79 @@ export type APIAccessLogResponse = {
   total_pages: number;
 };
 
+export type NotificationSettings = {
+  enabled: boolean;
+  active_channel_id?: number | null;
+  title_template: string;
+  body_template: string;
+};
+
+export type NotificationChannelType = "telegram" | "webhook" | "javascript";
+
+export type NotificationChannelItem = {
+  id: number;
+  name: string;
+  type: NotificationChannelType;
+  enabled: boolean;
+  config: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationChannelListResponse = {
+  items: NotificationChannelItem[];
+};
+
+export type NotificationRuleItem = {
+  id: number;
+  name: string;
+  enabled: boolean;
+  channel_id: number;
+  channel_name: string;
+  channel_type: NotificationChannelType | "";
+  node_uuid: string;
+  target_ip: string;
+  field_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationRuleListResponse = {
+  items: NotificationRuleItem[];
+};
+
+export type NotificationDeliveryLogItem = {
+  id: number;
+  channel_id?: number | null;
+  rule_id?: number | null;
+  channel_name: string;
+  channel_type: NotificationChannelType | "";
+  rule_name: string;
+  status: "success" | "failed";
+  error: string;
+  title: string;
+  body: string;
+  node_uuid: string;
+  node_name: string;
+  target_ip: string;
+  field_id: string;
+  field_label: string;
+  previous_value: string;
+  current_value: string;
+  recorded_at: string;
+  detail_url: string;
+  compare_url: string;
+  created_at: string;
+};
+
+export type NotificationDeliveryLogResponse = {
+  items: NotificationDeliveryLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+};
+
 export type NodeListItem = {
   node_uuid: string;
   komari_node_uuid: string;

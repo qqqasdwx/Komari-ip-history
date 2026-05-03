@@ -1146,6 +1146,10 @@ func GetNodeReporterPlan(db *gorm.DB, uuid, token string, input ReporterPlanInpu
 }
 
 func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
+	return ReportNodeWithConfig(db, config.Config{}, uuid, token, input)
+}
+
+func ReportNodeWithConfig(db *gorm.DB, cfg config.Config, uuid, token string, input ReportNodeInput) error {
 	if strings.TrimSpace(token) == "" {
 		return errors.New("missing reporter token")
 	}
@@ -1193,7 +1197,8 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 		summary = "Reporter update"
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	var historyID uint
+	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(target).Updates(map[string]any{
 			"has_data":                  true,
 			"current_summary":           summary,
@@ -1212,8 +1217,16 @@ func ReportNode(db *gorm.DB, uuid, token string, input ReportNodeInput) error {
 		if err := tx.Create(&history).Error; err != nil {
 			return err
 		}
+		historyID = history.ID
 		return recomputeNodeState(tx, node.ID)
-	})
+	}); err != nil {
+		return err
+	}
+
+	if historyID != 0 {
+		_ = triggerNotificationsForHistory(db, historyID, cfg.PublicBaseURL)
+	}
+	return nil
 }
 
 func sanitizePublicCurrentResult(result map[string]any) map[string]any {
