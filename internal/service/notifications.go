@@ -30,7 +30,7 @@ const (
 	NotificationDeliverySuccess = "success"
 	NotificationDeliveryFailed  = "failed"
 
-	notificationDefaultTitleTemplate = "{{node_name}} {{target_ip}} {{field_label}} 发生变化"
+	notificationDefaultTitleTemplate = ""
 	notificationDefaultBodyTemplate  = "节点：{{node_name}}\n目标 IP：{{target_ip}}\n字段：{{field_label}}\n旧值：{{old_value}}\n新值：{{new_value}}\n记录时间：{{recorded_at}}\n详情：{{detail_url}}\n对比：{{compare_url}}"
 	notificationSenderTimeout        = 3 * time.Second
 )
@@ -165,9 +165,6 @@ func GetNotificationSettings(db *gorm.DB) (NotificationSettings, error) {
 		return defaultNotificationSettings(), nil
 	}
 	settings.TitleTemplate = strings.TrimSpace(settings.TitleTemplate)
-	if settings.TitleTemplate == "" {
-		settings.TitleTemplate = notificationDefaultTitleTemplate
-	}
 	if strings.TrimSpace(settings.BodyTemplate) == "" {
 		settings.BodyTemplate = notificationDefaultBodyTemplate
 	}
@@ -176,9 +173,6 @@ func GetNotificationSettings(db *gorm.DB) (NotificationSettings, error) {
 
 func SetNotificationSettings(db *gorm.DB, settings NotificationSettings) (NotificationSettings, error) {
 	settings.TitleTemplate = strings.TrimSpace(settings.TitleTemplate)
-	if settings.TitleTemplate == "" {
-		settings.TitleTemplate = notificationDefaultTitleTemplate
-	}
 	if strings.TrimSpace(settings.BodyTemplate) == "" {
 		settings.BodyTemplate = notificationDefaultBodyTemplate
 	}
@@ -522,7 +516,7 @@ func triggerNotificationsForHistory(db *gorm.DB, historyID uint, cfgPublicBaseUR
 			if activeChannel != nil {
 				channel = *activeChannel
 			}
-			if channel.ID == 0 || !channel.Enabled {
+			if channel.ID == 0 {
 				continue
 			}
 			message := renderNotificationMessage(settings, event)
@@ -678,7 +672,7 @@ func sendTelegramNotification(config map[string]string, message notificationRend
 	}
 	payload := map[string]any{
 		"chat_id": chatID,
-		"text":    strings.TrimSpace(message.Title + "\n\n" + message.Body),
+		"text":    strings.TrimSpace(message.Body),
 	}
 	if messageThreadID := strings.TrimSpace(config["message_thread_id"]); messageThreadID != "" {
 		payload["message_thread_id"] = messageThreadID
@@ -714,18 +708,13 @@ func sendWebhookNotification(config map[string]string, message notificationRende
 	}
 	bodyTemplate := strings.TrimSpace(config["body"])
 	if bodyTemplate != "" {
-		body := renderNotificationTemplate(bodyTemplate, notificationTemplateValues(message))
+		body := renderNotificationTemplate(bodyTemplate, notificationEventTemplateValues(message))
 		return sendWebhookRequest(webhookURL, method, contentType, headers, config, strings.NewReader(body))
-	}
-	payload := map[string]any{
-		"title":   message.Title,
-		"body":    message.Body,
-		"context": message.Context,
 	}
 	if method == http.MethodGet {
 		return sendWebhookRequest(webhookURL, method, contentType, headers, config, nil)
 	}
-	raw, err := json.Marshal(payload)
+	raw, err := json.Marshal(message.Context)
 	if err != nil {
 		return err
 	}
@@ -822,7 +811,7 @@ func renderNotificationMessage(settings NotificationSettings, event notification
 		"detail_url":         event.DetailURL,
 		"compare_url":        event.CompareURL,
 	}
-	title := renderNotificationTemplate(settings.TitleTemplate, contextValues)
+	title := ""
 	body := renderNotificationTemplate(settings.BodyTemplate, contextValues)
 	contextMap := make(map[string]any, len(contextValues))
 	for key, value := range contextValues {
@@ -1140,12 +1129,8 @@ func sendWebhookRequest(endpoint string, method string, contentType string, head
 	return nil
 }
 
-func notificationTemplateValues(message notificationRenderedMessage) map[string]string {
-	values := map[string]string{
-		"title":   message.Title,
-		"body":    message.Body,
-		"message": strings.TrimSpace(message.Title + "\n\n" + message.Body),
-	}
+func notificationEventTemplateValues(message notificationRenderedMessage) map[string]string {
+	values := make(map[string]string, len(message.Context))
 	for key, value := range message.Context {
 		values[key] = fmt.Sprint(value)
 	}

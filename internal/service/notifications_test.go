@@ -1,6 +1,7 @@
 package service
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,7 +134,7 @@ func TestNotificationChannelsCanSaveAndTestSend(t *testing.T) {
 			Type:    NotificationChannelJavaScript,
 			Enabled: true,
 			Config: map[string]string{
-				"script": `function send(input) { return { ok: input.title.length > 0 }; }`,
+				"script": `function send(input) { return { ok: input.body.length > 0 }; }`,
 			},
 		},
 		{
@@ -141,7 +142,7 @@ func TestNotificationChannelsCanSaveAndTestSend(t *testing.T) {
 			Type:    NotificationChannelJavaScript,
 			Enabled: true,
 			Config: map[string]string{
-				"script": `async function sendMessage(message, title) { return { ok: title.length > 0 && message.length > 0 }; }`,
+				"script": `async function sendMessage(message, title) { return { ok: message.length > 0 }; }`,
 			},
 		},
 	}
@@ -276,15 +277,116 @@ func TestNotificationUsesActiveChannelWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestNotificationSkipsNonMatchingDisabledRuleAndDisabledChannel(t *testing.T) {
+func TestNotificationGlobalSwitchDisablesDelivery(t *testing.T) {
+	db := openNotificationServiceTestDB(t)
+	targetIP := "203.0.113.44"
+	detail := createNotificationNode(t, db, targetIP)
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org A", "2026-05-03T00:00:00Z")
+
+	var hits atomic.Int64
+	server := notificationTestServer(http.StatusOK, "ok", &hits)
+	defer server.Close()
+	channel, err := CreateNotificationChannel(db, NotificationChannelInput{
+		Name:    "Webhook",
+		Type:    NotificationChannelWebhook,
+		Enabled: true,
+		Config:  map[string]string{"url": server.URL},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := SetNotificationSettings(db, NotificationSettings{Enabled: false, ActiveChannelID: &channel.ID}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if _, err := CreateNotificationRule(db, NotificationRuleInput{
+		Name:      "Organization changed",
+		Enabled:   true,
+		ChannelID: channel.ID,
+		NodeUUID:  detail.NodeUUID,
+		TargetIP:  targetIP,
+		FieldID:   "info.organization",
+	}); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org B", "2026-05-03T01:00:00Z")
+
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("expected no delivery when global notification switch is disabled, got %d hits", got)
+	}
+}
+
+func TestWebhookBodyTemplateUsesEventVariablesOnly(t *testing.T) {
+	db := openNotificationServiceTestDB(t)
+	targetIP := "203.0.113.45"
+	detail := createNotificationNode(t, db, targetIP)
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org A", "2026-05-03T00:00:00Z")
+
+	bodies := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies <- string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	channel, err := CreateNotificationChannel(db, NotificationChannelInput{
+		Name:    "Webhook",
+		Type:    NotificationChannelWebhook,
+		Enabled: true,
+		Config: map[string]string{
+			"url":  server.URL,
+			"body": `{"new_value":"{{new_value}}","telegram_body":"{{body}}","message":"{{message}}"}`,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if _, err := SetNotificationSettings(db, NotificationSettings{
+		Enabled:         true,
+		ActiveChannelID: &channel.ID,
+		BodyTemplate:    "Telegram template {{new_value}}",
+	}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if _, err := CreateNotificationRule(db, NotificationRuleInput{
+		Name:      "Organization changed",
+		Enabled:   true,
+		ChannelID: channel.ID,
+		NodeUUID:  detail.NodeUUID,
+		TargetIP:  targetIP,
+		FieldID:   "info.organization",
+	}); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org B", "2026-05-03T01:00:00Z")
+
+	var body string
+	select {
+	case body = <-bodies:
+	case <-time.After(time.Second):
+		t.Fatal("expected webhook body")
+	}
+	if !strings.Contains(body, `"new_value":"Org B"`) {
+		t.Fatalf("expected webhook body to render direct event variable, got %q", body)
+	}
+	if strings.Contains(body, "Telegram template") {
+		t.Fatalf("webhook body unexpectedly used telegram notification template: %q", body)
+	}
+	if !strings.Contains(body, `"telegram_body":"{{body}}"`) || !strings.Contains(body, `"message":"{{message}}"`) {
+		t.Fatalf("webhook body should not render notification body/message variables, got %q", body)
+	}
+}
+
+func TestNotificationSkipsNonMatchingAndDisabledRule(t *testing.T) {
 	cases := []struct {
-		name      string
-		rule      NotificationRuleInput
-		channelOn bool
+		name string
+		rule NotificationRuleInput
 	}{
 		{
-			name:      "non matching rule",
-			channelOn: true,
+			name: "non matching rule",
 			rule: NotificationRuleInput{
 				Name:     "ASN only",
 				Enabled:  true,
@@ -293,21 +395,10 @@ func TestNotificationSkipsNonMatchingDisabledRuleAndDisabledChannel(t *testing.T
 			},
 		},
 		{
-			name:      "disabled rule",
-			channelOn: true,
+			name: "disabled rule",
 			rule: NotificationRuleInput{
 				Name:     "Disabled org",
 				Enabled:  false,
-				FieldID:  "info.organization",
-				TargetIP: "203.0.113.42",
-			},
-		},
-		{
-			name:      "disabled channel",
-			channelOn: false,
-			rule: NotificationRuleInput{
-				Name:     "Disabled channel org",
-				Enabled:  true,
 				FieldID:  "info.organization",
 				TargetIP: "203.0.113.42",
 			},
@@ -329,7 +420,7 @@ func TestNotificationSkipsNonMatchingDisabledRuleAndDisabledChannel(t *testing.T
 			channel, err := CreateNotificationChannel(db, NotificationChannelInput{
 				Name:    "Webhook",
 				Type:    NotificationChannelWebhook,
-				Enabled: tt.channelOn,
+				Enabled: true,
 				Config:  map[string]string{"url": server.URL},
 			})
 			if err != nil {

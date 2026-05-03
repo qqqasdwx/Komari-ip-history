@@ -4,9 +4,7 @@ import {
   ArrowLeft,
   BellRing,
   CheckCircle2,
-  ChevronRight,
   ClipboardList,
-  Filter,
   Pencil,
   PlayCircle,
   RefreshCw,
@@ -44,9 +42,7 @@ type NotificationsPageProps = {
 };
 
 type ChannelForm = {
-  name: string;
   type: NotificationChannelType;
-  enabled: boolean;
   bot_token: string;
   chat_id: string;
   message_thread_id: string;
@@ -73,7 +69,7 @@ type RulePayload = {
 const defaultSettings: NotificationSettings = {
   enabled: false,
   active_channel_id: null,
-  title_template: "{{node_name}} {{target_ip}} {{field_label}} 发生变化",
+  title_template: "",
   body_template:
     "节点：{{node_name}}\n目标 IP：{{target_ip}}\n字段：{{field_label}}\n旧值：{{old_value}}\n新值：{{new_value}}\n记录时间：{{recorded_at}}\n详情：{{detail_url}}\n对比：{{compare_url}}"
 };
@@ -81,7 +77,7 @@ const defaultSettings: NotificationSettings = {
 const defaultScript =
   "function sendEvent(event) {\n  return { ok: true };\n}\n\nfunction sendMessage(message, title) {\n  return { ok: true };\n}\n";
 
-const placeholderTokens = [
+const eventPlaceholderTokens = [
   "{{node_name}}",
   "{{target_ip}}",
   "{{field_label}}",
@@ -93,9 +89,6 @@ const placeholderTokens = [
 ];
 
 const javascriptFields = [
-  "title",
-  "body",
-  "message",
   "node_name",
   "target_ip",
   "field_id",
@@ -122,9 +115,7 @@ function channelTypeLabel(type: string) {
 
 function defaultChannelForm(type: NotificationChannelType): ChannelForm {
   return {
-    name: `${channelTypeLabel(type)} 通道`,
     type,
-    enabled: true,
     bot_token: "",
     chat_id: "",
     message_thread_id: "",
@@ -133,7 +124,7 @@ function defaultChannelForm(type: NotificationChannelType): ChannelForm {
     method: "POST",
     content_type: "application/json",
     headers: "",
-    body: '{\n  "title": "{{title}}",\n  "message": "{{message}}"\n}',
+    body: '{\n  "node_name": "{{node_name}}",\n  "target_ip": "{{target_ip}}",\n  "field": "{{field_label}}",\n  "old_value": "{{old_value}}",\n  "new_value": "{{new_value}}",\n  "detail_url": "{{detail_url}}"\n}',
     username: "",
     password: "",
     script: defaultScript
@@ -144,8 +135,6 @@ function channelToForm(channel: NotificationChannelItem): ChannelForm {
   const form = defaultChannelForm(channel.type);
   return {
     ...form,
-    name: channel.name || form.name,
-    enabled: channel.enabled,
     bot_token: channel.config.bot_token ?? "",
     chat_id: channel.config.chat_id ?? "",
     message_thread_id: channel.config.message_thread_id ?? "",
@@ -223,7 +212,7 @@ function activeChannel(settings: NotificationSettings, channels: NotificationCha
   if (settings.active_channel_id) {
     return channels.find((item) => item.id === settings.active_channel_id) ?? null;
   }
-  return channels.find((item) => item.enabled) ?? channels[0] ?? null;
+  return channels[0] ?? null;
 }
 
 function HeaderBackButton(props: { to: string }) {
@@ -375,7 +364,7 @@ function RuleDialog(props: {
       return;
     }
     if (!props.currentChannel) {
-      setError("请先设置当前发信通道。");
+      setError("请先设置当前发送器。");
       return;
     }
 
@@ -430,7 +419,7 @@ function RuleDialog(props: {
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div>
             <h2 className="text-base font-semibold text-slate-900">{props.initialRule ? "编辑订阅规则" : "添加订阅规则"}</h2>
-            <p className="text-sm text-slate-500">当前发信通道：{props.currentChannel ? props.currentChannel.name : "未设置"}</p>
+            <p className="text-sm text-slate-500">当前发送器：{props.currentChannel ? channelTypeLabel(props.currentChannel.type) : "未设置"}</p>
           </div>
           <Button aria-label="关闭" className="size-9 rounded-full border border-slate-200 bg-white p-0 text-slate-700 hover:bg-slate-50" onClick={props.onClose} type="button">
             <X className="size-4" />
@@ -729,7 +718,7 @@ export function NotificationsPage(props: NotificationsPageProps) {
     <section className="space-y-6">
       <PageHeader
         title="通知"
-        subtitle="当前发信通道和字段变化订阅规则。"
+        subtitle="当前发送器和字段变化订阅规则。"
         actions={
           <Button className="rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 hover:bg-slate-50" onClick={() => void load()} type="button">
             <RefreshCw className="size-4" />
@@ -749,18 +738,18 @@ export function NotificationsPage(props: NotificationsPageProps) {
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-3">
                   <Badge className={enabledBadge(settings.enabled)}>{settings.enabled ? "已启用" : "已停用"}</Badge>
-                  <Badge className={currentChannel?.enabled ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-500"}>
-                    {currentChannel ? `${channelTypeLabel(currentChannel.type)} · ${currentChannel.name}` : "未设置发信通道"}
+                  <Badge className={currentChannel ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-500"}>
+                    {currentChannel ? channelTypeLabel(currentChannel.type) : "未设置发送器"}
                   </Badge>
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-slate-900">当前发信通道</h2>
-                  <p className="mt-1 text-sm text-slate-500">{currentChannel ? "字段变化命中规则后，会通过当前发信通道发送。" : "还没有可用发信通道。"}</p>
+                  <h2 className="text-base font-semibold text-slate-900">当前发送器</h2>
+                  <p className="mt-1 text-sm text-slate-500">{currentChannel ? "字段变化命中规则后，会通过当前发送器发送。" : "还没有配置发送器。"}</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={() => navigate("/settings/notifications/channel")} type="button">
                     <Settings2 className="size-4" />
-                    <span>通道设置</span>
+                    <span>发送器设置</span>
                   </Button>
                   <Button className="rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 hover:bg-slate-50" onClick={() => navigate("/settings/notifications/logs")} type="button">
                     <ClipboardList className="size-4" />
@@ -784,8 +773,8 @@ export function NotificationsPage(props: NotificationsPageProps) {
                   <strong className="text-lg text-slate-900">{rules.length}</strong>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-slate-500">可用通道</span>
-                  <strong className="text-lg text-slate-900">{channels.filter((item) => item.enabled).length}</strong>
+                  <span className="text-sm text-slate-500">当前发送器</span>
+                  <strong className="text-lg text-slate-900">{currentChannel ? channelTypeLabel(currentChannel.type) : "-"}</strong>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-sm text-slate-500">最近失败</span>
@@ -799,7 +788,7 @@ export function NotificationsPage(props: NotificationsPageProps) {
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">字段变化订阅规则</h2>
-                <p className="text-sm text-slate-500">规则使用当前发信通道，不再单独选择通道。</p>
+                <p className="text-sm text-slate-500">规则使用当前发送器，不再单独选择发送通道。</p>
               </div>
               <Button
                 className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
@@ -934,7 +923,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
         props.onUnauthorized();
         return;
       }
-      setError(loadError instanceof Error ? loadError.message : "加载通道设置失败");
+      setError(loadError instanceof Error ? loadError.message : "加载发送器设置失败");
     } finally {
       setLoading(false);
     }
@@ -955,9 +944,9 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
     setError("");
     try {
       const payload = {
-        name: form.name.trim() || `${channelTypeLabel(form.type)} 通道`,
+        name: channelTypeLabel(form.type),
         type: form.type,
-        enabled: form.enabled,
+        enabled: true,
         config: channelFormConfig(form)
       };
       const saved = selectedChannel
@@ -974,14 +963,14 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
         body: JSON.stringify({ ...settings, active_channel_id: saved.id })
       });
       setSettings({ ...defaultSettings, ...savedSettings });
-      pushToast("当前发信通道已保存。");
+      pushToast("当前发送器已保存。");
       await load();
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
         props.onUnauthorized();
         return;
       }
-      setError(saveError instanceof Error ? saveError.message : "保存发信通道失败");
+      setError(saveError instanceof Error ? saveError.message : "保存发送器失败");
     } finally {
       setSavingChannel(false);
     }
@@ -1030,8 +1019,8 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
   return (
     <section className="space-y-6">
       <PageHeader
-        title="通道设置"
-        subtitle="管理当前发信通道、模板和发送器配置。"
+        title="发送器设置"
+        subtitle="管理当前发送器和发送配置。"
         actions={
           <div className="flex flex-wrap gap-2">
             <HeaderBackButton to="/settings/notifications" />
@@ -1052,8 +1041,8 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
           <Card className="p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">当前发信通道</h2>
-                <p className="mt-1 text-sm text-slate-500">{currentChannel ? `${channelTypeLabel(currentChannel.type)} · ${currentChannel.name}` : "未设置"}</p>
+                <h2 className="text-base font-semibold text-slate-900">当前发送器</h2>
+                <p className="mt-1 text-sm text-slate-500">{currentChannel ? channelTypeLabel(currentChannel.type) : "未设置"}</p>
               </div>
               <Badge className={settings.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}>
                 {settings.enabled ? "通知已启用" : "通知已停用"}
@@ -1063,13 +1052,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
 
           <Card className="p-6">
             <form className="grid gap-5" onSubmit={submitChannel}>
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_160px]">
-                <div className="grid gap-2">
-                  <Label className="text-slate-900" htmlFor="notification-channel-name">
-                    通道名称
-                  </Label>
-                  <Input id="notification-channel-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
-                </div>
+              <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
                 <div className="grid gap-2">
                   <Label className="text-slate-900" htmlFor="notification-channel-type">
                     发送器类型
@@ -1085,10 +1068,9 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                     <option value="javascript">JavaScript</option>
                   </select>
                 </div>
-                <label className="mt-auto flex h-11 items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-slate-700">
-                  <input checked={form.enabled} onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} type="checkbox" />
-                  <span>启用通道</span>
-                </label>
+                <div className="mt-auto rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  全局只保留一个当前发送器，通知是否启用在通知主页控制。
+                </div>
               </div>
 
               {form.type === "telegram" ? (
@@ -1165,7 +1147,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                     </div>
                     <div className="grid gap-2">
                       <Label className="text-slate-900" htmlFor="notification-webhook-body">
-                        请求体模板
+                        请求体
                       </Label>
                       <textarea
                         className="min-h-28 rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
@@ -1173,6 +1155,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                         value={form.body}
                         onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
                       />
+                      <p className="text-xs text-slate-500">支持下方事件变量，不使用 Telegram 正文模板。</p>
                     </div>
                   </div>
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -1209,7 +1192,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
               <div className="flex flex-wrap gap-3">
                 <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" disabled={savingChannel} type="submit">
                   <Send className="size-4" />
-                  <span>{savingChannel ? "保存中..." : "保存并设为当前通道"}</span>
+                  <span>{savingChannel ? "保存中..." : "保存并设为当前发送器"}</span>
                 </Button>
                 <Button
                   className="rounded-lg border border-indigo-200 bg-white px-3 text-[13px] text-indigo-700 hover:bg-indigo-50"
@@ -1226,8 +1209,14 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
 
           <Card className="p-6">
             <div className="mb-5">
-              <h2 className="text-base font-semibold text-slate-900">通知模板</h2>
-              <p className="text-sm text-slate-500">{selectedType === "javascript" ? "JavaScript 发送器会收到完整事件字段。" : "Telegram 和 Webhook 可使用模板变量。"}</p>
+              <h2 className="text-base font-semibold text-slate-900">{selectedType === "telegram" ? "Telegram 正文模板" : "可用变量"}</h2>
+              <p className="text-sm text-slate-500">
+                {selectedType === "telegram"
+                  ? "Telegram 使用正文模板生成消息文本。"
+                  : selectedType === "webhook"
+                    ? "Webhook 请求体可以直接使用这些事件变量。"
+                    : "JavaScript 发送器会收到这些事件字段。"}
+              </p>
             </div>
             {selectedType === "javascript" ? (
               <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-xs text-slate-600">
@@ -1237,14 +1226,16 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                   </code>
                 ))}
               </div>
+            ) : selectedType === "webhook" ? (
+              <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-xs text-slate-600">
+                {eventPlaceholderTokens.map((item) => (
+                  <code key={item} className="rounded-md bg-white px-2 py-1">
+                    {item}
+                  </code>
+                ))}
+              </div>
             ) : (
               <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label className="text-slate-900" htmlFor="notification-title-template">
-                    标题模板
-                  </Label>
-                  <Input id="notification-title-template" value={settings.title_template} onChange={(event) => setSettings((current) => ({ ...current, title_template: event.target.value }))} />
-                </div>
                 <div className="grid gap-2">
                   <Label className="text-slate-900" htmlFor="notification-body-template">
                     正文模板
@@ -1257,7 +1248,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs text-slate-600">
-                  {placeholderTokens.map((item) => (
+                  {eventPlaceholderTokens.map((item) => (
                     <code key={item} className="rounded-md bg-slate-100 px-2 py-1">
                       {item}
                     </code>
@@ -1388,7 +1379,7 @@ export function NotificationDeliveryLogsPage(props: NotificationsPageProps) {
                   <div>
                     <div className="font-medium text-slate-900">{log.title || log.rule_name || "测试发送"}</div>
                     <div className="mt-1 text-xs text-slate-500">
-                      {formatDateTime(log.created_at)} · {log.channel_name || "已删除通道"} · {log.rule_name || "测试发送"}
+                      {formatDateTime(log.created_at)} · {log.channel_type ? channelTypeLabel(log.channel_type) : "已删除发送器"} · {log.rule_name || "测试发送"}
                     </div>
                   </div>
                   <Badge className={statusBadgeClass(log.status)}>{log.status === "success" ? "成功" : "失败"}</Badge>

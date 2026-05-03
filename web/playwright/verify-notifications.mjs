@@ -9,13 +9,10 @@ const runID = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
 const nodeName = `Playwright Notification Node ${runID}`;
 const targetIP = "203.0.113.93";
 const names = {
-  webhook: `Playwright Webhook ${runID}`,
-  telegram: `Playwright Telegram ${runID}`,
-  javascript: `Playwright JavaScript ${runID}`,
   matchingRule: `Playwright Org Change ${runID}`,
   nonMatchingRule: `Playwright ASN Only ${runID}`,
   disabledRule: `Playwright Disabled Rule ${runID}`,
-  disabledChannel: `Playwright Disabled Channel ${runID}`,
+  globalDisabledRule: `Playwright Global Disabled Rule ${runID}`,
   failingWebhook: `Playwright Failing Webhook ${runID}`,
   timeoutJS: `Playwright Timeout JS ${runID}`
 };
@@ -161,9 +158,8 @@ async function configureSettingsFromUI(page) {
   }
 
   await page.goto(`${appBaseURL}/#/settings/notifications/channel`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "通道设置", exact: true }).waitFor({ state: "visible", timeout: 10000 });
-  await page.locator("#notification-channel-type").selectOption("webhook");
-  await page.getByLabel("标题模板").fill("{{node_name}} {{target_ip}} {{field_label}} 发生变化");
+  await page.getByRole("heading", { name: "发送器设置", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  await page.locator("#notification-channel-type").selectOption("telegram");
   await page.getByLabel("正文模板").fill("旧值 {{old_value}}\n新值 {{new_value}}\n详情 {{detail_url}}\n对比 {{compare_url}}");
   await page.getByRole("button", { name: "保存模板" }).click();
   await page.waitForTimeout(300);
@@ -171,53 +167,50 @@ async function configureSettingsFromUI(page) {
 
 async function selectChannelType(page, type) {
   await page.goto(`${appBaseURL}/#/settings/notifications/channel`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "通道设置", exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  await page.getByRole("heading", { name: "发送器设置", exact: true }).waitFor({ state: "visible", timeout: 10000 });
   await page.locator("#notification-channel-type").selectOption(type);
 }
 
 async function saveSelectedChannel(page) {
-  await page.getByRole("button", { name: "保存并设为当前通道" }).click();
+  await page.getByRole("button", { name: "保存并设为当前发送器" }).click();
   await page.waitForTimeout(500);
 }
 
 async function activateWebhookFromUI(page) {
   await selectChannelType(page, "webhook");
   await saveSelectedChannel(page);
-  await page.getByText(names.webhook).first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("Webhook").first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function createWebhookChannelFromUI(page, receiverURL) {
   log("create webhook channel from UI");
   await selectChannelType(page, "webhook");
-  await page.getByLabel("通道名称").fill(names.webhook);
   await page.getByLabel("Webhook URL").fill(`${receiverURL}/webhook`);
   await page.locator("#notification-webhook-method").selectOption("POST");
   await page.getByLabel("Content-Type").fill("application/json");
   await page.getByLabel("请求头 JSON").fill('{"X-Playwright":"notification"}');
-  await page.getByLabel("请求体模板").fill('{"title":"{{title}}","message":"{{message}}","node":"{{node_name}}"}');
+  await page.getByLabel("请求体").fill('{"node":"{{node_name}}","new":"{{new_value}}","detail":"{{detail_url}}"}');
   await saveSelectedChannel(page);
-  await page.getByText(names.webhook).first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("Webhook").first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function createTelegramChannelFromUI(page, receiverURL) {
   log("create telegram channel from UI");
   await selectChannelType(page, "telegram");
-  await page.getByLabel("通道名称").fill(names.telegram);
   await page.getByLabel("Bot Token").fill("playwright-token");
   await page.getByLabel("Chat ID").fill("12345");
   await page.getByLabel("Thread ID").fill("67890");
   await page.getByLabel("接口前缀").fill(`${receiverURL}/telegram/bot`);
   await saveSelectedChannel(page);
-  await page.getByText(names.telegram).first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("Telegram").first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function createJSChannelFromUI(page) {
   log("create javascript channel from UI");
   await selectChannelType(page, "javascript");
-  await page.getByLabel("通道名称").fill(names.javascript);
   await page.getByLabel("Sender 脚本").fill("function sendEvent(event) { return { ok: event.field_id !== '' }; }");
   await saveSelectedChannel(page);
-  await page.getByText(names.javascript).first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByText("JavaScript").first().waitFor({ state: "visible", timeout: 10000 });
 }
 
 async function testChannelFromUI(page, type) {
@@ -253,11 +246,11 @@ async function createMatchingRuleFromUI(page, nodeUUID) {
   return rule;
 }
 
-async function findChannel(context, name) {
+async function findChannelByType(context, type) {
   const channels = await apiOK(context, "/admin/notifications/channels", undefined, "list notification channels");
-  const channel = (channels.items || []).find((item) => item.name === name);
+  const channel = (channels.items || []).find((item) => item.type === type);
   if (!channel) {
-    throw new Error(`channel not found: ${name}`);
+    throw new Error(`channel not found: ${type}`);
   }
   return channel;
 }
@@ -323,12 +316,12 @@ try {
   if (receiver.requests.length - beforeTests !== 2) {
     throw new Error(`expected webhook and telegram test sends to hit receiver twice, got ${receiver.requests.length - beforeTests}`);
   }
-  await assertLogExists(context, (item) => item.channel_name === names.webhook && item.status === "success" && !item.rule_name, "webhook test log missing");
-  await assertLogExists(context, (item) => item.channel_name === names.telegram && item.status === "success" && !item.rule_name, "telegram test log missing");
-  await assertLogExists(context, (item) => item.channel_name === names.javascript && item.status === "success" && !item.rule_name, "javascript test log missing");
+  await assertLogExists(context, (item) => item.channel_type === "webhook" && item.status === "success" && !item.rule_name, "webhook test log missing");
+  await assertLogExists(context, (item) => item.channel_type === "telegram" && item.status === "success" && !item.rule_name, "telegram test log missing");
+  await assertLogExists(context, (item) => item.channel_type === "javascript" && item.status === "success" && !item.rule_name, "javascript test log missing");
 
   const matchingRule = await createMatchingRuleFromUI(page, nodeUUID);
-  const webhook = await findChannel(context, names.webhook);
+  const webhook = await findChannelByType(context, "webhook");
   const beforeMatchingReport = receiver.requests.length;
   await reportNode(context, nodeUUID, reporterToken, "Org B", "2026-05-03T01:00:00Z");
   if (receiver.requests.length !== beforeMatchingReport + 1) {
@@ -346,6 +339,13 @@ try {
   );
   if (!matchingLog.detail_url || !matchingLog.compare_url) {
     throw new Error(`matching log is missing public links: ${JSON.stringify(matchingLog)}`);
+  }
+  const matchingRequest = receiver.requests[receiver.requests.length - 1];
+  if (!matchingRequest.body.includes('"new":"Org B"')) {
+    throw new Error(`webhook body did not render event variable: ${matchingRequest.body}`);
+  }
+  if (matchingRequest.body.includes("旧值") || matchingRequest.body.includes("新值")) {
+    throw new Error(`webhook body unexpectedly used telegram notification template: ${matchingRequest.body}`);
   }
 
   await requestJSON(context, `/admin/notifications/rules/${matchingRule.id}`, {
@@ -380,35 +380,29 @@ try {
     throw new Error("disabled rule unexpectedly delivered a notification");
   }
 
-  const disabledChannel = await createChannelAPI(context, {
-    name: names.disabledChannel,
-    type: "webhook",
-    enabled: false,
-    config: { url: `${receiver.baseURL}/webhook-disabled` }
-  });
   await updateNotificationSettingsAPI(context, {
-    enabled: true,
-    active_channel_id: disabledChannel.id,
-    title_template: "{{node_name}} {{target_ip}} {{field_label}} 发生变化",
+    enabled: false,
+    active_channel_id: webhook.id,
+    title_template: "",
     body_template: "旧值 {{old_value}}\n新值 {{new_value}}\n详情 {{detail_url}}\n对比 {{compare_url}}"
   });
   await createRuleAPI(context, {
-    name: `${names.disabledChannel} Rule`,
+    name: names.globalDisabledRule,
     enabled: true,
-    channel_id: disabledChannel.id,
+    channel_id: webhook.id,
     node_uuid: nodeUUID,
     target_ip: targetIP,
     field_id: "info.organization"
   });
-  const beforeDisabledChannel = receiver.requests.length;
+  const beforeGlobalDisabled = receiver.requests.length;
   await reportNode(context, nodeUUID, reporterToken, "Org E", "2026-05-03T04:00:00Z");
-  if (receiver.requests.length !== beforeDisabledChannel) {
-    throw new Error("disabled active channel unexpectedly delivered a notification");
+  if (receiver.requests.length !== beforeGlobalDisabled) {
+    throw new Error("globally disabled notifications unexpectedly delivered");
   }
   await updateNotificationSettingsAPI(context, {
     enabled: true,
     active_channel_id: webhook.id,
-    title_template: "{{node_name}} {{target_ip}} {{field_label}} 发生变化",
+    title_template: "",
     body_template: "旧值 {{old_value}}\n新值 {{new_value}}\n详情 {{detail_url}}\n对比 {{compare_url}}"
   });
 

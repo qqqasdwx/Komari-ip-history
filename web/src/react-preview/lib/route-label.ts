@@ -24,7 +24,7 @@ export function routeLabel(pathname: string) {
     return "通知";
   }
   if (pathname === "/settings/notifications/channel") {
-    return "通道设置";
+    return "发送器设置";
   }
   if (pathname === "/settings/notifications/logs") {
     return "投递记录";
