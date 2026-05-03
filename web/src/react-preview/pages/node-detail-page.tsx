@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import {
-  Link,
   useLocation,
   useNavigate,
   useParams,
   useSearchParams
 } from "react-router-dom";
-import {
-  buildReportConfigListPath,
-  toStandaloneAppURL
-} from "../lib/embed-navigation";
+import { buildConnectPath } from "../lib/embed-navigation";
 import { formatDateTime } from "../lib/format";
 import { CurrentReportView } from "../lib/report";
 import { useNodePageData } from "../hooks/node-data";
@@ -18,7 +14,6 @@ import { PageHeader } from "../components/layout/page-header";
 import { NodeDetailLoading } from "../components/node/node-detail-loading";
 import { NodePageError } from "../components/node/node-page-error";
 import { TargetTabs } from "../components/node/target-tabs";
-import { Button } from "../components/ui/button";
 import { EmbedBridgePage } from "./embed-bridge-page";
 
 export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => void }) {
@@ -53,19 +48,6 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
     navigate(`${location.pathname}${query ? `?${query}` : ""}`, { replace: true });
   }
 
-  const currentTargetID = detail?.selected_target_id ?? detail?.current_target?.id ?? selectedTargetID ?? null;
-  const targetQuery = currentTargetID ? `?target_id=${currentTargetID}` : "";
-  const historyPath = `/nodes/${uuid}/history${targetQuery}`;
-
-  function goToReportConfig() {
-    const path = buildReportConfigListPath(uuid);
-    if (isEmbed) {
-      window.location.assign(toStandaloneAppURL(path));
-      return;
-    }
-    navigate(path);
-  }
-
   if (loading && !detail) {
     return <NodeDetailLoading />;
   }
@@ -75,7 +57,7 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
       <EmbedBridgePage
         title="接入节点"
         description="当前节点尚未配置，正在打开独立页面继续。"
-        actionURL={buildReportConfigListPath(uuid, { fromKomari: true, nodeName })}
+        actionURL={buildConnectPath(uuid, nodeName, { returnTo: "settings" })}
         actionLabel="去接入"
       />
     );
@@ -98,18 +80,24 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
       <PageHeader
         title={detail.name}
         subtitle={detail.has_data ? `最近更新: ${formatDateTime(detail.updated_at ?? undefined)}` : "当前还没有任何 IP 结果"}
-        backTo={isEmbed ? undefined : "/nodes"}
-        actions={
-          detail.current_target && !isEmbed ? (
-            <Button
-              asChild
-              className="rounded-xl border border-slate-200 bg-white text-slate-700 hover:border-indigo-300 hover:bg-white hover:text-indigo-600"
-            >
-              <Link to={historyPath}>查看历史记录</Link>
-            </Button>
-          ) : undefined
-        }
       />
+
+      {!isEmbed ? (
+        <section
+          className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm"
+          data-node-readonly-state="true"
+        >
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-sm font-semibold text-slate-900">只读视图</h2>
+            <p className="text-sm text-slate-500" data-node-binding-state="true">
+              {detail.binding_state === "komari_bound"
+                ? `已绑定：${detail.komari_node_name || "Komari 节点"}`
+                : "当前是独立节点"}
+            </p>
+            <p className="text-xs text-slate-400">节点名称、绑定关系、目标 IP、上报计划和接入命令在设置页管理。</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className={isEmbed ? "embed-detail-card rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" : "rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm"}>
         <div className="section space-y-4">
@@ -123,11 +111,6 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
               <span>当前节点还没有目标 IP。</span>
-              {!isEmbed ? (
-                <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={goToReportConfig} type="button">
-                  去接入
-                </Button>
-              ) : null}
             </div>
           )}
         </div>

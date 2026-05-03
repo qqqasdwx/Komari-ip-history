@@ -27,7 +27,8 @@ type Session struct {
 type Node struct {
 	ID                       uint       `gorm:"primaryKey" json:"id"`
 	NodeUUID                 string     `gorm:"size:48;not null;default:''" json:"node_uuid"`
-	KomariNodeUUID           string     `gorm:"size:64;uniqueIndex;not null" json:"komari_node_uuid"`
+	KomariNodeUUID           string     `gorm:"size:64;not null;default:''" json:"komari_node_uuid"`
+	KomariNodeName           string     `gorm:"size:255;not null;default:''" json:"komari_node_name"`
 	Name                     string     `gorm:"size:255;not null" json:"name"`
 	HasData                  bool       `gorm:"not null;default:false" json:"has_data"`
 	CurrentSummary           string     `gorm:"size:512" json:"current_summary"`

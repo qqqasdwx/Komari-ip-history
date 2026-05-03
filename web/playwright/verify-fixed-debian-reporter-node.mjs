@@ -95,16 +95,18 @@ async function tryOpenDetailWithData(page) {
   return true;
 }
 
-async function assertReportConfigShowsAutoTarget(page) {
+async function assertNodeSettingsShowsAutoTarget(page) {
   const row = await openFixedNodeRow(page);
-  await row.getByRole("button", { name: "上报设置" }).click();
-  const modal = page.locator('[data-node-report-config="true"]');
-  await modal.waitFor({ state: "visible", timeout: 10000 });
-  const text = await modal.innerText();
+  await row.click();
+  await page.getByRole("link", { name: "设置" }).first().click();
+  await page.waitForURL("**/#/nodes/**/settings**", { timeout: 10000 });
+  const panel = page.locator('[data-node-report-config="true"]');
+  await panel.waitFor({ state: "visible", timeout: 10000 });
+  const text = await panel.innerText();
   if (!text.includes("接入命令") || !text.includes("自动发现") || !text.includes("已启用")) {
-    throw new Error(`fixed reporter config does not show command and enabled auto target: ${text.slice(0, 800)}`);
+    throw new Error(`fixed reporter settings does not show command and enabled auto target: ${text.slice(0, 800)}`);
   }
-  const autoRow = modal.locator('[data-report-target-row="true"][data-target-source="auto"]').first();
+  const autoRow = panel.locator('[data-report-target-row="true"][data-target-source="auto"]').first();
   await autoRow.waitFor({ state: "visible", timeout: 10000 });
   await page.screenshot({ path: path.join(outputDir, "06-ipq-fixed-node-report-config.png"), fullPage: true });
 }
@@ -133,7 +135,7 @@ try {
   if (!ok) {
     throw new Error(`fixed reporter node did not show real data in the UI before timeout: ${nodeName}`);
   }
-  await assertReportConfigShowsAutoTarget(page);
+  await assertNodeSettingsShowsAutoTarget(page);
   writeFileSync(
     path.join(outputDir, "verify-summary.json"),
     JSON.stringify({ appBaseURL, nodeName, verifiedAt: new Date().toISOString() }, null, 2)

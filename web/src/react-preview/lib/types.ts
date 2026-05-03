@@ -32,10 +32,22 @@ export type HistoryRetentionSettings = {
 export type NodeListItem = {
   node_uuid: string;
   komari_node_uuid: string;
+  komari_node_name: string;
   name: string;
   has_data: boolean;
+  binding_state: "independent" | "komari_bound";
   updated_at?: string | null;
   created_at?: string;
+};
+
+export type KomariBindingCandidate = {
+  komari_node_uuid: string;
+  komari_node_name: string;
+  available: boolean;
+  occupied: boolean;
+  current: boolean;
+  bound_node_uuid: string;
+  bound_node_name: string;
 };
 
 export type NodeTargetListItem = {
@@ -63,8 +75,10 @@ export type NodeTargetDetail = {
 export type NodeDetail = {
   node_uuid: string;
   komari_node_uuid: string;
+  komari_node_name: string;
   name: string;
   has_data: boolean;
+  binding_state: "independent" | "komari_bound";
   updated_at?: string | null;
   targets: NodeTargetListItem[];
   selected_target_id?: number | null;

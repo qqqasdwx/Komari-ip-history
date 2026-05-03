@@ -130,7 +130,7 @@ try {
   screenshots.push("nodes-mobile.png");
 
   await page.setViewportSize({ width: 1440, height: 1200 });
-  await capture(page, `/nodes?report_config=${multiIPNode.komari_node_uuid}`, "nodes-report-config-desktop.png", async () => {
+  await capture(page, `/nodes/${multiIPNode.komari_node_uuid}/settings`, "nodes-report-config-desktop.png", async () => {
     await page.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
     await page.getByText("接入命令", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   });
@@ -173,7 +173,7 @@ try {
   const compareDetail = await fetchNodeDetail(page, compareNode.komari_node_uuid);
   const compareTargetID = compareDetail.current_target?.id;
   const compareQuery = compareTargetID ? `?target_id=${compareTargetID}` : "";
-  await capture(page, `/nodes/${compareNode.komari_node_uuid}/compare${compareQuery}`, "compare-multi-snapshot-desktop.png", async () => {
+  await capture(page, `/nodes/${compareNode.komari_node_uuid}/snapshots${compareQuery}`, "compare-multi-snapshot-desktop.png", async () => {
     await page.getByText("时间范围", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
     await page.locator(".compare-timeline-panel").waitFor({ state: "visible", timeout: 10000 });
     await page.getByRole("button", { name: /收藏快照|取消收藏/ }).first().waitFor({ state: "visible", timeout: 10000 });

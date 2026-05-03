@@ -90,14 +90,18 @@ if (rowCount > 0) {
     await page.waitForLoadState('networkidle');
   }
 
-  await chosenRow.getByRole('button', { name: '上报设置' }).click();
-  const reportConfigModal = page.locator('[data-node-report-config="true"]');
-  await reportConfigModal.waitFor({ state: 'visible', timeout: 10000 });
+  await chosenRow.click();
+  await page.waitForURL(`**/#/nodes/${firstUUID}`, { timeout: 10000 });
+  await page.getByRole('link', { name: '设置' }).first().click();
+  await page.waitForURL(`**/#/nodes/${firstUUID}/settings**`, { timeout: 10000 });
+  await page.locator('[data-node-settings-page="true"]').waitFor({ state: 'visible', timeout: 10000 });
+  const reportConfigPanel = page.locator('[data-node-report-config="true"]');
+  await reportConfigPanel.waitFor({ state: 'visible', timeout: 10000 });
   let modalDetail = JSON.parse((await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}?_=${Date.now()}`)).text);
   if (!Array.isArray(modalDetail.targets) || modalDetail.targets.length === 0) {
     await page.getByPlaceholder('例如 1.1.1.1 或 2606:4700:4700::1111').fill('203.0.113.10');
     await page.getByRole('button', { name: '添加 IP' }).click();
-    await reportConfigModal
+    await reportConfigPanel
       .locator('[data-report-target-row="true"][data-target-ip="203.0.113.10"]')
       .waitFor({ state: 'visible', timeout: 10000 });
     modalDetail = JSON.parse((await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}?_=${Date.now()}`)).text);
@@ -105,12 +109,12 @@ if (rowCount > 0) {
 
   const reportConfigCount = await page.locator('[data-node-report-config="true"]').count();
   if (reportConfigCount === 0) {
-    throw new Error('react node list modal missing report config');
+    throw new Error('react node settings page missing report config');
   }
   const timezoneSelect = page.locator('#report-config-timezone');
   await timezoneSelect.waitFor({ state: 'visible', timeout: 10000 });
   await timezoneSelect.selectOption(expectedBrowserTimeZone);
-  const runImmediatelyCheckbox = reportConfigModal.locator('input[type="checkbox"]').first();
+  const runImmediatelyCheckbox = reportConfigPanel.locator('input[type="checkbox"]').first();
   if (!(await runImmediatelyCheckbox.isChecked())) {
     await runImmediatelyCheckbox.check();
   }
@@ -123,10 +127,10 @@ if (rowCount > 0) {
     'report config timezone and immediate-run were not persisted'
   );
 
-  const configText = await reportConfigModal.innerText();
+  const configText = await reportConfigPanel.innerText();
   const installCommandCount = await page.getByText('接入命令', { exact: true }).count();
   if (installCommandCount === 0) {
-    throw new Error('react node list modal missing install command');
+    throw new Error('react node settings page missing install command');
   }
   if (!configText.includes('节点执行时会先请求上报计划') && !configText.includes('可以先安装脚本')) {
     throw new Error('react detail page missing reporter plan hint');
@@ -150,7 +154,7 @@ if (rowCount > 0) {
     throw new Error('react detail page schedule preview should render timezone at the end, for example 2026/5/3 0:00:00 (GMT+8)');
   }
   if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh')) {
-    throw new Error('react node list modal install command is not using GitHub raw install script');
+    throw new Error('react node settings page install command is not using GitHub raw install script');
   }
 
   if (detailAfterConfig.report_config?.schedule_timezone !== expectedBrowserTimeZone) {
@@ -165,7 +169,7 @@ if (rowCount > 0) {
   if (!toggleTarget) {
     throw new Error('report config should have at least one target after setup');
   }
-  const toggleTargetRow = reportConfigModal.locator(`[data-report-target-row="true"][data-target-id="${toggleTarget.id}"]`);
+  const toggleTargetRow = reportConfigPanel.locator(`[data-report-target-row="true"][data-target-id="${toggleTarget.id}"]`);
   await toggleTargetRow.waitFor({ state: 'visible', timeout: 10000 });
   const toggleTargetRowText = await toggleTargetRow.innerText();
   if (!toggleTargetRowText.includes(toggleTarget.source === 'auto' ? '自动发现' : '手动添加')) {
@@ -241,13 +245,11 @@ if (rowCount > 0) {
   if (invalidTimezoneResponse.status !== 400 || !invalidTimezoneResponse.text.includes('invalid timezone')) {
     throw new Error(`invalid timezone preview did not return a clear 400 error: ${invalidTimezoneResponse.status} ${invalidTimezoneResponse.text}`);
   }
-  await page.getByRole('button', { name: '关闭' }).click();
-
-  await page.locator(`[data-node-row="true"][data-node-uuid="${firstUUID}"]`).click({ position: { x: 24, y: 24 } });
-  await page.waitForURL(`**/#/nodes/${firstUUID}`);
+  await page.goto(`${appBaseURL}/#/nodes/${firstUUID}`);
   await page.waitForLoadState('networkidle');
   const detailReport = page.locator('[data-detail-report="true"]');
   await detailReport.waitFor();
+  await page.locator('[data-node-readonly-state="true"]').waitFor({ state: 'visible', timeout: 10000 });
 
   const detailData = JSON.parse(
     (await jsonFetch(page, `${appBaseURL}/api/v1/nodes/${firstUUID}`)).text
@@ -299,24 +301,32 @@ if (rowCount > 0) {
   if (detailReportConfigButtonCount !== 0) {
     throw new Error('react detail page should not expose report config entry');
   }
-  const historyLinkCount = await page.getByRole('link', { name: '查看历史记录' }).count();
-  if (historyLinkCount > 0) {
-    await page.getByRole('link', { name: '查看历史记录' }).click();
-    await page.waitForURL('**/#/nodes/**/history**');
-    await page.getByText('字段变化', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('link', { name: '快照对比' }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('button', { name: /全部时间|今天|近 7 天|本周|近 30 天|本月/ }).click();
-    const dateInputs = page.locator('input[type="datetime-local"]');
-    await dateInputs.nth(0).fill('2026-04-02T00:00');
-    await dateInputs.nth(1).fill('2026-04-02T23:59');
-    await page.getByRole('button', { name: '应用筛选' }).click();
-    await page.locator('[data-history-change-row="true"]').first().waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('link', { name: '快照对比' }).click();
-    await page.waitForURL('**/#/nodes/**/compare**');
-    await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.goto(detailURL);
-    await page.waitForLoadState('networkidle');
+  for (const label of ['返回', '设置', '详情', '历史', '快照']) {
+    await page.getByRole('link', { name: label }).first().waitFor({ state: 'visible', timeout: 10000 });
   }
+  for (const forbiddenText of ['保存名称', '选择 Komari 节点', '解除绑定', '接入命令']) {
+    if ((await page.getByText(forbiddenText, { exact: true }).count()) > 0) {
+      throw new Error(`react detail page should be read-only but shows ${forbiddenText}`);
+    }
+  }
+  await page.getByRole('link', { name: '历史' }).first().click();
+  await page.waitForURL('**/#/nodes/**/history**');
+  await page.getByText('字段变化', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByRole('link', { name: '快照' }).first().waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByRole('button', { name: /全部时间|今天|近 7 天|本周|近 30 天|本月/ }).click();
+  const dateInputs = page.locator('input[type="datetime-local"]');
+  await dateInputs.nth(0).fill('2026-04-02T00:00');
+  await dateInputs.nth(1).fill('2026-04-02T23:59');
+  await page.getByRole('button', { name: '应用筛选' }).click();
+  await page.locator('[data-history-change-row="true"]').first().waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByRole('link', { name: '快照' }).first().click();
+  await page.waitForURL('**/#/nodes/**/snapshots**');
+  await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.goto(`${appBaseURL}/#/nodes/${firstUUID}/compare${currentTarget?.id ? `?target_id=${currentTarget.id}` : ''}`);
+  await page.waitForURL('**/#/nodes/**/snapshots**');
+  await page.getByText('时间范围', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.goto(detailURL);
+  await page.waitForLoadState('networkidle');
 
   const detailHash = new URL(page.url()).hash.replace(/^#/, '');
   await page.goto(`${appBaseURL}/#${detailHash}${detailHash.includes('?') ? '&' : '?'}embed=1`);

@@ -235,6 +235,9 @@ CREATE TABLE app_settings (
 		if node.KomariNodeUUID == "" {
 			t.Fatal("expected komari_node_uuid to be preserved")
 		}
+		if node.KomariNodeName != node.Name {
+			t.Fatalf("expected komari_node_name to be backfilled from name, got %q for %q", node.KomariNodeName, node.Name)
+		}
 		if node.NodeUUID == "" {
 			t.Fatal("expected node_uuid to be backfilled")
 		}
@@ -245,6 +248,9 @@ CREATE TABLE app_settings (
 	}
 	if !reopened.Migrator().HasIndex(&models.Node{}, "idx_nodes_node_uuid") {
 		t.Fatalf("expected node_uuid index after migration")
+	}
+	if !reopened.Migrator().HasIndex(&models.Node{}, "idx_nodes_komari_node_uuid_bound") {
+		t.Fatalf("expected partial komari node binding index after migration")
 	}
 	if !reopened.Migrator().HasColumn(&models.Node{}, "ReporterScheduleTimezone") {
 		t.Fatalf("expected reporter_schedule_timezone column after migration")
@@ -264,5 +270,14 @@ CREATE TABLE app_settings (
 	}
 	if !target.ReportEnabled {
 		t.Fatalf("expected legacy target report_enabled to default to true")
+	}
+
+	independentA := models.Node{KomariNodeUUID: "", Name: "Independent A", ReporterToken: "independent-a"}
+	independentB := models.Node{KomariNodeUUID: "", Name: "Independent B", ReporterToken: "independent-b"}
+	if err := reopened.Create(&independentA).Error; err != nil {
+		t.Fatalf("create first independent node after migration: %v", err)
+	}
+	if err := reopened.Create(&independentB).Error; err != nil {
+		t.Fatalf("create second independent node after migration: %v", err)
 	}
 }

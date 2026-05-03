@@ -112,7 +112,7 @@ async function cleanupFixedNodes(appPage, komariPage) {
     : {};
   const ipqNodes = Array.isArray(ipqPayload.items) ? ipqPayload.items : [];
   for (const node of ipqNodes.filter((item) => legacyNodeNames.has(String(item.name || "")))) {
-    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
+    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.node_uuid || node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
   }
 
   await requestJSON(context, `${komariBaseURL}/api/login`, {

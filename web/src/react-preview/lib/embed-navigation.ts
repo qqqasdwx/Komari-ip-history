@@ -8,16 +8,16 @@ export function buildConnectPath(uuid: string, name: string, options?: { returnT
   return `/connect?${params.toString()}`;
 }
 
-export function buildReportConfigListPath(uuid: string, options?: { fromKomari?: boolean; nodeName?: string }) {
+export function buildNodeSettingsPath(uuid: string, options?: { fromKomari?: boolean; nodeName?: string }) {
   const params = new URLSearchParams();
-  params.set("report_config", uuid);
   if (options?.fromKomari) {
     params.set("from_komari", "1");
   }
   if (options?.nodeName?.trim()) {
     params.set("node_name", options.nodeName.trim());
   }
-  return `/nodes?${params.toString()}`;
+  const query = params.toString();
+  return `/nodes/${encodeURIComponent(uuid)}/settings${query ? `?${query}` : ""}`;
 }
 
 export function toStandaloneAppURL(path: string) {

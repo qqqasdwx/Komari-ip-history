@@ -176,7 +176,7 @@ async function loginKomari(page) {
   }), "komari login");
 }
 
-async function waitForStandaloneReportConfig(page, label) {
+async function waitForStandaloneNodeSettings(page, label) {
   const deadline = Date.now() + 30000;
   let loginSubmitted = false;
   let lastURL = page.url();
@@ -184,8 +184,8 @@ async function waitForStandaloneReportConfig(page, label) {
 
   while (Date.now() < deadline) {
     lastURL = page.url();
-    const modal = page.locator('[data-node-report-config="true"]').first();
-    if ((await modal.count()) > 0 && await modal.isVisible().catch(() => false)) {
+    const settings = page.locator('[data-node-settings-page="true"]').first();
+    if ((await settings.count()) > 0 && await settings.isVisible().catch(() => false)) {
       return;
     }
 
@@ -201,7 +201,7 @@ async function waitForStandaloneReportConfig(page, label) {
     await page.waitForTimeout(250);
   }
 
-  throw new Error(`${label} report config did not open: url=${lastURL} text=${lastText.slice(0, 500)}`);
+  throw new Error(`${label} node settings did not open: url=${lastURL} text=${lastText.slice(0, 500)}`);
 }
 
 async function configureLoader(appPage, komariPage, guestReadEnabled) {
@@ -398,10 +398,10 @@ try {
     connectButton.click()
   ]);
   await standalonePage.waitForLoadState("domcontentloaded");
-  await waitForStandaloneReportConfig(standalonePage, "logged-in pending");
+  await waitForStandaloneNodeSettings(standalonePage, "logged-in pending");
   const standaloneURL = standalonePage.url();
-  if (!standaloneURL.includes("report_config=") || !standaloneURL.includes("from_komari=1")) {
-    throw new Error(`logged-in pending scenario did not open report config URL: ${standaloneURL}`);
+  if (!standaloneURL.includes("#/nodes/") || !standaloneURL.includes("/settings") || !standaloneURL.includes("from_komari=1")) {
+    throw new Error(`logged-in pending scenario did not open node settings URL: ${standaloneURL}`);
   }
   await standalonePage.locator('[data-komari-return-hint="true"]').waitFor({ state: "visible", timeout: 10000 });
   await standalonePage.close();

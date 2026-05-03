@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,9 +28,73 @@ func (h NodeHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h NodeHandler) Create(c *gin.Context) {
+	var req service.CreateNodeInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	detail, err := service.CreateNode(h.DB, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
 func (h NodeHandler) Detail(c *gin.Context) {
 	targetID := parseTargetID(c.Query("target_id"))
 	detail, err := service.GetNodeDetail(h.DB, c.Param("uuid"), targetID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+func (h NodeHandler) Update(c *gin.Context) {
+	var req service.UpdateNodeInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	detail, err := service.UpdateNode(h.DB, c.Param("uuid"), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+func (h NodeHandler) KomariBindingCandidates(c *gin.Context) {
+	items, err := service.ListKomariBindingCandidates(h.DB, c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h NodeHandler) BindKomari(c *gin.Context) {
+	var req service.BindKomariNodeInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid request"})
+		return
+	}
+	detail, err := service.BindKomariNode(h.DB, c.Param("uuid"), req)
+	if err != nil {
+		if errors.Is(err, service.ErrKomariNodeAlreadyBound) {
+			c.JSON(http.StatusConflict, gin.H{"message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+func (h NodeHandler) UnbindKomari(c *gin.Context) {
+	detail, err := service.UnbindKomariNode(h.DB, c.Param("uuid"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return

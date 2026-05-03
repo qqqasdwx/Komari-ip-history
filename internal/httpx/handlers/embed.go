@@ -55,7 +55,9 @@ func (h EmbedHandler) Register(c *gin.Context) {
 		"status":  "ok",
 		"existed": existed,
 		"node": gin.H{
+			"node_uuid":        node.NodeUUID,
 			"komari_node_uuid": node.KomariNodeUUID,
+			"komari_node_name": node.KomariNodeName,
 			"name":             node.Name,
 			"has_data":         node.HasData,
 		},

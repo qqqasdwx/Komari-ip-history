@@ -141,7 +141,7 @@ export function HistoryRetentionPage(props: { onUnauthorized: () => void }) {
             </div>
 
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-800">
-              <p>`-1` 表示永久保留。历史越多，历史查询和快照对比会越慢。</p>
+              <p>`-1` 表示永久保留。历史越多，历史查询和快照页面会越慢。</p>
               <p>收藏快照不会被自动清理；取消收藏后会重新受全局保留策略影响。</p>
             </div>
 

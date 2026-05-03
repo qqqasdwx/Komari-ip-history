@@ -141,7 +141,7 @@ async function cleanupNodes(appPage, scenarioPages) {
     : {};
   const ipqNodes = Array.isArray(ipqPayload.items) ? ipqPayload.items : [];
   for (const node of ipqNodes.filter((item) => String(item.name || "").startsWith("Playwright Real User "))) {
-    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
+    await requestJSON(context, `${appBaseURL}/api/v1/nodes/${node.node_uuid || node.komari_node_uuid}`, { method: "DELETE" }).catch(() => {});
   }
 
   for (const { baseURL } of scenarioPages) {
@@ -832,14 +832,16 @@ async function verifyHomeEntryButtons(page, baseURL, theme, connectedNode, pendi
   }
 }
 
-async function openReportConfigFromUI(appPage, uuid, nodeName, scenarioDir) {
-  log(`open IPQ report config from UI: ${nodeName}`);
+async function openNodeSettingsFromUI(appPage, uuid, nodeName, scenarioDir) {
+  log(`open IPQ node settings from UI: ${nodeName}`);
   await appPage.goto(`${appBaseURL}/#/nodes`);
   await appPage.getByPlaceholder("搜索节点名称").fill(nodeName);
   await appPage.getByPlaceholder("搜索节点名称").press("Enter");
   const row = appPage.locator(`[data-node-row="true"][data-node-uuid="${uuid}"]`);
   await row.waitFor({ state: "visible", timeout: 15000 });
-  await row.getByRole("button", { name: "上报设置" }).click();
+  await row.click();
+  await appPage.getByRole("link", { name: "设置" }).first().click();
+  await appPage.waitForURL(`**/#/nodes/${uuid}/settings**`, { timeout: 10000 });
   await appPage.locator('[data-node-report-config="true"]').waitFor({ state: "visible", timeout: 10000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "04-ipq-report-config-empty.png"), fullPage: true });
 }
@@ -1007,7 +1009,7 @@ async function seedTargetReports(appPage, uuid, targets) {
 }
 
 async function verifyConfiguredNode(appPage, uuid, targets, scenarioDir) {
-  log(`verify detail/history/compare pages for ${uuid}`);
+  log(`verify detail/history/snapshot pages for ${uuid}`);
   const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${uuid}`, undefined, "load configured node");
   const firstTarget = detail.targets?.find((target) => target.ip === targets[0]);
   const secondTarget = detail.targets?.find((target) => target.ip === targets[1]);
@@ -1026,7 +1028,7 @@ async function verifyConfiguredNode(appPage, uuid, targets, scenarioDir) {
   await appPage.locator('[data-history-change-row="true"]').first().waitFor({ state: "visible", timeout: 15000 });
   await appPage.screenshot({ path: path.join(scenarioDir, "07-ipq-history.png"), fullPage: true });
 
-  await appPage.goto(`${appBaseURL}/#/nodes/${uuid}/compare?target_id=${firstTarget.id}`);
+  await appPage.goto(`${appBaseURL}/#/nodes/${uuid}/snapshots?target_id=${firstTarget.id}`);
   await appPage.getByText("时间范围", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   await appPage.locator(".compare-timeline-panel").waitFor({ state: "visible", timeout: 15000 });
   await appPage.getByRole("button", { name: /收藏快照|取消收藏/ }).first().waitFor({
@@ -1059,16 +1061,18 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
     "01-komari-connected-node-created.png"
   );
   const standaloneURL = await connectNodeFromKomari(komariPage, baseURL, node, scenarioDir);
+  const connectedDetail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${node.uuid}`, undefined, "load connected IPQ node");
+  const ipqNodeUUID = connectedDetail.node_uuid || node.uuid;
 
-  await openReportConfigFromUI(appPage, node.uuid, nodeName, scenarioDir);
-  await configureTargetsFromUI(appPage, scenarioDir, targets, node.uuid);
-  await seedTargetReports(appPage, node.uuid, targets);
+  await openNodeSettingsFromUI(appPage, ipqNodeUUID, nodeName, scenarioDir);
+  await configureTargetsFromUI(appPage, scenarioDir, targets, ipqNodeUUID);
+  await seedTargetReports(appPage, ipqNodeUUID, targets);
   await verifyHomeEntryButtons(komariPage, baseURL, theme, node, pendingNode, scenarioDir);
 
   if (fullVerification) {
-    await verifyConfiguredNode(appPage, node.uuid, targets, scenarioDir);
+    await verifyConfiguredNode(appPage, ipqNodeUUID, targets, scenarioDir);
   } else {
-    const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${node.uuid}`, undefined, "load PurCarte node");
+    const detail = await apiOK(appPage, `${appBaseURL}/api/v1/nodes/${ipqNodeUUID}`, undefined, "load PurCarte node");
     if (!detail.has_data) {
       throw new Error("PurCarte real-user node did not receive report data");
     }
@@ -1078,6 +1082,7 @@ async function runScenario({ appPage, komariPage, baseURL, theme, targets, fullV
     theme,
     nodeName,
     uuid: node.uuid,
+    ipqNodeUUID,
     pendingNodeName,
     pendingUUID: pendingNode.uuid,
     standaloneURL,

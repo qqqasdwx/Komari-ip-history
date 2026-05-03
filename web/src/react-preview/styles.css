@@ -50,7 +50,7 @@ textarea {
 @media (min-width: 1180px) {
   .react-node-list-head,
   .react-node-list-row {
-    grid-template-columns: minmax(220px, 1.5fr) 92px 180px 120px;
+    grid-template-columns: minmax(260px, 1.6fr) minmax(160px, 0.8fr) 96px 180px;
     align-items: center;
     gap: 16px;
   }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,6 +50,141 @@ func TestReorderNodeTargetsRejectsDuplicateIDs(t *testing.T) {
 	})
 	if err == nil || err.Error() != "target_ids mismatch" {
 		t.Fatalf("expected target_ids mismatch, got %v", err)
+	}
+}
+
+func TestCreateIndependentNodeCanUseReportConfig(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	detail, err := CreateNode(db, CreateNodeInput{Name: "Independent Node"})
+	if err != nil {
+		t.Fatalf("create independent node: %v", err)
+	}
+	if detail.NodeUUID == "" {
+		t.Fatalf("expected generated node_uuid")
+	}
+	if detail.KomariNodeUUID != "" {
+		t.Fatalf("expected no komari binding, got %q", detail.KomariNodeUUID)
+	}
+	if detail.BindingState != "independent" {
+		t.Fatalf("unexpected binding state: %s", detail.BindingState)
+	}
+
+	target, err := AddNodeTarget(db, config.Config{}, detail.NodeUUID, AddNodeTargetInput{IP: "198.51.100.80"})
+	if err != nil {
+		t.Fatalf("add independent target: %v", err)
+	}
+	nextDetail, err := GetNodeDetail(db, detail.NodeUUID, nil)
+	if err != nil {
+		t.Fatalf("get independent node detail: %v", err)
+	}
+	if got, want := strings.Join(nextDetail.ReportConfig.TargetIPs, ","), target.IP; got != want {
+		t.Fatalf("unexpected target IPs: got %q want %q", got, want)
+	}
+	if nextDetail.ReportConfig.EndpointPath != "/api/v1/report/nodes/"+detail.NodeUUID {
+		t.Fatalf("expected report endpoint to use independent node_uuid, got %s", nextDetail.ReportConfig.EndpointPath)
+	}
+}
+
+func TestUpdateNodeRenamesIPQNodeWithoutChangingKomariName(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	node := models.Node{KomariNodeUUID: "komari-rename", KomariNodeName: "Komari Original", Name: "IPQ Original", ReporterToken: "token"}
+	if err := db.Create(&node).Error; err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	detail, err := UpdateNode(db, node.NodeUUID, UpdateNodeInput{Name: "IPQ Renamed"})
+	if err != nil {
+		t.Fatalf("update node: %v", err)
+	}
+	if detail.Name != "IPQ Renamed" {
+		t.Fatalf("expected IPQ name to change, got %s", detail.Name)
+	}
+	if detail.KomariNodeName != "Komari Original" {
+		t.Fatalf("expected Komari name to be preserved, got %s", detail.KomariNodeName)
+	}
+}
+
+func TestBindKomariNodeConsumesPendingShellAndUnbindKeepsNode(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	independent, err := CreateNode(db, CreateNodeInput{Name: "Independent Binding Target"})
+	if err != nil {
+		t.Fatalf("create independent node: %v", err)
+	}
+	pending, _, err := RegisterNode(db, config.Config{}, RegisterNodeInput{
+		KomariNodeUUID: "komari-pending-bind",
+		Name:           "Komari Pending Bind",
+	})
+	if err != nil {
+		t.Fatalf("create pending komari shell: %v", err)
+	}
+
+	candidates, err := ListKomariBindingCandidates(db, independent.NodeUUID)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(candidates) != 1 || !candidates[0].Available || candidates[0].Occupied {
+		t.Fatalf("expected available pending candidate, got %#v", candidates)
+	}
+
+	bound, err := BindKomariNode(db, independent.NodeUUID, BindKomariNodeInput{KomariNodeUUID: pending.KomariNodeUUID})
+	if err != nil {
+		t.Fatalf("bind komari node: %v", err)
+	}
+	if bound.NodeUUID != independent.NodeUUID {
+		t.Fatalf("expected independent node to remain primary, got %s", bound.NodeUUID)
+	}
+	if bound.KomariNodeUUID != "komari-pending-bind" || bound.KomariNodeName != "Komari Pending Bind" {
+		t.Fatalf("unexpected binding detail: %#v", bound)
+	}
+	var pendingCount int64
+	if err := db.Model(&models.Node{}).Where("id = ?", pending.ID).Count(&pendingCount).Error; err != nil {
+		t.Fatalf("count pending shell: %v", err)
+	}
+	if pendingCount != 0 {
+		t.Fatalf("expected pending shell to be consumed, got %d", pendingCount)
+	}
+
+	unbound, err := UnbindKomariNode(db, bound.NodeUUID)
+	if err != nil {
+		t.Fatalf("unbind komari node: %v", err)
+	}
+	if unbound.NodeUUID != independent.NodeUUID {
+		t.Fatalf("expected node to remain after unbind")
+	}
+	if unbound.KomariNodeUUID != "" || unbound.BindingState != "independent" {
+		t.Fatalf("expected independent node after unbind, got %#v", unbound)
+	}
+}
+
+func TestBindKomariNodeRejectsOccupiedCandidate(t *testing.T) {
+	db := openNodesServiceTestDB(t)
+
+	independent, err := CreateNode(db, CreateNodeInput{Name: "Independent Conflict Target"})
+	if err != nil {
+		t.Fatalf("create independent node: %v", err)
+	}
+	occupied := models.Node{KomariNodeUUID: "komari-occupied", KomariNodeName: "Komari Occupied", Name: "Already Bound", ReporterToken: "token"}
+	if err := db.Create(&occupied).Error; err != nil {
+		t.Fatalf("create occupied node: %v", err)
+	}
+	if err := db.Create(&models.NodeTarget{NodeID: occupied.ID, TargetIP: "203.0.113.90", SortOrder: 0}).Error; err != nil {
+		t.Fatalf("create occupied target: %v", err)
+	}
+
+	candidates, err := ListKomariBindingCandidates(db, independent.NodeUUID)
+	if err != nil {
+		t.Fatalf("list candidates: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Available || !candidates[0].Occupied {
+		t.Fatalf("expected occupied candidate, got %#v", candidates)
+	}
+
+	_, err = BindKomariNode(db, independent.NodeUUID, BindKomariNodeInput{KomariNodeUUID: occupied.KomariNodeUUID})
+	if !errors.Is(err, ErrKomariNodeAlreadyBound) {
+		t.Fatalf("expected ErrKomariNodeAlreadyBound, got %v", err)
 	}
 }
 
