@@ -129,3 +129,52 @@ type APIAccessLog struct {
 	RemoteIP   string    `gorm:"size:64;not null;default:''" json:"remote_ip"`
 	CreatedAt  time.Time `gorm:"index" json:"created_at"`
 }
+
+type NotificationChannel struct {
+	ID         uint           `gorm:"primaryKey" json:"id"`
+	Name       string         `gorm:"size:128;not null" json:"name"`
+	Type       string         `gorm:"size:32;index;not null" json:"type"`
+	Enabled    bool           `gorm:"not null;default:true" json:"enabled"`
+	ConfigJSON string         `gorm:"type:longtext;not null;default:'{}'" json:"-"`
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+type NotificationRule struct {
+	ID        uint                `gorm:"primaryKey" json:"id"`
+	Name      string              `gorm:"size:128;not null" json:"name"`
+	Enabled   bool                `gorm:"not null;default:true" json:"enabled"`
+	ChannelID uint                `gorm:"index;not null" json:"channel_id"`
+	Channel   NotificationChannel `gorm:"constraint:OnDelete:CASCADE" json:"-"`
+	NodeUUID  string              `gorm:"size:64;not null;default:''" json:"node_uuid"`
+	TargetIP  string              `gorm:"size:64;not null;default:''" json:"target_ip"`
+	FieldID   string              `gorm:"size:255;not null;default:''" json:"field_id"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
+	DeletedAt gorm.DeletedAt      `gorm:"index" json:"-"`
+}
+
+type NotificationDeliveryLog struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	ChannelID     *uint     `gorm:"index" json:"channel_id"`
+	RuleID        *uint     `gorm:"index" json:"rule_id"`
+	ChannelName   string    `gorm:"size:128;not null;default:''" json:"channel_name"`
+	ChannelType   string    `gorm:"size:32;not null;default:''" json:"channel_type"`
+	RuleName      string    `gorm:"size:128;not null;default:''" json:"rule_name"`
+	Status        string    `gorm:"size:16;index;not null" json:"status"`
+	Error         string    `gorm:"type:longtext" json:"error"`
+	Title         string    `gorm:"type:longtext" json:"title"`
+	Body          string    `gorm:"type:longtext" json:"body"`
+	NodeUUID      string    `gorm:"size:64;not null;default:''" json:"node_uuid"`
+	NodeName      string    `gorm:"size:255;not null;default:''" json:"node_name"`
+	TargetIP      string    `gorm:"size:64;not null;default:''" json:"target_ip"`
+	FieldID       string    `gorm:"size:255;not null;default:''" json:"field_id"`
+	FieldLabel    string    `gorm:"size:255;not null;default:''" json:"field_label"`
+	PreviousValue string    `gorm:"type:longtext" json:"previous_value"`
+	CurrentValue  string    `gorm:"type:longtext" json:"current_value"`
+	RecordedAt    time.Time `gorm:"index" json:"recorded_at"`
+	DetailURL     string    `gorm:"type:longtext" json:"detail_url"`
+	CompareURL    string    `gorm:"type:longtext" json:"compare_url"`
+	CreatedAt     time.Time `gorm:"index" json:"created_at"`
+}

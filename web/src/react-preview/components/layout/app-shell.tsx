@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  Bell,
   Camera,
   Clock3,
   History,
@@ -34,6 +35,7 @@ import { NodeHistoryComparePage } from "../../pages/node-history-compare-page";
 import { NodeHistoryPage } from "../../pages/node-history-page";
 import { NodeSettingsPage } from "../../pages/node-settings-page";
 import { NodesPage } from "../../pages/nodes-page";
+import { NotificationsPage } from "../../pages/notifications-page";
 import { PublicAPIDocsPage } from "../../pages/public-api-docs-page";
 import { Button } from "../ui/button";
 import { EmbedFrameShell } from "./embed-frame-shell";
@@ -44,6 +46,7 @@ const nodeNavItems: NavItem[] = [{ to: "/nodes", label: "节点结果", icon: <S
 const settingsNavItems: NavItem[] = [
   { to: "/settings/integration", label: "接入配置", icon: <Plug /> },
   { to: "/settings/history-retention", label: "历史保留", icon: <Clock3 /> },
+  { to: "/settings/notifications", label: "通知", icon: <Bell /> },
   { to: "/settings/api-keys", label: "开放 API", icon: <KeyRound /> },
   { to: "/settings/user", label: "用户", icon: <UserCog /> }
 ];
@@ -118,6 +121,7 @@ export function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>;
       <Route path="/nodes/:uuid/changes" element={<Navigate to="../history" relative="path" replace />} />
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/history-retention" element={<HistoryRetentionPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notifications" element={<NotificationsPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/api-keys" element={<APIKeysPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/api-keys/docs" element={<PublicAPIDocsPage />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />
