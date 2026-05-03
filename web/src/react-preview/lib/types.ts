@@ -66,6 +66,7 @@ export type APIAccessLogResponse = {
 
 export type NotificationSettings = {
   enabled: boolean;
+  active_channel_id?: number | null;
   title_template: string;
   body_template: string;
 };

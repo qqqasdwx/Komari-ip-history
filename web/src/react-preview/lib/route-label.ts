@@ -23,6 +23,12 @@ export function routeLabel(pathname: string) {
   if (pathname === "/settings/notifications") {
     return "通知";
   }
+  if (pathname === "/settings/notifications/channel") {
+    return "通道设置";
+  }
+  if (pathname === "/settings/notifications/logs") {
+    return "投递记录";
+  }
   if (pathname === "/settings/api-keys/docs") {
     return "开放 API 文档";
   }

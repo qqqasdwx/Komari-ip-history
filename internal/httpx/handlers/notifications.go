@@ -184,8 +184,12 @@ func (h AdminHandler) DeleteNotificationRule(c *gin.Context) {
 func (h AdminHandler) ListNotificationDeliveryLogs(c *gin.Context) {
 	page := parsePositiveInt(c.Query("page"))
 	pageSize := parsePositiveInt(c.Query("page_size"))
-	items, err := service.ListNotificationDeliveryLogs(h.DB, page, pageSize)
+	items, err := service.ListNotificationDeliveryLogs(h.DB, page, pageSize, c.Query("status"))
 	if err != nil {
+		if err.Error() == "notification delivery status filter is invalid" {
+			c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to load notification delivery logs"})
 		return
 	}

@@ -136,6 +136,14 @@ func TestNotificationChannelsCanSaveAndTestSend(t *testing.T) {
 				"script": `function send(input) { return { ok: input.title.length > 0 }; }`,
 			},
 		},
+		{
+			Name:    "JavaScript SendMessage Test",
+			Type:    NotificationChannelJavaScript,
+			Enabled: true,
+			Config: map[string]string{
+				"script": `async function sendMessage(message, title) { return { ok: title.length > 0 && message.length > 0 }; }`,
+			},
+		},
 	}
 
 	for _, input := range channels {
@@ -197,7 +205,7 @@ func TestNotificationMatchingRuleCreatesDeliveryLog(t *testing.T) {
 	if got, want := hits.Load(), int64(1); got != want {
 		t.Fatalf("expected %d webhook delivery, got %d", want, got)
 	}
-	logs, err := ListNotificationDeliveryLogs(db, 1, 10)
+	logs, err := ListNotificationDeliveryLogs(db, 1, 10, "")
 	if err != nil {
 		t.Fatalf("list logs: %v", err)
 	}
@@ -210,6 +218,61 @@ func TestNotificationMatchingRuleCreatesDeliveryLog(t *testing.T) {
 	}
 	if !strings.Contains(log.DetailURL, "https://ipq.example/#/nodes/") || !strings.Contains(log.CompareURL, "/snapshots?target_id=") {
 		t.Fatalf("expected public links in log, got detail=%q compare=%q", log.DetailURL, log.CompareURL)
+	}
+}
+
+func TestNotificationUsesActiveChannelWhenConfigured(t *testing.T) {
+	db := openNotificationServiceTestDB(t)
+	targetIP := "203.0.113.43"
+	detail := createNotificationNode(t, db, targetIP)
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org A", "2026-05-03T00:00:00Z")
+
+	var oldHits atomic.Int64
+	oldServer := notificationTestServer(http.StatusOK, "old", &oldHits)
+	defer oldServer.Close()
+	oldChannel, err := CreateNotificationChannel(db, NotificationChannelInput{
+		Name:    "Old Webhook",
+		Type:    NotificationChannelWebhook,
+		Enabled: true,
+		Config:  map[string]string{"url": oldServer.URL},
+	})
+	if err != nil {
+		t.Fatalf("create old channel: %v", err)
+	}
+
+	var activeHits atomic.Int64
+	activeServer := notificationTestServer(http.StatusOK, "active", &activeHits)
+	defer activeServer.Close()
+	activeChannel, err := CreateNotificationChannel(db, NotificationChannelInput{
+		Name:    "Active Webhook",
+		Type:    NotificationChannelWebhook,
+		Enabled: true,
+		Config:  map[string]string{"url": activeServer.URL},
+	})
+	if err != nil {
+		t.Fatalf("create active channel: %v", err)
+	}
+	if _, err := SetNotificationSettings(db, NotificationSettings{Enabled: true, ActiveChannelID: &activeChannel.ID}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	if _, err := CreateNotificationRule(db, NotificationRuleInput{
+		Name:      "Organization changed",
+		Enabled:   true,
+		ChannelID: oldChannel.ID,
+		NodeUUID:  detail.NodeUUID,
+		TargetIP:  targetIP,
+		FieldID:   "info.organization",
+	}); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	reportNotificationNode(t, db, config.Config{}, detail, targetIP, "Org B", "2026-05-03T01:00:00Z")
+
+	if got := oldHits.Load(); got != 0 {
+		t.Fatalf("expected old channel to be ignored, got %d hits", got)
+	}
+	if got, want := activeHits.Load(), int64(1); got != want {
+		t.Fatalf("expected active channel hits %d, got %d", want, got)
 	}
 }
 

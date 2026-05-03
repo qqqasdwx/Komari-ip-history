@@ -35,7 +35,7 @@ import { NodeHistoryComparePage } from "../../pages/node-history-compare-page";
 import { NodeHistoryPage } from "../../pages/node-history-page";
 import { NodeSettingsPage } from "../../pages/node-settings-page";
 import { NodesPage } from "../../pages/nodes-page";
-import { NotificationsPage } from "../../pages/notifications-page";
+import { NotificationChannelSettingsPage, NotificationDeliveryLogsPage, NotificationsPage } from "../../pages/notifications-page";
 import { PublicAPIDocsPage } from "../../pages/public-api-docs-page";
 import { Button } from "../ui/button";
 import { EmbedFrameShell } from "./embed-frame-shell";
@@ -122,6 +122,8 @@ export function AppShell(props: { me: MeResponse; onLogout: () => Promise<void>;
       <Route path="/settings/integration" element={<IntegrationPage me={props.me} onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/history-retention" element={<HistoryRetentionPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/notifications" element={<NotificationsPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notifications/channel" element={<NotificationChannelSettingsPage onUnauthorized={props.onUnauthorized} />} />
+      <Route path="/settings/notifications/logs" element={<NotificationDeliveryLogsPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/api-keys" element={<APIKeysPage onUnauthorized={props.onUnauthorized} />} />
       <Route path="/settings/api-keys/docs" element={<PublicAPIDocsPage />} />
       <Route path="/settings/fields" element={<Navigate to="/nodes" replace />} />

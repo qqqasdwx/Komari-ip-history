@@ -36,9 +36,10 @@ const (
 )
 
 type NotificationSettings struct {
-	Enabled       bool   `json:"enabled"`
-	TitleTemplate string `json:"title_template"`
-	BodyTemplate  string `json:"body_template"`
+	Enabled         bool   `json:"enabled"`
+	ActiveChannelID *uint  `json:"active_channel_id"`
+	TitleTemplate   string `json:"title_template"`
+	BodyTemplate    string `json:"body_template"`
 }
 
 type NotificationChannelInput struct {
@@ -181,6 +182,13 @@ func SetNotificationSettings(db *gorm.DB, settings NotificationSettings) (Notifi
 	if strings.TrimSpace(settings.BodyTemplate) == "" {
 		settings.BodyTemplate = notificationDefaultBodyTemplate
 	}
+	if settings.ActiveChannelID != nil {
+		if *settings.ActiveChannelID == 0 {
+			settings.ActiveChannelID = nil
+		} else if err := ensureNotificationChannelExists(db, *settings.ActiveChannelID); err != nil {
+			return NotificationSettings{}, err
+		}
+	}
 	raw, err := json.Marshal(settings)
 	if err != nil {
 		return NotificationSettings{}, err
@@ -305,6 +313,16 @@ func DeleteNotificationChannel(db *gorm.DB, id uint) error {
 		if result.RowsAffected == 0 {
 			return gorm.ErrRecordNotFound
 		}
+		settings, err := GetNotificationSettings(tx)
+		if err != nil {
+			return err
+		}
+		if settings.ActiveChannelID != nil && *settings.ActiveChannelID == id {
+			settings.ActiveChannelID = nil
+			if _, err := SetNotificationSettings(tx, settings); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -428,15 +446,23 @@ func DeleteNotificationRule(db *gorm.DB, id uint) error {
 	return nil
 }
 
-func ListNotificationDeliveryLogs(db *gorm.DB, page, pageSize int) (NotificationDeliveryLogPage, error) {
+func ListNotificationDeliveryLogs(db *gorm.DB, page, pageSize int, status string) (NotificationDeliveryLogPage, error) {
 	page = normalizeHistoryPage(page)
 	pageSize = normalizeHistoryPageSize(0, pageSize)
+	status, err := normalizeNotificationDeliveryStatusFilter(status)
+	if err != nil {
+		return NotificationDeliveryLogPage{}, err
+	}
+	query := db.Model(&models.NotificationDeliveryLog{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
 	var total int64
-	if err := db.Model(&models.NotificationDeliveryLog{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return NotificationDeliveryLogPage{}, err
 	}
 	var logs []models.NotificationDeliveryLog
-	if err := db.Order("created_at DESC").Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&logs).Error; err != nil {
+	if err := query.Order("created_at DESC").Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&logs).Error; err != nil {
 		return NotificationDeliveryLogPage{}, err
 	}
 	items := make([]NotificationDeliveryLogItem, 0, len(logs))
@@ -479,6 +505,10 @@ func triggerNotificationsForHistory(db *gorm.DB, historyID uint, cfgPublicBaseUR
 	if len(events) == 0 {
 		return nil
 	}
+	activeChannel, err := getActiveNotificationChannel(db, settings)
+	if err != nil {
+		return err
+	}
 	var rules []models.NotificationRule
 	if err := db.Preload("Channel").Where("enabled = ?", true).Find(&rules).Error; err != nil {
 		return err
@@ -488,11 +518,15 @@ func triggerNotificationsForHistory(db *gorm.DB, historyID uint, cfgPublicBaseUR
 			if !notificationRuleMatches(rule, event) {
 				continue
 			}
-			if rule.Channel.ID == 0 || !rule.Channel.Enabled {
+			channel := rule.Channel
+			if activeChannel != nil {
+				channel = *activeChannel
+			}
+			if channel.ID == 0 || !channel.Enabled {
 				continue
 			}
 			message := renderNotificationMessage(settings, event)
-			deliverNotificationMessage(db, rule.Channel, &rule, message)
+			deliverNotificationMessage(db, channel, &rule, message)
 		}
 	}
 	return nil
@@ -630,10 +664,14 @@ func sendTelegramNotification(config map[string]string, message notificationRend
 	chatID := strings.TrimSpace(config["chat_id"])
 	apiURL := strings.TrimSpace(config["api_url"])
 	if apiURL == "" {
+		endpoint := strings.TrimRight(strings.TrimSpace(config["endpoint"]), "/")
+		if endpoint == "" {
+			endpoint = "https://api.telegram.org/bot"
+		}
 		if botToken == "" {
 			return errors.New("telegram bot token is required")
 		}
-		apiURL = "https://api.telegram.org/bot" + url.PathEscape(botToken) + "/sendMessage"
+		apiURL = endpoint + url.PathEscape(botToken) + "/sendMessage"
 	}
 	if chatID == "" {
 		return errors.New("telegram chat id is required")
@@ -641,6 +679,9 @@ func sendTelegramNotification(config map[string]string, message notificationRend
 	payload := map[string]any{
 		"chat_id": chatID,
 		"text":    strings.TrimSpace(message.Title + "\n\n" + message.Body),
+	}
+	if messageThreadID := strings.TrimSpace(config["message_thread_id"]); messageThreadID != "" {
+		payload["message_thread_id"] = messageThreadID
 	}
 	return postJSON(apiURL, nil, payload)
 }
@@ -650,18 +691,45 @@ func sendWebhookNotification(config map[string]string, message notificationRende
 	if webhookURL == "" {
 		return errors.New("webhook url is required")
 	}
+	method := strings.ToUpper(strings.TrimSpace(config["method"]))
+	if method == "" {
+		method = http.MethodPost
+	}
+	if method != http.MethodPost && method != http.MethodGet {
+		return errors.New("webhook method must be GET or POST")
+	}
 	headers := map[string]string{}
-	if rawHeaders := strings.TrimSpace(config["headers_json"]); rawHeaders != "" {
+	rawHeaders := strings.TrimSpace(config["headers_json"])
+	if rawHeaders == "" {
+		rawHeaders = strings.TrimSpace(config["headers"])
+	}
+	if rawHeaders != "" {
 		if err := json.Unmarshal([]byte(rawHeaders), &headers); err != nil {
-			return errors.New("webhook headers_json must be a JSON object")
+			return errors.New("webhook headers must be a JSON object")
 		}
+	}
+	contentType := strings.TrimSpace(config["content_type"])
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	bodyTemplate := strings.TrimSpace(config["body"])
+	if bodyTemplate != "" {
+		body := renderNotificationTemplate(bodyTemplate, notificationTemplateValues(message))
+		return sendWebhookRequest(webhookURL, method, contentType, headers, config, strings.NewReader(body))
 	}
 	payload := map[string]any{
 		"title":   message.Title,
 		"body":    message.Body,
 		"context": message.Context,
 	}
-	return postJSON(webhookURL, headers, payload)
+	if method == http.MethodGet {
+		return sendWebhookRequest(webhookURL, method, contentType, headers, config, nil)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return sendWebhookRequest(webhookURL, method, contentType, headers, config, bytes.NewReader(raw))
 }
 
 func sendJavaScriptNotification(config map[string]string, message notificationRenderedMessage) error {
@@ -677,29 +745,34 @@ func sendJavaScriptNotification(config map[string]string, message notificationRe
 	if _, err := vm.RunString(script); err != nil {
 		return err
 	}
+	if sendEvent, ok := goja.AssertFunction(vm.Get("sendEvent")); ok {
+		result, err := sendEvent(goja.Undefined(), vm.ToValue(notificationEventPayload(message)))
+		if err != nil {
+			return err
+		}
+		return validateJavaScriptNotificationResult(result.Export())
+	}
+	if sendMessage, ok := goja.AssertFunction(vm.Get("sendMessage")); ok {
+		result, err := sendMessage(goja.Undefined(), vm.ToValue(message.Body), vm.ToValue(message.Title))
+		if err != nil {
+			return err
+		}
+		return validateJavaScriptNotificationResult(result.Export())
+	}
 	send, ok := goja.AssertFunction(vm.Get("send"))
 	if !ok {
-		return errors.New("javascript sender must define send(input)")
+		return errors.New("javascript sender must define send(input), sendMessage(message, title), or sendEvent(event)")
 	}
 	result, err := send(goja.Undefined(), vm.ToValue(map[string]any{
 		"title":   message.Title,
 		"body":    message.Body,
 		"context": message.Context,
+		"event":   notificationEventPayload(message),
 	}))
 	if err != nil {
 		return err
 	}
-	if exported := result.Export(); exported != nil {
-		if resultMap, ok := exported.(map[string]any); ok {
-			if okValue, exists := resultMap["ok"]; exists && !truthyNotificationResult(okValue) {
-				if messageValue, hasMessage := resultMap["message"]; hasMessage {
-					return fmt.Errorf("%v", messageValue)
-				}
-				return errors.New("javascript sender returned ok=false")
-			}
-		}
-	}
-	return nil
+	return validateJavaScriptNotificationResult(result.Export())
 }
 
 func postJSON(endpoint string, headers map[string]string, payload any) error {
@@ -826,7 +899,17 @@ func buildNotificationRule(db *gorm.DB, input NotificationRuleInput) (models.Not
 	if err != nil {
 		return models.NotificationRule{}, err
 	}
-	if err := ensureNotificationChannelExists(db, input.ChannelID); err != nil {
+	channelID := input.ChannelID
+	if channelID == 0 {
+		settings, err := GetNotificationSettings(db)
+		if err != nil {
+			return models.NotificationRule{}, err
+		}
+		if settings.ActiveChannelID != nil {
+			channelID = *settings.ActiveChannelID
+		}
+	}
+	if err := ensureNotificationChannelExists(db, channelID); err != nil {
 		return models.NotificationRule{}, err
 	}
 	targetIP, err := normalizeOptionalNotificationTargetIP(input.TargetIP)
@@ -836,7 +919,7 @@ func buildNotificationRule(db *gorm.DB, input NotificationRuleInput) (models.Not
 	return models.NotificationRule{
 		Name:      name,
 		Enabled:   input.Enabled,
-		ChannelID: input.ChannelID,
+		ChannelID: channelID,
 		NodeUUID:  strings.TrimSpace(input.NodeUUID),
 		TargetIP:  targetIP,
 		FieldID:   normalizeNotificationFieldID(input.FieldID),
@@ -845,7 +928,7 @@ func buildNotificationRule(db *gorm.DB, input NotificationRuleInput) (models.Not
 
 func ensureNotificationChannelExists(db *gorm.DB, channelID uint) error {
 	if channelID == 0 {
-		return errors.New("channel is required")
+		return errors.New("current notification channel is required")
 	}
 	var count int64
 	if err := db.Model(&models.NotificationChannel{}).Where("id = ?", channelID).Count(&count).Error; err != nil {
@@ -855,6 +938,20 @@ func ensureNotificationChannelExists(db *gorm.DB, channelID uint) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func getActiveNotificationChannel(db *gorm.DB, settings NotificationSettings) (*models.NotificationChannel, error) {
+	if settings.ActiveChannelID == nil || *settings.ActiveChannelID == 0 {
+		return nil, nil
+	}
+	var channel models.NotificationChannel
+	if err := db.First(&channel, *settings.ActiveChannelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &channel, nil
 }
 
 func normalizeNotificationName(name string) (string, error) {
@@ -901,11 +998,19 @@ func normalizeNotificationChannelConfig(channelType string, config map[string]st
 		if _, err := url.ParseRequestURI(normalized["url"]); err != nil {
 			return nil, errors.New("webhook url is invalid")
 		}
-		if rawHeaders := normalized["headers_json"]; rawHeaders != "" {
+		rawHeaders := normalized["headers_json"]
+		if rawHeaders == "" {
+			rawHeaders = normalized["headers"]
+		}
+		if rawHeaders != "" {
 			headers := map[string]string{}
 			if err := json.Unmarshal([]byte(rawHeaders), &headers); err != nil {
-				return nil, errors.New("webhook headers_json must be a JSON object")
+				return nil, errors.New("webhook headers must be a JSON object")
 			}
+		}
+		method := strings.ToUpper(normalized["method"])
+		if method != "" && method != http.MethodPost && method != http.MethodGet {
+			return nil, errors.New("webhook method must be GET or POST")
 		}
 	case NotificationChannelJavaScript:
 		if normalized["script"] == "" {
@@ -913,6 +1018,19 @@ func normalizeNotificationChannelConfig(channelType string, config map[string]st
 		}
 	}
 	return normalized, nil
+}
+
+func normalizeNotificationDeliveryStatusFilter(raw string) (string, error) {
+	status := strings.TrimSpace(strings.ToLower(raw))
+	if status == "" {
+		return "", nil
+	}
+	switch status {
+	case NotificationDeliverySuccess, NotificationDeliveryFailed:
+		return status, nil
+	default:
+		return "", errors.New("notification delivery status filter is invalid")
+	}
 }
 
 func normalizeOptionalNotificationTargetIP(raw string) (string, error) {
@@ -987,6 +1105,88 @@ func notificationDeliveryLogItem(log models.NotificationDeliveryLog) Notificatio
 		CompareURL:    log.CompareURL,
 		CreatedAt:     log.CreatedAt,
 	}
+}
+
+func sendWebhookRequest(endpoint string, method string, contentType string, headers map[string]string, config map[string]string, body io.Reader) error {
+	ctx, cancel := context.WithTimeout(context.Background(), notificationSenderTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return err
+	}
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", contentType)
+	}
+	for key, value := range headers {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
+	username := strings.TrimSpace(config["username"])
+	password := strings.TrimSpace(config["password"])
+	if username != "" || password != "" {
+		req.SetBasicAuth(username, password)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+func notificationTemplateValues(message notificationRenderedMessage) map[string]string {
+	values := map[string]string{
+		"title":   message.Title,
+		"body":    message.Body,
+		"message": strings.TrimSpace(message.Title + "\n\n" + message.Body),
+	}
+	for key, value := range message.Context {
+		values[key] = fmt.Sprint(value)
+	}
+	return values
+}
+
+func notificationEventPayload(message notificationRenderedMessage) map[string]any {
+	values := map[string]any{
+		"title":   message.Title,
+		"body":    message.Body,
+		"message": strings.TrimSpace(message.Title + "\n\n" + message.Body),
+	}
+	for key, value := range message.Context {
+		values[key] = value
+	}
+	return values
+}
+
+func validateJavaScriptNotificationResult(exported any) error {
+	if exported == nil {
+		return nil
+	}
+	if promise, ok := exported.(*goja.Promise); ok {
+		switch promise.State() {
+		case goja.PromiseStateFulfilled:
+			return validateJavaScriptNotificationResult(promise.Result().Export())
+		case goja.PromiseStateRejected:
+			return fmt.Errorf("%v", promise.Result())
+		default:
+			return errors.New("javascript sender returned pending promise")
+		}
+	}
+	if resultMap, ok := exported.(map[string]any); ok {
+		if okValue, exists := resultMap["ok"]; exists && !truthyNotificationResult(okValue) {
+			if messageValue, hasMessage := resultMap["message"]; hasMessage {
+				return fmt.Errorf("%v", messageValue)
+			}
+			return errors.New("javascript sender returned ok=false")
+		}
+	}
+	return nil
 }
 
 func decodeNotificationChannelConfig(raw string) map[string]string {
