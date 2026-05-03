@@ -20,6 +20,9 @@ export function routeLabel(pathname: string) {
   if (pathname === "/settings/history-retention") {
     return "历史保留";
   }
+  if (pathname === "/settings/api-keys/docs") {
+    return "开放 API 文档";
+  }
   if (pathname === "/settings/api-keys") {
     return "开放 API";
   }
