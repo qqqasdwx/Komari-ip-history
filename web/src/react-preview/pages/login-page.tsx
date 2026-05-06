@@ -51,7 +51,7 @@ export function LoginPage(props: { me: MeResponse | null; onAuthenticated: (me: 
       <Card className="w-full max-w-md p-8">
         <div className="space-y-2">
           <h1 className="text-3xl font-medium tracking-tight text-slate-950">Komari IP Quality</h1>
-          <p className="text-sm text-slate-500">登录后直接进入后台工作区。</p>
+          <p className="text-sm text-slate-500">登录后进入节点列表。</p>
         </div>
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <div className="grid gap-2">

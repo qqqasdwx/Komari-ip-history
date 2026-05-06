@@ -245,7 +245,7 @@ function NodeIdentitySection(props: {
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-base font-semibold text-slate-900">基础信息</h2>
-          <p className="text-sm text-slate-500">这里只修改 IPQ 节点名称，不会改动 Komari 节点名称。</p>
+          <p className="text-sm text-slate-500">保存后只会更新本系统中的显示名称，不会改动 Komari 节点名称。</p>
         </div>
         {saved ? (
           <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700">
@@ -355,7 +355,7 @@ function KomariBindingSection(props: {
         return;
       }
       if (bindError instanceof RequestError && bindError.status === 409) {
-        setError("这个 Komari 节点已经被其它 IPQ 节点绑定。");
+        setError("这个 Komari 节点已经被其它节点绑定。");
       } else {
         setError(bindError instanceof Error ? bindError.message : "绑定失败");
       }
@@ -672,22 +672,22 @@ function ReportConfigPanel(props: {
         {props.fromKomari ? (
           <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-800" data-komari-return-hint="true">
             {props.detail.report_config.target_ips.length > 0
-              ? "配置已保存。请回到 Komari 节点页重新点击 IPQ，查看当前 IP 质量结果。"
-              : "从 Komari 入口打开。可以手动添加目标 IP，也可以安装脚本后让节点自动发现本机 IP。"}
+              ? "配置已保存。请回到 Komari 节点页重新打开 IP 质量结果。"
+              : "添加目标 IP 或安装脚本后，即可开始检测本机 IP。"}
           </div>
         ) : null}
         <div className="space-y-1">
           {props.detail.report_config.target_ips.length > 0 ? (
-            <p className="text-sm text-slate-500">节点执行时会先请求上报计划，再按已启用的目标 IP 探查并上报。</p>
+            <p className="text-sm text-slate-500">节点会按计划检测已启用的目标 IP 并上报结果。</p>
           ) : (
-            <p className="text-sm text-slate-500">可以先安装脚本，节点执行时会自动发现本机候选 IP 并请求上报计划。</p>
+            <p className="text-sm text-slate-500">安装脚本后，节点会自动发现可检测的本机 IP。</p>
           )}
         </div>
         <div className="space-y-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="space-y-1">
               <h3 className="text-sm font-semibold text-slate-900">目标 IP</h3>
-              <p className="text-sm text-slate-500">手动目标会按启用状态纳入计划，自动发现目标来自节点脚本上报的候选 IP。</p>
+              <p className="text-sm text-slate-500">启用的目标 IP 会随上报计划检测；自动发现的 IP 来自节点脚本。</p>
             </div>
           </div>
           {props.detail.targets.length > 0 ? (
@@ -702,7 +702,7 @@ function ReportConfigPanel(props: {
             />
           ) : (
             <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-              当前节点还没有目标 IP。可以手动添加，也可以先安装脚本，让节点执行时自动发现本机 IP。
+              当前节点还没有目标 IP。可以手动添加，或安装脚本自动发现本机 IP。
             </div>
           )}
           <form className="grid gap-3 md:grid-cols-[minmax(0,1fr)_48px]" onSubmit={props.onAddTarget}>
@@ -779,7 +779,7 @@ function ReportConfigPanel(props: {
               {previewError ? "请先修正 Cron" : saveState === "saving" ? "正在保存..." : saveState === "saved" ? "已自动保存" : "自动保存"}
             </span>
           </div>
-          <p className="text-xs text-slate-500">当前 Cron 按 {preview.schedule_timezone || scheduleTimezone} 解析。</p>
+          <p className="text-xs text-slate-500">执行计划按 {preview.schedule_timezone || scheduleTimezone} 计算。</p>
           <div className="report-config-next-runs">
             {preview.next_runs.map((value) => (
               <div key={value} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -1052,7 +1052,7 @@ export function NodeSettingsPage(props: { me: MeResponse; onUnauthorized: () => 
       />
       {fromKomari ? (
         <section className="rounded-[24px] border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm leading-6 text-indigo-800">
-          已从 Komari 入口打开。完成接入配置后，回到 Komari 节点页重新点击 IPQ 查看结果。
+          完成接入后，回到 Komari 节点页重新打开 IP 质量结果。
         </section>
       ) : null}
       <NodeIdentitySection

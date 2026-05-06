@@ -56,7 +56,7 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
     return (
       <EmbedBridgePage
         title="接入节点"
-        description="当前节点尚未配置，正在打开独立页面继续。"
+        description="请先完成节点接入。"
         actionURL={buildConnectPath(uuid, nodeName, { returnTo: "settings" })}
         actionLabel="去接入"
       />
@@ -88,13 +88,13 @@ export function NodeDetailPage(props: { me: MeResponse; onUnauthorized: () => vo
           data-node-readonly-state="true"
         >
           <div className="min-w-0 space-y-1">
-            <h2 className="text-sm font-semibold text-slate-900">只读视图</h2>
+            <h2 className="text-sm font-semibold text-slate-900">节点概览</h2>
             <p className="text-sm text-slate-500" data-node-binding-state="true">
               {detail.binding_state === "komari_bound"
                 ? `已绑定：${detail.komari_node_name || "Komari 节点"}`
                 : "当前是独立节点"}
             </p>
-            <p className="text-xs text-slate-400">节点名称、绑定关系、目标 IP、上报计划和接入命令在设置页管理。</p>
+            <p className="text-xs text-slate-400">如需修改节点名称、目标 IP 或上报计划，请进入设置。</p>
           </div>
         </section>
       ) : null}

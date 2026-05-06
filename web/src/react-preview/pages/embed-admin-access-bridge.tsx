@@ -13,9 +13,9 @@ export function EmbedAdminAccessBridge() {
   if (!uuid || !komariReturn) {
     return (
       <section className="space-y-6">
-        <PageHeader title="需要登录" subtitle="请在独立页面继续。" />
+        <PageHeader title="需要登录" subtitle="请在新窗口登录后继续。" />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm leading-6 text-slate-500">当前页面无法直接完成管理员登录。</p>
+          <p className="text-sm leading-6 text-slate-500">请在新窗口登录后继续查看。</p>
         </section>
       </section>
     );
@@ -24,9 +24,9 @@ export function EmbedAdminAccessBridge() {
   return (
     <EmbedBridgePage
       title="需要登录"
-      description="当前查看需要先在独立页面登录 IPQ。"
+      description="登录后即可查看该节点。"
       actionURL={`/nodes/${encodeURIComponent(uuid)}?node_name=${encodeURIComponent(nodeName)}`}
-      actionLabel="登录 IPQ 后查看"
+      actionLabel="登录后查看"
     />
   );
 }

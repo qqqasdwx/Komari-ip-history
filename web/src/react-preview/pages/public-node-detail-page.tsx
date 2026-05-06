@@ -55,7 +55,7 @@ export function PublicNodeDetailPage() {
         title="IP质量体检报告"
         subtitle={blocked ? "管理员未开放游客查看" : error || "当前结果不可用"}
         backTo="/"
-        error={blocked ? "管理员未开放该功能，请联系管理员或登录后查看。" : error || "当前结果不可用。"}
+        error={blocked ? "管理员未开放游客查看，请登录后再试或联系管理员。" : error || "当前结果不可用。"}
         onRetry={reload}
       />
     );

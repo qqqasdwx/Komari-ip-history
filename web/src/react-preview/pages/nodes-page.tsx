@@ -91,7 +91,7 @@ function CreateIndependentNodeDialog(props: {
         <div className="field-modal-head">
           <div className="space-y-1">
             <h2 className="text-base font-semibold text-slate-900">新建独立节点</h2>
-            <p className="text-sm text-slate-500">先创建 IPQ 节点，再配置目标 IP、上报计划和接入命令。</p>
+            <p className="text-sm text-slate-500">先创建节点，再配置目标 IP、上报计划和接入命令。</p>
           </div>
           <Button
             className="rounded-lg border border-[var(--line)] bg-white px-3 text-[13px] text-[var(--ink)] hover:bg-slate-50"
@@ -268,7 +268,7 @@ export function NodesPage(props: { me: MeResponse; onUnauthorized: () => void })
               <div className="space-y-2">
                 <h3 className="text-lg font-semibold text-slate-900">还没有节点</h3>
                 <p className="text-sm leading-6 text-slate-500">
-                  先复制 Header 到 Komari，然后在节点详情页点击“添加 IP 质量检测”。
+                  先把接入代码复制到 Komari，然后在节点详情页点击“添加 IP 质量检测”。
                 </p>
               </div>
               <div>

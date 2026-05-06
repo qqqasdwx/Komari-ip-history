@@ -1022,17 +1022,17 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       '  <div class="ipq-loader-dialog-header">',
       '    <div class="ipq-loader-dialog-title">',
       '      <strong>IP 质量详情</strong>',
-      '      <span>当前结果由本服务页面提供。</span>',
+      '      <span>显示该节点的 IP 质量结果。</span>',
       '    </div>',
       '    <div class="ipq-loader-dialog-actions">',
-      '      <a class="ipq-loader-link" target="_blank" rel="noopener noreferrer">独立页面</a>',
+      '      <a class="ipq-loader-link" target="_blank" rel="noopener noreferrer">新窗口打开</a>',
       '      <button type="button" class="ipq-loader-close" aria-label="关闭"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>',
       '    </div>',
       '  </div>',
       '  <div class="ipq-loader-connect-panel">',
       '    <div class="ipq-loader-connect-card">',
       '      <strong>当前节点尚未开启 IP 质量检测</strong>',
-      '      <span>接入后会打开管理页面，用来配置检测目标、上报计划和接入命令。</span>',
+      '      <span>接入后可设置检测 IP、上报计划和安装命令。</span>',
       '      <button type="button" class="ipq-loader-connect-action">去接入</button>',
       '    </div>',
       '  </div>',
@@ -1340,7 +1340,7 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
       title.textContent = (context.name || "节点") + " IP 质量";
     }
     if (subtitle) {
-      subtitle.textContent = "当前节点还没有 IPQ 上报配置。";
+      subtitle.textContent = "当前节点还没有开启 IP 质量检测。";
     }
     if (state.openLink) {
       state.openLink.removeAttribute("href");
@@ -2067,14 +2067,14 @@ func LoaderScript(cfg config.Config, publicBaseURL string, guestReadEnabled bool
 
       if (!GUEST_READ_ENABLED) {
         debugLog("guest_blocked", { uuid: context.uuid });
-        showToast("管理员未开放该功能");
+        showToast("管理员未开放游客查看");
         return;
       }
 
       const currentNode = await loadKomariPublicNode(context);
       if (!currentNode) {
         debugLog("guest_node_not_found", { uuid: context.uuid });
-        showToast("管理员未开放该功能");
+        showToast("管理员未开放游客查看");
         return;
       }
 
