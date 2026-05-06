@@ -140,7 +140,7 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
 
   return (
     <section className="space-y-6">
-      <PageHeader title="接入配置" subtitle="复制 Header 到 Komari。默认按独立部署接入，需要时再兼容子路径。" />
+      <PageHeader title="接入配置" subtitle="把接入代码复制到 Komari，用于显示 IP 质量入口。" />
 
       {loading ? (
         <div className="grid gap-4">
@@ -157,7 +157,7 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
               <div className="space-y-2">
                 <h2 className="text-base font-semibold text-slate-900">接入地址</h2>
                 <p className="text-sm leading-6 text-slate-500">
-                  默认留空即可，系统会按你当前访问本服务时的地址生成 Header。只有在你需要固定域名、端口，或希望用户统一通过某个外部地址访问时，再手动填写。
+                  通常无需填写。只有需要固定外部访问地址时，再填写这里。
                 </p>
               </div>
 
@@ -219,7 +219,7 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
               <div className="space-y-2">
                 <h2 className="text-base font-semibold text-slate-900">游客只读</h2>
                 <p className="text-sm leading-6 text-slate-500">
-                  只影响 Komari 注入弹窗。开启后，Komari 游客在节点本身公开时可查看当前结果；关闭后，游客点击按钮只会收到提示。
+                  控制未登录用户能否在 Komari 节点页查看 IP 质量结果。
                 </p>
               </div>
 
@@ -232,7 +232,7 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                 />
                 <span className="space-y-1">
                   <span className="block font-medium text-slate-900">允许游客查看已接入节点的当前结果</span>
-                  <span className="block text-slate-500">默认关闭。管理员链路和后台页面不受影响。</span>
+                  <span className="block text-slate-500">默认关闭。管理员登录后仍可查看。</span>
                 </span>
               </label>
 
@@ -252,7 +252,7 @@ export function IntegrationPage(props: { me: MeResponse; onUnauthorized: () => v
                   {savingGuestRead ? "保存中…" : "保存游客只读设置"}
                 </Button>
                 <span className="text-sm text-slate-500">
-                  {savedGuestReadEnabled ? "当前状态：已开放" : "当前状态：未开放"}
+                  {savedGuestReadEnabled ? "游客查看：已开放" : "游客查看：未开放"}
                 </span>
               </div>
             </div>

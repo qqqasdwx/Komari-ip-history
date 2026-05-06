@@ -364,7 +364,7 @@ function RuleDialog(props: {
       return;
     }
     if (!props.currentChannel) {
-      setError("请先设置当前发送器。");
+      setError("请先配置发送器。");
       return;
     }
 
@@ -419,7 +419,7 @@ function RuleDialog(props: {
         <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
           <div>
             <h2 className="text-base font-semibold text-slate-900">{props.initialRule ? "编辑订阅规则" : "添加订阅规则"}</h2>
-            <p className="text-sm text-slate-500">当前发送器：{props.currentChannel ? channelTypeLabel(props.currentChannel.type) : "未设置"}</p>
+            <p className="text-sm text-slate-500">发送器：{props.currentChannel ? channelTypeLabel(props.currentChannel.type) : "未设置"}</p>
           </div>
           <Button aria-label="关闭" className="size-9 rounded-full border border-slate-200 bg-white p-0 text-slate-700 hover:bg-slate-50" onClick={props.onClose} type="button">
             <X className="size-4" />
@@ -718,7 +718,7 @@ export function NotificationsPage(props: NotificationsPageProps) {
     <section className="space-y-6">
       <PageHeader
         title="通知"
-        subtitle="当前发送器和字段变化订阅规则。"
+        subtitle="设置通知发送方式和字段变化订阅规则。"
         actions={
           <Button className="rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-700 hover:bg-slate-50" onClick={() => void load()} type="button">
             <RefreshCw className="size-4" />
@@ -743,8 +743,8 @@ export function NotificationsPage(props: NotificationsPageProps) {
                   </Badge>
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-slate-900">当前发送器</h2>
-                  <p className="mt-1 text-sm text-slate-500">{currentChannel ? "字段变化命中规则后，会通过当前发送器发送。" : "还没有配置发送器。"}</p>
+                  <h2 className="text-base font-semibold text-slate-900">发送器</h2>
+                  <p className="mt-1 text-sm text-slate-500">{currentChannel ? "字段变化符合规则时会发送通知。" : "还没有配置发送器。"}</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" onClick={() => navigate("/settings/notifications/channel")} type="button">
@@ -773,7 +773,7 @@ export function NotificationsPage(props: NotificationsPageProps) {
                   <strong className="text-lg text-slate-900">{rules.length}</strong>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-slate-500">当前发送器</span>
+                  <span className="text-sm text-slate-500">发送器</span>
                   <strong className="text-lg text-slate-900">{currentChannel ? channelTypeLabel(currentChannel.type) : "-"}</strong>
                 </div>
                 <div className="flex items-center justify-between gap-4">
@@ -788,7 +788,7 @@ export function NotificationsPage(props: NotificationsPageProps) {
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">字段变化订阅规则</h2>
-                <p className="text-sm text-slate-500">规则使用当前发送器，不再单独选择发送通道。</p>
+                <p className="text-sm text-slate-500">规则触发后会使用发送器设置中的配置发送通知。</p>
               </div>
               <Button
                 className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]"
@@ -963,7 +963,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
         body: JSON.stringify({ ...settings, active_channel_id: saved.id })
       });
       setSettings({ ...defaultSettings, ...savedSettings });
-      pushToast("当前发送器已保存。");
+      pushToast("发送器设置已保存。");
       await load();
     } catch (saveError) {
       if (saveError instanceof UnauthorizedError) {
@@ -1020,7 +1020,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
     <section className="space-y-6">
       <PageHeader
         title="发送器设置"
-        subtitle="管理当前发送器和发送配置。"
+        subtitle="选择通知发送方式并填写发送配置。"
         actions={
           <div className="flex flex-wrap gap-2">
             <HeaderBackButton to="/settings/notifications" />
@@ -1041,7 +1041,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
           <Card className="p-6">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-base font-semibold text-slate-900">当前发送器</h2>
+                <h2 className="text-base font-semibold text-slate-900">发送器</h2>
                 <p className="mt-1 text-sm text-slate-500">{currentChannel ? channelTypeLabel(currentChannel.type) : "未设置"}</p>
               </div>
               <Badge className={settings.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}>
@@ -1052,7 +1052,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
 
           <Card className="p-6">
             <form className="grid gap-5" onSubmit={submitChannel}>
-              <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+              <div className="grid max-w-sm gap-4">
                 <div className="grid gap-2">
                   <Label className="text-slate-900" htmlFor="notification-channel-type">
                     发送器类型
@@ -1067,9 +1067,6 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                     <option value="telegram">Telegram</option>
                     <option value="javascript">JavaScript</option>
                   </select>
-                </div>
-                <div className="mt-auto rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                  全局只保留一个当前发送器，通知是否启用在通知主页控制。
                 </div>
               </div>
 
@@ -1155,7 +1152,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                         value={form.body}
                         onChange={(event) => setForm((current) => ({ ...current, body: event.target.value }))}
                       />
-                      <p className="text-xs text-slate-500">支持下方事件变量，不使用 Telegram 正文模板。</p>
+                      <p className="text-xs text-slate-500">请求体可使用下方变量。</p>
                     </div>
                   </div>
                   <div className="grid gap-4 lg:grid-cols-2">
@@ -1192,7 +1189,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
               <div className="flex flex-wrap gap-3">
                 <Button className="rounded-lg bg-[var(--accent)] px-3 text-[13px] text-white hover:bg-[#6868e8]" disabled={savingChannel} type="submit">
                   <Send className="size-4" />
-                  <span>{savingChannel ? "保存中..." : "保存并设为当前发送器"}</span>
+                  <span>{savingChannel ? "保存中..." : "保存发送器"}</span>
                 </Button>
                 <Button
                   className="rounded-lg border border-indigo-200 bg-white px-3 text-[13px] text-indigo-700 hover:bg-indigo-50"
@@ -1201,7 +1198,7 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
                   type="button"
                 >
                   <PlayCircle className="size-4" />
-                  <span>{testingID === selectedChannel?.id ? "测试中..." : "测试已保存配置"}</span>
+                  <span>{testingID === selectedChannel?.id ? "测试中..." : "发送测试通知"}</span>
                 </Button>
               </div>
             </form>
@@ -1209,13 +1206,13 @@ export function NotificationChannelSettingsPage(props: NotificationsPageProps) {
 
           <Card className="p-6">
             <div className="mb-5">
-              <h2 className="text-base font-semibold text-slate-900">{selectedType === "telegram" ? "Telegram 正文模板" : "可用变量"}</h2>
+              <h2 className="text-base font-semibold text-slate-900">{selectedType === "telegram" ? "消息正文" : "可用变量"}</h2>
               <p className="text-sm text-slate-500">
                 {selectedType === "telegram"
-                  ? "Telegram 使用正文模板生成消息文本。"
+                  ? "收到通知时会显示这段正文。"
                   : selectedType === "webhook"
-                    ? "Webhook 请求体可以直接使用这些事件变量。"
-                    : "JavaScript 发送器会收到这些事件字段。"}
+                    ? "请求体可使用这些变量。"
+                    : "脚本可读取这些事件字段。"}
               </p>
             </div>
             {selectedType === "javascript" ? (

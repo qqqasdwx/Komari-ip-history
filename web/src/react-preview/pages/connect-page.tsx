@@ -68,7 +68,7 @@ export function ConnectPage(props: { onUnauthorized: () => void }) {
       <section className="space-y-6">
         <PageHeader
           title="接入节点"
-          subtitle={returnTo ? "正在打开独立配置页。" : "正在为当前节点创建或恢复 IP 质量视图。"}
+          subtitle={returnTo ? "正在打开节点接入设置。" : "正在准备节点接入设置。"}
           backTo={isEmbed ? undefined : "/nodes"}
         />
         <section className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
