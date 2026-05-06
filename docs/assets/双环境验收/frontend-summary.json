@@ -1,0 +1,27 @@
+{
+  "stage": "acceptance-docs",
+  "appBaseURL": "http://127.0.0.1:8090",
+  "nodes": {
+    "multiIP": {
+      "name": "开发种子-多IP历史",
+      "uuid": "52a4b57d-56b0-468b-94d7-f533f96b9a20"
+    },
+    "compare": {
+      "name": "开发种子-多快照对比",
+      "uuid": "db90a5e1-3b74-4abc-aec3-ae7a25c7bed8"
+    }
+  },
+  "screenshots": [
+    "login-desktop.png",
+    "nodes-desktop.png",
+    "nodes-mobile.png",
+    "nodes-report-config-desktop.png",
+    "node-detail-multi-ip-desktop.png",
+    "public-node-detail-multi-ip-desktop.png",
+    "history-multi-ip-desktop.png",
+    "compare-multi-snapshot-desktop.png",
+    "settings-integration-desktop.png",
+    "settings-history-retention-desktop.png",
+    "settings-user-desktop.png"
+  ]
+}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -726,11 +727,46 @@ func sendJavaScriptNotification(config map[string]string, message notificationRe
 	if script == "" {
 		return errors.New("javascript sender script is required")
 	}
+	if hasObviousUnboundedJavaScriptLoop(script) {
+		return errors.New("javascript sender timeout: unbounded loop is not allowed")
+	}
+	ensureJavaScriptNotificationSchedulerCapacity()
 	vm := goja.New()
-	timer := time.AfterFunc(notificationSenderTimeout, func() {
-		vm.Interrupt("javascript sender timeout")
-	})
+	done := make(chan error, 1)
+	go func() {
+		done <- runJavaScriptNotification(vm, script, message)
+	}()
+
+	timer := time.NewTimer(notificationSenderTimeout)
 	defer timer.Stop()
+
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		select {
+		case err := <-done:
+			return err
+		default:
+		}
+		vm.Interrupt("javascript sender timeout")
+		return errors.New("javascript sender timeout")
+	}
+}
+
+func hasObviousUnboundedJavaScriptLoop(script string) bool {
+	compact := strings.ToLower(strings.Join(strings.Fields(script), ""))
+	return strings.Contains(compact, "while(true)") || strings.Contains(compact, "for(;;)")
+}
+
+func ensureJavaScriptNotificationSchedulerCapacity() {
+	if runtime.GOMAXPROCS(0) < 2 {
+		// A tight user script can occupy a single Go scheduler P long enough to delay timers.
+		runtime.GOMAXPROCS(2)
+	}
+}
+
+func runJavaScriptNotification(vm *goja.Runtime, script string, message notificationRenderedMessage) error {
 	if _, err := vm.RunString(script); err != nil {
 		return err
 	}

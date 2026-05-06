@@ -100,7 +100,7 @@ async function waitForEmbedReport(page) {
 async function waitForEmbedBridge(page) {
   const frame = page.frameLocator('#ipq-loader-overlay[data-open="true"] iframe').first();
   await frame.getByRole("heading", { name: "需要登录" }).waitFor({ state: "visible", timeout: 15000 });
-  await frame.getByRole("link", { name: "登录 IPQ 后查看" }).waitFor({ state: "visible", timeout: 15000 });
+  await frame.getByRole("link", { name: "登录后查看" }).waitFor({ state: "visible", timeout: 15000 });
 }
 
 async function assertPurCarteBridgeStyle(page) {

@@ -41,6 +41,8 @@ public/index.html
 
 # Local data and build cache
 data/ipq/
+data/ipq-default/
+data/ipq-purcarte/
 data/komari/
 data/komari-purcarte/
 data/*.db

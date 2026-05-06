@@ -182,7 +182,7 @@ try {
 
   await capture(page, "/settings/integration", "settings-integration-desktop.png", async () => {
     await page.getByRole("heading", { name: "接入配置" }).waitFor({ state: "visible", timeout: 10000 });
-    await page.getByText("Header", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 });
+    await page.getByText("loader 版", { exact: false }).first().waitFor({ state: "visible", timeout: 10000 });
   });
   screenshots.push("settings-integration-desktop.png");
 
