@@ -54,9 +54,12 @@ func (h AdminHandler) Runtime(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"app_name":                  h.Cfg.AppName,
 		"app_env":                   h.Cfg.AppEnv,
+		"version":                   h.Cfg.AppVersion,
+		"commit":                    h.Cfg.AppCommit,
 		"base_path":                 h.Cfg.BasePath,
 		"public_base_url":           integration.PublicBaseURL,
 		"effective_public_base_url": integration.EffectivePublicBaseURL,
+		"installer_script":          service.ResolveInstallerScriptSource(h.Cfg),
 	})
 }
 

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"komari-ip-history/internal/version"
 )
 
 type Config struct {
@@ -19,6 +21,10 @@ type Config struct {
 	DefaultAdminUser      string
 	DefaultAdminPass      string
 	PublicBaseURL         string
+	AppVersion            string
+	AppCommit             string
+	InstallerScriptURL    string
+	InstallerScriptRef    string
 	CookieSecure          bool
 	APIRateLimitPerMinute int
 }
@@ -35,6 +41,10 @@ func Load() Config {
 		DefaultAdminUser:      env("IPQ_DEFAULT_ADMIN_USERNAME", "admin"),
 		DefaultAdminPass:      env("IPQ_DEFAULT_ADMIN_PASSWORD", "admin"),
 		PublicBaseURL:         strings.TrimRight(env("IPQ_PUBLIC_BASE_URL", ""), "/"),
+		AppVersion:            env("IPQ_VERSION", version.Version),
+		AppCommit:             env("IPQ_COMMIT", version.Commit),
+		InstallerScriptURL:    strings.TrimSpace(os.Getenv("IPQ_INSTALLER_SCRIPT_URL")),
+		InstallerScriptRef:    strings.TrimSpace(os.Getenv("IPQ_INSTALLER_SCRIPT_REF")),
 		CookieSecure:          strings.EqualFold(env("IPQ_COOKIE_SECURE", "false"), "true"),
 		APIRateLimitPerMinute: envInt("IPQ_API_RATE_LIMIT_PER_MINUTE", 60),
 	}

@@ -17,6 +17,9 @@ FROM golang:1.25-bookworm AS app-build
 
 WORKDIR /src
 
+ARG IPQ_VERSION=dev
+ARG IPQ_COMMIT=
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -28,7 +31,7 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY --from=web-build /src/public ./public
 
-RUN go build -o /out/ipq ./cmd/ipq
+RUN go build -ldflags "-X komari-ip-history/internal/version.Version=${IPQ_VERSION} -X komari-ip-history/internal/version.Commit=${IPQ_COMMIT}" -o /out/ipq ./cmd/ipq
 
 
 FROM debian:bookworm-slim

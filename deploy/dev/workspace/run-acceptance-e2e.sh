@@ -39,7 +39,16 @@ run_purcarte_ipq_checks() {
   node playwright/verify-embed-auth-flows.mjs
 }
 
+run_release_installer_check() {
+  export IPQ_PUBLIC_BASE_URL=http://127.0.0.1:8092
+  export IPQ_RELEASE_SIM_BASE_URL=http://127.0.0.1:8092
+  export IPQ_RELEASE_SIM_VERSION="${IPQ_RELEASE_VERSION:-v0.0.0-acceptance}"
+
+  node playwright/verify-release-installer-source.mjs
+}
+
 run_default_ipq_checks
 run_purcarte_ipq_checks
+run_release_installer_check
 
 echo "dual environment acceptance checks completed"

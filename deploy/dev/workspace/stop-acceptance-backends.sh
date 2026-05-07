@@ -18,6 +18,7 @@ stop_pid_file() {
 
 stop_pid_file "${WORKSPACE_TMP}/ipq-default.pid"
 stop_pid_file "${WORKSPACE_TMP}/ipq-purcarte.pid"
+stop_pid_file "${WORKSPACE_TMP}/ipq-release.pid"
 
 pkill -f "${BINARY_PATH}" >/dev/null 2>&1 || true
 

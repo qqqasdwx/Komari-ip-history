@@ -43,6 +43,7 @@ public/index.html
 data/ipq/
 data/ipq-default/
 data/ipq-purcarte/
+data/ipq-release/
 data/komari/
 data/komari-purcarte/
 data/*.db

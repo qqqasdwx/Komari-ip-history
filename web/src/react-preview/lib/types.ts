@@ -10,9 +10,21 @@ export type MeResponse = {
 export type RuntimeResponse = {
   app_name: string;
   app_env: string;
+  version?: string;
+  commit?: string;
   base_path: string;
   public_base_url?: string;
   effective_public_base_url?: string;
+  installer_script?: InstallerScriptSource;
+};
+
+export type InstallerScriptSource = {
+  url: string;
+  ref: string;
+  version: string;
+  commit: string;
+  channel: "development" | "latest" | "release" | "custom" | "custom-ref" | string;
+  label: string;
 };
 
 export type IntegrationSettings = {
@@ -194,6 +206,7 @@ export type NodeDetail = {
   report_config: {
     endpoint_path: string;
     installer_path: string;
+    installer_script?: InstallerScriptSource;
     reporter_token: string;
     install_token: string;
     target_ips: string[];
