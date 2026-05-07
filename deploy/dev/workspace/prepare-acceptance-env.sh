@@ -6,6 +6,7 @@ DEFAULT_KOMARI_BASE_URL=${DEFAULT_KOMARI_BASE_URL:-http://proxy:8080}
 PURCARTE_KOMARI_BASE_URL=${PURCARTE_KOMARI_BASE_URL:-http://proxy:8081}
 DEFAULT_IPQ_BASE_URL=${DEFAULT_IPQ_BASE_URL:-http://127.0.0.1:8090}
 PURCARTE_IPQ_BASE_URL=${PURCARTE_IPQ_BASE_URL:-http://127.0.0.1:8091}
+RELEASE_IPQ_BASE_URL=${RELEASE_IPQ_BASE_URL:-http://127.0.0.1:8092}
 FRONTEND_BASE_URL=${FRONTEND_BASE_URL:-http://127.0.0.1:5173}
 
 wait_for_url() {
@@ -42,6 +43,7 @@ echo "[3/8] starting isolated IPQ backends"
 sh "$WORKSPACE_DIR/deploy/dev/workspace/start-acceptance-backends.sh"
 wait_for_url "Default IPQ backend" "$DEFAULT_IPQ_BASE_URL/api/v1/health" 60
 wait_for_url "PurCarte IPQ backend" "$PURCARTE_IPQ_BASE_URL/api/v1/health" 60
+wait_for_url "Release simulation IPQ backend" "$RELEASE_IPQ_BASE_URL/api/v1/health" 60
 
 echo "[4/8] starting frontend dev server"
 sh "$WORKSPACE_DIR/deploy/dev/workspace/start-frontend.sh"
@@ -70,6 +72,7 @@ sh "$WORKSPACE_DIR/deploy/dev/workspace/seed-dev-nodes.sh"
 echo "[8/8] acceptance environment ready"
 echo "Default IPQ: $DEFAULT_IPQ_BASE_URL"
 echo "PurCarte IPQ: $PURCARTE_IPQ_BASE_URL"
+echo "Release simulation IPQ: $RELEASE_IPQ_BASE_URL"
 echo "IPQ frontend dev server: $FRONTEND_BASE_URL"
 echo "Komari default proxy: $DEFAULT_KOMARI_BASE_URL"
 echo "Komari PurCarte proxy: $PURCARTE_KOMARI_BASE_URL"

@@ -58,6 +58,12 @@ if (headingCount === 0) {
   throw new Error('react nodes page heading not found');
 }
 
+const runtimeResponse = await jsonFetch(page, `${appBaseURL}/api/v1/admin/runtime`);
+if (runtimeResponse.status < 200 || runtimeResponse.status >= 300) {
+  throw new Error(`runtime request failed: ${runtimeResponse.status} ${runtimeResponse.text}`);
+}
+const runtime = JSON.parse(runtimeResponse.text);
+
 const rowLocator = page.locator('[data-node-row="true"]');
 const rowCount = await rowLocator.count();
 
@@ -153,8 +159,18 @@ if (rowCount > 0) {
   if (!configText.includes('(GMT+8)')) {
     throw new Error('react detail page schedule preview should render timezone at the end, for example 2026/5/3 0:00:00 (GMT+8)');
   }
-  if (!configText.includes('raw.githubusercontent.com/qqqasdwx/Komari-ip-history/master/deploy/install.sh')) {
-    throw new Error('react node settings page install command is not using GitHub raw install script');
+  const installerScriptURL = detailAfterConfig.report_config?.installer_script?.url || '';
+  if (!/^https:\/\/raw\.githubusercontent\.com\/qqqasdwx\/Komari-ip-history\/[^/]+\/deploy\/install\.sh$/.test(installerScriptURL)) {
+    throw new Error(`react node settings page report config has invalid installer script URL: ${installerScriptURL}`);
+  }
+  if (runtime.installer_script?.url !== installerScriptURL) {
+    throw new Error(`runtime installer source does not match node report config: ${runtime.installer_script?.url} !== ${installerScriptURL}`);
+  }
+  if (/^v\d/.test(runtime.version || '') && installerScriptURL.includes('/master/')) {
+    throw new Error(`release runtime must not use master installer URL: ${runtime.version} ${installerScriptURL}`);
+  }
+  if (!configText.includes(installerScriptURL) || !configText.includes('脚本来源')) {
+    throw new Error('react node settings page install command is not using the versioned installer script source');
   }
 
   if (detailAfterConfig.report_config?.schedule_timezone !== expectedBrowserTimeZone) {
@@ -223,6 +239,9 @@ if (rowCount > 0) {
   const installConfig = JSON.parse(installConfigResponse.text);
   if (installConfig.schedule_timezone !== expectedBrowserTimeZone || installConfig.run_immediately !== true) {
     throw new Error('install config did not include the saved timezone and immediate-run setting');
+  }
+  if (installConfig.installer_script?.url !== installerScriptURL) {
+    throw new Error(`install config installer source does not match page command: ${installConfig.installer_script?.url} !== ${installerScriptURL}`);
   }
 
   const installScriptResponse = await jsonFetch(page, `${appBaseURL}/api/v1/report/nodes/${firstUUID}/install.sh?timezone=${encodeURIComponent(expectedBrowserTimeZone)}`, {

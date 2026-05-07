@@ -17,6 +17,11 @@ type ReportHandler struct {
 	Cfg config.Config
 }
 
+func (h ReportHandler) withInstallerScript(config service.NodeInstallConfig) service.NodeInstallConfig {
+	config.InstallerScript = service.ResolveInstallerScriptSource(h.Cfg)
+	return config
+}
+
 func (h ReportHandler) Report(c *gin.Context) {
 	var req service.ReportNodeInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -156,7 +161,7 @@ func (h ReportHandler) InstallConfig(c *gin.Context) {
 	}
 
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, config)
+	c.JSON(http.StatusOK, h.withInstallerScript(config))
 }
 
 func (h ReportHandler) InstallConfigByToken(c *gin.Context) {
@@ -193,7 +198,7 @@ func (h ReportHandler) InstallConfigByToken(c *gin.Context) {
 	}
 
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, config)
+	c.JSON(http.StatusOK, h.withInstallerScript(config))
 }
 
 func extractReporterToken(c *gin.Context) string {

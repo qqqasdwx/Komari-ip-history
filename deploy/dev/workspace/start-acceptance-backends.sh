@@ -6,7 +6,7 @@ BINARY_PATH="${WORKSPACE_TMP}/ipq-acceptance-bin"
 LOG_PREFIX=${LOG_PREFIX:-/tmp}
 
 cd /workspace
-mkdir -p "$WORKSPACE_TMP" /workspace/data/ipq-default /workspace/data/ipq-purcarte
+mkdir -p "$WORKSPACE_TMP" /workspace/data/ipq-default /workspace/data/ipq-purcarte /workspace/data/ipq-release
 
 sh /workspace/deploy/dev/workspace/stop-backend.sh >/dev/null 2>&1 || true
 sh /workspace/deploy/dev/workspace/stop-acceptance-backends.sh >/dev/null 2>&1 || true
@@ -18,10 +18,13 @@ start_backend() {
   port=$2
   db_path=$3
   public_base_url=$4
+  app_version=${5:-dev}
   pid_path="${WORKSPACE_TMP}/ipq-${name}.pid"
   log_path="${LOG_PREFIX}/ipq-${name}.log"
 
   IPQ_APP_ENV=development \
+  IPQ_VERSION="$app_version" \
+  IPQ_COMMIT=acceptance \
   IPQ_LISTEN=":${port}" \
   IPQ_BASE_PATH="" \
   IPQ_DB_PATH="$db_path" \
@@ -38,3 +41,4 @@ start_backend() {
 
 start_backend default 8090 /workspace/data/ipq-default/ipq.db "${IPQ_DEFAULT_PUBLIC_BASE_URL:-http://127.0.0.1:8090}"
 start_backend purcarte 8091 /workspace/data/ipq-purcarte/ipq.db "${IPQ_PURCARTE_PUBLIC_BASE_URL:-http://127.0.0.1:8091}"
+start_backend release 8092 /workspace/data/ipq-release/ipq.db "${IPQ_RELEASE_PUBLIC_BASE_URL:-http://127.0.0.1:8092}" "${IPQ_RELEASE_VERSION:-v0.0.0-acceptance}"

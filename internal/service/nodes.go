@@ -120,25 +120,27 @@ type PublicTargetDetail struct {
 }
 
 type NodeReportConfig struct {
-	EndpointPath     string      `json:"endpoint_path"`
-	InstallerPath    string      `json:"installer_path"`
-	ReporterToken    string      `json:"reporter_token"`
-	InstallToken     string      `json:"install_token"`
-	TargetIPs        []string    `json:"target_ips"`
-	ScheduleCron     string      `json:"schedule_cron"`
-	ScheduleTimezone string      `json:"schedule_timezone"`
-	RunImmediately   bool        `json:"run_immediately"`
-	NextRuns         []time.Time `json:"next_runs"`
+	EndpointPath     string                `json:"endpoint_path"`
+	InstallerPath    string                `json:"installer_path"`
+	InstallerScript  InstallerScriptSource `json:"installer_script"`
+	ReporterToken    string                `json:"reporter_token"`
+	InstallToken     string                `json:"install_token"`
+	TargetIPs        []string              `json:"target_ips"`
+	ScheduleCron     string                `json:"schedule_cron"`
+	ScheduleTimezone string                `json:"schedule_timezone"`
+	RunImmediately   bool                  `json:"run_immediately"`
+	NextRuns         []time.Time           `json:"next_runs"`
 }
 
 type NodeInstallConfig struct {
-	NodeUUID         string   `json:"node_uuid"`
-	ReportEndpoint   string   `json:"report_endpoint"`
-	ReporterToken    string   `json:"reporter_token"`
-	ScheduleCron     string   `json:"schedule_cron"`
-	ScheduleTimezone string   `json:"schedule_timezone"`
-	RunImmediately   bool     `json:"run_immediately"`
-	TargetIPs        []string `json:"target_ips"`
+	NodeUUID         string                `json:"node_uuid"`
+	ReportEndpoint   string                `json:"report_endpoint"`
+	ReporterToken    string                `json:"reporter_token"`
+	InstallerScript  InstallerScriptSource `json:"installer_script"`
+	ScheduleCron     string                `json:"schedule_cron"`
+	ScheduleTimezone string                `json:"schedule_timezone"`
+	RunImmediately   bool                  `json:"run_immediately"`
+	TargetIPs        []string              `json:"target_ips"`
 }
 
 type ReporterPlanInput struct {

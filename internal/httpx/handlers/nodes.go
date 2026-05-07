@@ -19,6 +19,16 @@ type NodeHandler struct {
 	Cfg config.Config
 }
 
+func (h NodeHandler) withInstallerScript(config service.NodeReportConfig) service.NodeReportConfig {
+	config.InstallerScript = service.ResolveInstallerScriptSource(h.Cfg)
+	return config
+}
+
+func (h NodeHandler) withNodeInstallerScript(detail service.NodeDetail) service.NodeDetail {
+	detail.ReportConfig = h.withInstallerScript(detail.ReportConfig)
+	return detail
+}
+
 func (h NodeHandler) List(c *gin.Context) {
 	items, err := service.ListNodes(h.DB, c.Query("q"))
 	if err != nil {
@@ -39,7 +49,7 @@ func (h NodeHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, h.withNodeInstallerScript(detail))
 }
 
 func (h NodeHandler) Detail(c *gin.Context) {
@@ -49,7 +59,7 @@ func (h NodeHandler) Detail(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, h.withNodeInstallerScript(detail))
 }
 
 func (h NodeHandler) Update(c *gin.Context) {
@@ -63,7 +73,7 @@ func (h NodeHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, h.withNodeInstallerScript(detail))
 }
 
 func (h NodeHandler) KomariBindingCandidates(c *gin.Context) {
@@ -90,7 +100,7 @@ func (h NodeHandler) BindKomari(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, h.withNodeInstallerScript(detail))
 }
 
 func (h NodeHandler) UnbindKomari(c *gin.Context) {
@@ -99,7 +109,7 @@ func (h NodeHandler) UnbindKomari(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, h.withNodeInstallerScript(detail))
 }
 
 func (h NodeHandler) History(c *gin.Context) {
@@ -244,7 +254,7 @@ func (h NodeHandler) RotateReporterToken(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, config)
+	c.JSON(http.StatusOK, h.withInstallerScript(config))
 }
 
 func (h NodeHandler) PreviewReportConfig(c *gin.Context) {
@@ -280,7 +290,7 @@ func (h NodeHandler) UpdateReportConfig(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "node not found"})
 		return
 	}
-	c.JSON(http.StatusOK, config)
+	c.JSON(http.StatusOK, h.withInstallerScript(config))
 }
 
 func parseTargetID(raw string) *uint {

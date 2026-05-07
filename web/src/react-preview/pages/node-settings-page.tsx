@@ -34,6 +34,7 @@ import { copyText } from "../lib/clipboard";
 import { formatDateTime, formatDateTimeInTimeZone } from "../lib/format";
 import type {
   KomariBindingCandidate,
+  InstallerScriptSource,
   MeResponse,
   NodeDetail,
   NodeReportConfigPreview,
@@ -84,10 +85,29 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
 
-function buildInstallCommand(publicBaseURL: string, installToken: string) {
+function buildInstallCommand(installerScriptURL: string, publicBaseURL: string, installToken: string) {
   const args = ["-e", publicBaseURL, "-t", installToken];
   const argString = args.map(shellQuote).join(" ");
-  return `curl -fsSL ${shellQuote(githubRawInstallScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${argString}; }`;
+  return `curl -fsSL ${shellQuote(installerScriptURL)} | { SUDO=$(command -v sudo || true); [ "$(id -u)" -eq 0 ] && SUDO=; \${SUDO:-} bash -s -- ${argString}; }`;
+}
+
+function installerScriptLabel(source?: InstallerScriptSource) {
+  if (!source) {
+    return "默认脚本";
+  }
+  switch (source.channel) {
+    case "release":
+      return source.version ? `当前版本 ${source.version}` : "当前版本";
+    case "latest":
+      return "latest 镜像";
+    case "custom":
+      return "自定义脚本";
+    case "custom-ref":
+      return source.ref ? `指定来源 ${source.ref}` : "指定来源";
+    case "development":
+    default:
+      return "开发版";
+  }
 }
 
 function targetSourceLabel(source: string) {
@@ -508,7 +528,9 @@ function ReportConfigPanel(props: {
     scheduleTimezone: props.detail.report_config.schedule_timezone,
     runImmediately: props.detail.report_config.run_immediately
   });
-  const installCommand = buildInstallCommand(publicBaseURL, props.detail.report_config.install_token);
+  const installerScript = props.detail.report_config.installer_script;
+  const installerScriptURL = installerScript?.url || githubRawInstallScriptURL;
+  const installCommand = buildInstallCommand(installerScriptURL, publicBaseURL, props.detail.report_config.install_token);
   const routeUUID = props.detail.node_uuid || props.detail.komari_node_uuid;
   const [loadedNodeUUID, setLoadedNodeUUID] = useState(routeUUID);
 
@@ -805,6 +827,9 @@ function ReportConfigPanel(props: {
               复制
             </Button>
           </div>
+          <p className="text-xs text-slate-500" data-installer-script-source="true">
+            脚本来源：{installerScriptLabel(installerScript)}
+          </p>
           <pre className="code-block report-config-command">{installCommand}</pre>
         </div>
       </div>
