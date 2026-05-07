@@ -21,6 +21,12 @@ const purcarteKomariBaseURL = (
   process.env.KOMARI_PURCARTE_BASE_URL ||
   "http://127.0.0.1:8081"
 ).replace(/\/$/, "");
+const requestedScenarios = new Set(
+  (process.env.REAL_USER_SCENARIOS || "default,purcarte")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+);
 const outputDir = path.resolve("playwright-output", "real-user-onboarding");
 const sampleResult = JSON.parse(
   readFileSync(path.resolve("..", "internal", "sampledata", "ipquality_template.json"), "utf8")
@@ -29,6 +35,12 @@ const runID = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
 const nodeNamePrefix = `Playwright Real User ${runID}`;
 
 mkdirSync(outputDir, { recursive: true });
+
+for (const scenario of requestedScenarios) {
+  if (!["default", "purcarte"].includes(scenario)) {
+    throw new Error(`unsupported REAL_USER_SCENARIOS item: ${scenario}`);
+  }
+}
 
 function log(message) {
   console.log(`[real-user] ${message}`);
@@ -861,7 +873,7 @@ async function configureTargetsFromUI(appPage, scenarioDir, targets, uuid) {
   }
   await appPage.getByLabel("Cron").fill("*/30 * * * *");
   await appPage.getByLabel("解析时区").selectOption("Asia/Shanghai");
-  await appPage.getByText("当前 Cron 按 Asia/Shanghai 解析。", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  await appPage.getByText("执行计划按 Asia/Shanghai 计算。", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   await appPage.getByText("时区：Asia/Shanghai", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
   const detail = await waitForNodeReportConfig(
     appPage,
@@ -1114,29 +1126,32 @@ try {
   ]);
 
   const loaderCode = await configureIntegrationFromUI(appPage);
-  await setKomariHeaderFromUI(defaultKomariPage, defaultKomariBaseURL, loaderCode, path.join(outputDir, "default"));
-  await setKomariHeaderFromUI(purcarteKomariPage, purcarteKomariBaseURL, loaderCode, path.join(outputDir, "purcarte"));
-
-  summary.push(
-    await runScenario({
-      appPage,
-      komariPage: defaultKomariPage,
-      baseURL: defaultKomariBaseURL,
-      theme: "default",
-      targets: ["1.1.1.1", "8.8.8.8"],
-      fullVerification: true
-    })
-  );
-  summary.push(
-    await runScenario({
-      appPage,
-      komariPage: purcarteKomariPage,
-      baseURL: purcarteKomariBaseURL,
-      theme: "purcarte",
-      targets: ["9.9.9.9", "2606:4700:4700::1111"],
-      fullVerification: false
-    })
-  );
+  if (requestedScenarios.has("default")) {
+    await setKomariHeaderFromUI(defaultKomariPage, defaultKomariBaseURL, loaderCode, path.join(outputDir, "default"));
+    summary.push(
+      await runScenario({
+        appPage,
+        komariPage: defaultKomariPage,
+        baseURL: defaultKomariBaseURL,
+        theme: "default",
+        targets: ["1.1.1.1", "8.8.8.8"],
+        fullVerification: true
+      })
+    );
+  }
+  if (requestedScenarios.has("purcarte")) {
+    await setKomariHeaderFromUI(purcarteKomariPage, purcarteKomariBaseURL, loaderCode, path.join(outputDir, "purcarte"));
+    summary.push(
+      await runScenario({
+        appPage,
+        komariPage: purcarteKomariPage,
+        baseURL: purcarteKomariBaseURL,
+        theme: "purcarte",
+        targets: ["9.9.9.9", "2606:4700:4700::1111"],
+        fullVerification: false
+      })
+    );
+  }
 
   writeFileSync(
     path.join(outputDir, "summary.json"),
@@ -1144,6 +1159,7 @@ try {
       {
         appBaseURL,
         integrationPublicBaseURL,
+        requestedScenarios: Array.from(requestedScenarios),
         scenarios: summary
       },
       null,

@@ -34,6 +34,7 @@ services:
       dockerfile: ./deploy/dev/workspace/Dockerfile
     ports:
       - "8090:8090"
+      - "8091:8091"
       - "5173:5173"
     working_dir: /workspace
     command: >

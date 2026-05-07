@@ -1,0 +1,22 @@
+{
+  "appBaseURL": "http://proxy:8091",
+  "integrationPublicBaseURL": "http://proxy:8091",
+  "requestedScenarios": [
+    "purcarte"
+  ],
+  "scenarios": [
+    {
+      "theme": "purcarte",
+      "nodeName": "Playwright Real User 20260506052600 PurCarte 已接入节点",
+      "uuid": "39c948ed-c9da-4eef-8a3b-87683c18107b",
+      "ipqNodeUUID": "0cxMiCgBhnEqMXX6yqLgaNbC",
+      "pendingNodeName": "Playwright Real User 20260506052600 PurCarte 未接入节点",
+      "pendingUUID": "abde19bb-3cc6-43e5-83ab-3d3231475d76",
+      "standaloneURL": "http://proxy:8091/?v=motm6pht#/nodes/0cxMiCgBhnEqMXX6yqLgaNbC/settings?from_komari=1&node_name=Playwright+Real+User+20260506052600+PurCarte+%E5%B7%B2%E6%8E%A5%E5%85%A5%E8%8A%82%E7%82%B9",
+      "targets": [
+        "9.9.9.9",
+        "2606:4700:4700::1111"
+      ]
+    }
+  ]
+}

@@ -118,7 +118,7 @@ if (rowCount > 0) {
   if (!(await runImmediatelyCheckbox.isChecked())) {
     await runImmediatelyCheckbox.check();
   }
-  await page.getByText(`当前 Cron 按 ${expectedBrowserTimeZone} 解析。`, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByText(`执行计划按 ${expectedBrowserTimeZone} 计算。`, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await page.getByText(`时区：${expectedBrowserTimeZone}`, { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   const detailAfterConfig = await waitForNodeReportConfig(
     page,
@@ -132,7 +132,7 @@ if (rowCount > 0) {
   if (installCommandCount === 0) {
     throw new Error('react node settings page missing install command');
   }
-  if (!configText.includes('节点执行时会先请求上报计划') && !configText.includes('可以先安装脚本')) {
+  if (!configText.includes('节点会按计划检测已启用的目标 IP') && !configText.includes('安装脚本后，节点会自动发现可检测的本机 IP')) {
     throw new Error('react detail page missing reporter plan hint');
   }
   if (!configText.includes('手动添加') && !configText.includes('自动发现')) {
@@ -147,7 +147,7 @@ if (rowCount > 0) {
   if (!configText.includes('Cron') || !configText.includes('最近 10 次执行时间')) {
     throw new Error('react detail page missing schedule controls');
   }
-  if (!configText.includes('解析时区') || !configText.includes(`当前 Cron 按 ${expectedBrowserTimeZone} 解析。`)) {
+  if (!configText.includes('解析时区') || !configText.includes(`执行计划按 ${expectedBrowserTimeZone} 计算。`)) {
     throw new Error('react detail page missing schedule timezone controls');
   }
   if (!configText.includes('(GMT+8)')) {

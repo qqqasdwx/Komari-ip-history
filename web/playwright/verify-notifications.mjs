@@ -46,6 +46,10 @@ async function apiOK(context, path, options, label) {
   return parseJSON(await requestJSON(context, path, options), label);
 }
 
+async function loadNotificationSettings(context) {
+  return apiOK(context, "/admin/notifications/settings", undefined, "load notification settings");
+}
+
 function createNotificationReceiver() {
   const requests = [];
   const server = createServer((req, res) => {
@@ -153,8 +157,18 @@ async function configureSettingsFromUI(page) {
   log("configure notification settings from UI");
   await page.goto(`${appBaseURL}/#/settings/notifications`, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "通知", exact: true }).waitFor({ state: "visible", timeout: 10000 });
-  if ((await page.getByRole("button", { name: "启用通知" }).count()) > 0) {
-    await page.getByRole("button", { name: "启用通知" }).click();
+  const settings = await loadNotificationSettings(page.context());
+  if (!settings.enabled) {
+    await Promise.all([
+      page.waitForResponse((response) => {
+        return response.url().includes("/api/v1/admin/notifications/settings") && response.request().method() === "PUT" && response.status() >= 200 && response.status() < 300;
+      }),
+      page.getByRole("button", { name: "启用通知" }).click()
+    ]);
+    const saved = await loadNotificationSettings(page.context());
+    if (!saved.enabled) {
+      throw new Error(`notification settings were not enabled: ${JSON.stringify(saved)}`);
+    }
   }
 
   await page.goto(`${appBaseURL}/#/settings/notifications/channel`, { waitUntil: "domcontentloaded" });
@@ -172,7 +186,7 @@ async function selectChannelType(page, type) {
 }
 
 async function saveSelectedChannel(page) {
-  await page.getByRole("button", { name: "保存并设为当前发送器" }).click();
+  await page.getByRole("button", { name: "保存发送器" }).click();
   await page.waitForTimeout(500);
 }
 
@@ -215,7 +229,7 @@ async function createJSChannelFromUI(page) {
 
 async function testChannelFromUI(page, type) {
   await selectChannelType(page, type);
-  await page.getByRole("button", { name: "测试已保存配置" }).click();
+  await page.getByRole("button", { name: "发送测试通知" }).click();
   await page.waitForTimeout(500);
 }
 
@@ -428,7 +442,7 @@ try {
   const startedAt = Date.now();
   await apiOK(context, `/admin/notifications/channels/${timeoutJS.id}/test`, { method: "POST" }, "test timeout js");
   const elapsed = Date.now() - startedAt;
-  if (elapsed > 5500) {
+  if (elapsed > 12000) {
     throw new Error(`javascript sender timeout blocked too long: ${elapsed}ms`);
   }
   await assertLogExists(

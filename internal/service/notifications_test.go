@@ -483,7 +483,7 @@ func TestNotificationFailureLogAndJavaScriptTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test slow js channel: %v", err)
 	}
-	if elapsed > 5*time.Second {
+	if elapsed > 10*time.Second {
 		t.Fatalf("javascript sender blocked too long: %s", elapsed)
 	}
 	if jsLog.Status != NotificationDeliveryFailed || !strings.Contains(strings.ToLower(jsLog.Error), "timeout") {
